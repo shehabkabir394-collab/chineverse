@@ -90,3 +90,6 @@ dialog{border-radius:14px;background:#111318;border-color:#3a3c42}
 @media(max-width:1050px){.related-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
 @media(max-width:760px){.related-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.video-section{padding:14px}.video-heading,.related-heading{align-items:flex-start}.detail-buttons .btn{flex:1}}
 @media(max-width:430px){.related-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.related-heading{flex-direction:column}.detail-buttons{display:grid;grid-template-columns:1fr}.detail-buttons .btn{width:100%}}
+
+/* Bangladesh legal streaming providers */
+.watch-providers{margin:24px 0;padding:22px;border:1px solid var(--line);border-radius:14px;background:#111318}.watch-providers h2{margin:5px 0 18px;font:700 25px 'Space Grotesk',sans-serif}.provider-group{margin:16px 0}.provider-group h3{font-size:13px;color:#ffca28;margin:0 0 9px}.provider-list{display:flex;flex-wrap:wrap;gap:10px}.provider-item{display:flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid #ffffff20;border-radius:9px;background:#ffffff08;color:#fff;font-size:12px}.provider-item img{width:27px;height:27px;object-fit:contain;border-radius:6px}.provider-more{display:inline-block;margin-top:12px;color:var(--cyan);font-size:12px}
