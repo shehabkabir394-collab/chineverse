@@ -5,7 +5,7 @@ const SUPABASE_PUBLIC_KEY = "sb_publishable_7Kna5pXHrSnKiO_s8Wr3bA_T5AAj4me";
 
 async function requireAdmin(request) {
   const authorization = request.headers.get("Authorization") || "";
-  if (!/^Bearer\\s+\\S+$/i.test(authorization)) throw new Error("Sign in as an approved administrator to fetch details.");
+  if (!/^Bearer\s+\S+$/i.test(authorization)) throw new Error("Sign in as an approved administrator to fetch details.");
   const userResponse = await fetch(SUPABASE_URL + "/auth/v1/user", { headers: { apikey: SUPABASE_PUBLIC_KEY, Authorization: authorization }, signal: AbortSignal.timeout(8000) });
   if (!userResponse.ok) throw new Error("Your admin session expired. Sign in again.");
   const user = await userResponse.json();
