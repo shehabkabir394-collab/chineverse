@@ -18,7 +18,7 @@ create table if not exists public.admin_users(
 -- Add new catalog fields safely for existing installations.
 alter table public.movies add column if not exists media_type text not null default 'movie';
 alter table public.movies add column if not exists rating numeric(3,1);
-alter table public.movies add column if not exists backdrop_url text;
+alter table public.movies add column if not exists backdrop_url text;\nalter table public.movies add column if not exists video_url text;
 alter table public.movies add column if not exists cast_members text not null default '';
 alter table public.movies add column if not exists runtime_minutes integer;
 alter table public.movies add column if not exists content_status text not null default 'Released';
