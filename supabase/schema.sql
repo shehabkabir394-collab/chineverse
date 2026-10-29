@@ -15,7 +15,7 @@ create table if not exists public.admin_users(
  user_id uuid primary key references auth.users(id) on delete cascade,
  created_at timestamptz not null default now()
 );
--- Add new catalog fields safely for existing installations.
+-- Add new catalog fields safely for existing installations.\nalter table public.movies add column if not exists tmdb_id bigint;\ncreate index if not exists movies_tmdb_id_idx on public.movies(tmdb_id);
 alter table public.movies add column if not exists media_type text not null default 'movie';
 alter table public.movies add column if not exists rating numeric(3,1);
 alter table public.movies add column if not exists backdrop_url text;
