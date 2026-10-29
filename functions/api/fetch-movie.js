@@ -45,10 +45,10 @@ function clean(v, max=5000) {
 }
 function meta(html, names) {
   const wanted = new Set(names.map(n => n.toLowerCase()));
-  const tags = html.match(/<meta\\b[^>]*>/gi) || [];
+  const tags = html.match(/<meta\b[^>]*>/gi) || [];
   for (const tag of tags) {
     const attrs = {};
-    for (const m of tag.matchAll(/([\\w:-]+)\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))/g)) {
+    for (const m of tag.matchAll(/([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/g)) {
       attrs[m[1].toLowerCase()] = m[2] ?? m[3] ?? m[4] ?? "";
     }
     const key = (attrs.property || attrs.name || attrs.itemprop || "").toLowerCase();
@@ -71,12 +71,47 @@ function absolute(raw, base) {
 }
 function firstText(...vals) { for (const v of vals) { const s=clean(v); if(s) return s; } return ""; }
 
+async function getExistingCineVerseMovie(target, request) {
+  const id = target.searchParams.get("id");
+  if (!id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) return null;
+  const authorization = request.headers.get("Authorization") || "";
+  const apiUrl = SUPABASE_URL + "/rest/v1/movies?id=eq." + encodeURIComponent(id) +
+    "&select=id,title,media_type,release_year,quality,rating,genre,language,description,poster_url,backdrop_url,trailer_url,video_url,download_url";
+  const response = await fetch(apiUrl, {
+    headers: { apikey: SUPABASE_PUBLIC_KEY, Authorization: authorization },
+    signal: AbortSignal.timeout(8000)
+  });
+  if (!response.ok) throw new Error("Could not read this title from CineVerse. Check the movie record and admin access.");
+  const rows = await response.json();
+  if (!Array.isArray(rows) || rows.length !== 1) throw new Error("No accessible CineVerse movie record matches this page ID.");
+  const m = rows[0];
+  return {
+    source_url: target.href,
+    title: m.title || "",
+    release_year: m.release_year ?? null,
+    description: m.description || "",
+    poster_url: m.poster_url || "",
+    backdrop_url: m.backdrop_url || "",
+    genre: m.genre || "",
+    rating: m.rating ?? null,
+    quality: m.quality || "",
+    video_url: m.video_url || "",
+    download_url: m.download_url || target.href,
+    warnings: ["Loaded from the existing CineVerse database record. Review the preview before copying fields into the form."]
+  };
+}
+
 export async function onRequestPost({ request }) {
   try {
     await requireAdmin(request);
     const body = await request.json();
     if (!body || typeof body.url !== "string" || body.url.length > 2048) return Response.json({ error:"A webpage URL is required." }, { status:400 });
     let target = safeUrl(body.url);
+    const requestHost = new URL(request.url).hostname.toLowerCase();
+    if (target.hostname.toLowerCase() === requestHost && target.pathname === "/movie") {
+      const existing = await getExistingCineVerseMovie(target, request);
+      if (existing) return Response.json(existing, { headers: { "Cache-Control": "no-store" } });
+    }
     let response, html;
     for (let i=0; i<4; i++) {
       response = await fetch(target.href, { redirect:"manual", headers:{ "User-Agent":UA, "Accept":"text/html,application/xhtml+xml;q=0.9" }, signal:AbortSignal.timeout(12000) });
