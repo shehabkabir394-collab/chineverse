@@ -14,7 +14,8 @@ async function fetchMovieDetails(){
  if(!/^https:\/\//i.test(url)){msg(status,"Use a public HTTPS webpage URL.",true);return}
  button.disabled=true;msg(status,"Fetching public page metadata…");
  try{
-  const response=await fetch("/api/fetch-movie",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({url})});
+  const sessionResult=await db().auth.getSession();const accessToken=sessionResult.data?.session?.access_token;if(!accessToken)throw Error("Sign in again to fetch movie details.");
+  const response=await fetch("/api/fetch-movie",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+accessToken},body:JSON.stringify({url})});
   const data=await response.json();
   if(!response.ok||data.error)throw Error(data.error||"Could not fetch details.");
   if(!data.title&&!data.description&&!data.poster_url&&!data.release_year)throw Error("No useful metadata was found. This site may block automated access; enter details manually or try another public page.");
