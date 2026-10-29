@@ -29,12 +29,15 @@ function clean(v, max=5000) {
   return decode(String(v || "").replace(/<[^>]*>/g," ")).replace(/\s+/g," ").slice(0,max);
 }
 function meta(html, names) {
-  for (const name of names) {
-    const n = name.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
-    let m = html.match(new RegExp('<meta\\b(?=[^>]*(?:name|property|itemprop)\\s*=\\s*["\\']'+n+'["\\'])[^>]*content\\s*=\\s*["\\']([^"\\']*)["\\'][^>]*>',"i"));
-    if (!m) m = html.match(new RegExp('<meta\\b(?=[^>]*(?:name|property|itemprop)\\s*=\\s*["\\']'+n+'["\\'])[^>]*content\\s*=\\s*([^\\s>]+)[^>]*>',"i"));
-    if (!m) m = html.match(new RegExp('<meta\\b[^>]*content\\s*=\\s*["\\']([^"\\']*)["\\'][^>]*(?:name|property|itemprop)\\s*=\\s*["\\']'+n+'["\\'][^>]*>',"i"));
-    if (m && m[1]) return decode(m[1]);
+  const wanted = new Set(names.map(n => n.toLowerCase()));
+  const tags = html.match(/<meta\\b[^>]*>/gi) || [];
+  for (const tag of tags) {
+    const attrs = {};
+    for (const m of tag.matchAll(/([\\w:-]+)\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))/g)) {
+      attrs[m[1].toLowerCase()] = m[2] ?? m[3] ?? m[4] ?? "";
+    }
+    const key = (attrs.property || attrs.name || attrs.itemprop || "").toLowerCase();
+    if (wanted.has(key) && attrs.content) return decode(attrs.content);
   }
   return "";
 }
