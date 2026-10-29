@@ -1,5 +1,20 @@
 const MAX_BYTES = 1_500_000;
 const UA = "CineVerse4K-MetadataFetcher/1.0";
+const SUPABASE_URL = "https://bqvlkprluentrsovfpcy.supabase.co";
+const SUPABASE_PUBLIC_KEY = "sb_publishable_7Kna5pXHrSnKiO_s8Wr3bA_T5AAj4me";
+
+async function requireAdmin(request) {
+  const authorization = request.headers.get("Authorization") || "";
+  if (!/^Bearer\\s+\\S+$/i.test(authorization)) throw new Error("Sign in as an approved administrator to fetch details.");
+  const userResponse = await fetch(SUPABASE_URL + "/auth/v1/user", { headers: { apikey: SUPABASE_PUBLIC_KEY, Authorization: authorization }, signal: AbortSignal.timeout(8000) });
+  if (!userResponse.ok) throw new Error("Your admin session expired. Sign in again.");
+  const user = await userResponse.json();
+  if (!user?.id) throw new Error("Sign in as an approved administrator to fetch details.");
+  const membershipResponse = await fetch(SUPABASE_URL + "/rest/v1/admin_users?user_id=eq." + encodeURIComponent(user.id) + "&select=user_id&limit=1", { headers: { apikey: SUPABASE_PUBLIC_KEY, Authorization: authorization }, signal: AbortSignal.timeout(8000) });
+  if (!membershipResponse.ok) throw new Error("Could not verify admin permission.");
+  const rows = await membershipResponse.json();
+  if (!Array.isArray(rows) || rows.length !== 1) throw new Error("Only approved administrators can fetch movie details.");
+}
 
 function badHost(host) {
   const h = host.toLowerCase().replace(/^\[|\]$/g, "");
@@ -58,6 +73,7 @@ function firstText(...vals) { for (const v of vals) { const s=clean(v); if(s) re
 
 export async function onRequestPost({ request }) {
   try {
+    await requireAdmin(request);
     const body = await request.json();
     if (!body || typeof body.url !== "string" || body.url.length > 2048) return Response.json({ error:"A webpage URL is required." }, { status:400 });
     let target = safeUrl(body.url);
