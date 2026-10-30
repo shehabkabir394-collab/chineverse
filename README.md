@@ -8,7 +8,10 @@ Responsive bilingual movie catalog built with HTML/CSS/JavaScript, Cloudflare Pa
 - `admin.html`: admin login and catalog CRUD
 - `css/style.css`: responsive dark cinematic design
 - `js/config.js`: Supabase browser configuration
-- `js/app.js`, `js/movie.js`, `js/admin.js`: app behavior
+- `js/app.js`, `js/movie.js`, `js/admin.js`, `js/tmdb-import.js`: app behavior
+- `functions/api/tmdb-movies.js`: authenticated TMDB metadata lookup for bulk import
+- `js/ads.js`: opt-in, responsive AdSense ad placements (disabled until approved IDs are configured)
+- `privacy.html`: starter privacy page to customize before applying to an ad provider
 - `supabase/schema.sql`: tables, indexes and RLS policies
 
 ## 1. Supabase setup
@@ -17,6 +20,24 @@ Responsive bilingual movie catalog built with HTML/CSS/JavaScript, Cloudflare Pa
 3. Find the Project URL and publishable key (or legacy anon key) in Project Settings/API.
 4. Replace the two placeholders in `js/config.js`.
 5. Never put a `service_role` or secret key in browser code. RLS protects data.
+
+## Bulk add movie metadata without CSV
+1. In Cloudflare Pages → Settings → Variables and Secrets, add `TMDB_API_READ_ACCESS_TOKEN` as a secret. The same token is used by the watch-provider lookup.
+2. Sign in to `/admin.html` with an approved administrator account.
+3. Under “Bulk add movie metadata from TMDB,” choose Popular, Now playing, Upcoming, or Top rated, then load 1–5 pages (up to 100 results).
+4. Select the titles to add and choose “Import selected.” Existing TMDB IDs and matching title/year records are skipped.
+5. Imports contain metadata only. Watch, video, and download links remain empty; add only links you own or have permission to share.
+
+TMDB provides the curated movie lists and metadata. This project already displays TMDB attribution in its credits section. Check TMDB's current terms for your use case; its free developer API is limited to non-commercial use unless separately licensed.
+
+## AdSense setup (only for eligible, rights-cleared content)
+1. Apply at Google AdSense using your own site/domain and complete Google's ownership verification and site review. Ads will not serve until the site is approved.
+2. Before applying, publish accurate About, Contact, and Privacy pages and make sure the site contains original, useful content and only material you have rights to publish. The privacy page in this starter has a contact placeholder and must be completed.
+3. After approval, replace the publisher ID and three ad-unit IDs in `js/ads.js`. The three slots are on the homepage and movie details page. The script does nothing while IDs are placeholders.
+4. Add Google's `ads.txt` record at the site root if AdSense requests it. Use the exact record shown in your AdSense account.
+5. Keep ad placements clear of buttons and avoid forced redirects, popunders, or asking visitors to click ads. Follow the provider's current policies and applicable privacy/consent rules.
+
+This integration is only a code scaffold. It does not create an AdSense account or guarantee account approval or earnings. Do not monetize copyrighted material or links unless you have permission to publish them.
 
 ## 2. Create the first admin
 1. In Supabase → Authentication → Users, create/invite your admin account and set a strong password.
