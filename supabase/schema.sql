@@ -60,3 +60,6 @@ drop trigger if exists movies_set_updated_at on public.movies;
 create trigger movies_set_updated_at before update on public.movies for each row execute function public.set_updated_at();
 -- No client-side write policy for admin_users. Add admin UUID manually:
 -- insert into public.admin_users(user_id) values ('AUTH-USER-UUID');
+
+-- Authorized external watch page URL used by the movie details page and bulk CSV import.
+alter table public.movies add column if not exists watch_url text;
