@@ -63,3 +63,6 @@ create trigger movies_set_updated_at before update on public.movies for each row
 
 -- Authorized external watch page URL used by the movie details page and bulk CSV import.
 alter table public.movies add column if not exists watch_url text;
+
+-- Multiple authorized download options per title.
+alter table public.movies add column if not exists download_links jsonb not null default '[]'::jsonb;
