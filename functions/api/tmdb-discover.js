@@ -37,16 +37,20 @@ export async function onRequestGet({ request, env }) {
   }
 
   try {
-    const response = await fetch(
-      TMDB_API + "/movie/" + category + "?include_adult=false&language=en-US&page=1",
-      {
-        headers: { Authorization: "Bearer " + token, accept: "application/json" },
-        signal: AbortSignal.timeout(10000)
-      }
-    );
+    const headers = { Authorization: "Bearer " + token, accept: "application/json" };
+    const [response, genreResponse] = await Promise.all([
+      fetch(TMDB_API + "/movie/" + category + "?include_adult=false&language=en-US&page=1", {
+        headers, signal: AbortSignal.timeout(10000)
+      }),
+      fetch(TMDB_API + "/genre/movie/list?language=en-US", {
+        headers, signal: AbortSignal.timeout(10000)
+      })
+    ]);
     if (!response.ok) return json({ error: "TMDB could not load the movie list (HTTP " + response.status + ")." }, 502);
+    if (!genreResponse.ok) return json({ error: "TMDB genres could not be loaded." }, 502);
 
-    const body = await response.json();
+    const [body, genreBody] = await Promise.all([response.json(), genreResponse.json()]);
+    const genres = new Map((genreBody.genres || []).map(genre => [genre.id, genre.name]));
     const movies = (body.results || [])
       .filter(movie => movie && movie.adult !== true && movie.title)
       .map(movie => {
@@ -58,7 +62,7 @@ export async function onRequestGet({ request, env }) {
           title: String(movie.title).slice(0, 180),
           media_type: "movie",
           release_year: yearMatch ? Number(yearMatch[1]) : null,
-          genre: "",
+          genre: Array.isArray(movie.genre_ids) ? movie.genre_ids.map(id => genres.get(id)).filter(Boolean).join(", ") : "",
           language: languageName(movie.original_language),
           quality: "HD",
           rating: Number.isFinite(Number(movie.vote_average))
