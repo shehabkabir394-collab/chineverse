@@ -10,6 +10,7 @@ Responsive bilingual movie catalog built with HTML/CSS/JavaScript, Cloudflare Pa
 - `js/config.js`: Supabase browser configuration
 - `js/app.js`, `js/movie.js`, `js/admin.js`, `js/tmdb-import.js`: app behavior
 - `functions/api/tmdb-movies.js`: authenticated TMDB metadata lookup for bulk import
+- `functions/api/tmdb-discover.js`: public TMDB movie discovery feed for Popular, Now Playing, Upcoming and Top Rated
 - `js/ads.js`: opt-in, responsive AdSense ad placements (disabled until approved IDs are configured)
 - `privacy.html`: starter privacy page to customize before applying to an ad provider
 - `supabase/schema.sql`: tables, indexes and RLS policies
@@ -21,8 +22,11 @@ Responsive bilingual movie catalog built with HTML/CSS/JavaScript, Cloudflare Pa
 4. Replace the two placeholders in `js/config.js`.
 5. Never put a `service_role` or secret key in browser code. RLS protects data.
 
+## Homepage movie discovery
+The homepage loads Popular movies from TMDB automatically and lets visitors switch to Now Playing, Upcoming and Top Rated. If your Supabase catalog has its own published records, those appear first; matching TMDB entries are deduplicated. TMDB discovery cards link to the official TMDB title page and do not claim to stream or download the movie. Configure the Cloudflare secret above for this feed to work.
+
 ## Bulk add movie metadata without CSV
-1. In Cloudflare Pages → Settings → Variables and Secrets, add `TMDB_API_READ_ACCESS_TOKEN` as a secret. The same token is used by the watch-provider lookup.
+1. In Cloudflare Pages → Settings → Variables and Secrets, add `TMDB_API_READ_ACCESS_TOKEN` as a secret. This enables the public homepage discovery feed, admin bulk import and Bangladesh streaming-provider lookup.
 2. Sign in to `/admin.html` with an approved administrator account.
 3. Under “Bulk add movie metadata from TMDB,” choose Popular, Now playing, Upcoming, or Top rated, then load 1–5 pages (up to 100 results).
 4. Select the titles to add and choose “Import selected.” Existing TMDB IDs and matching title/year records are skipped.
