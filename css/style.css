@@ -106,4 +106,5 @@ dialog{border-radius:14px;background:#111318;border-color:#3a3c42}
 .download-link-list{grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr))}
 .download-link-card>div{min-width:0;overflow-wrap:anywhere;word-break:break-word}
 .download-link-card .btn{max-width:100%;white-space:nowrap}
+.hilltop-banner{display:grid;place-items:center;width:min(100%,300px);min-height:250px;margin:18px auto;padding:0;border-radius:8px;background:#111318}.hilltop-banner:empty{display:none}
 
