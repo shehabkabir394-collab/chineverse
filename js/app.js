@@ -60,7 +60,7 @@
     try{
       if(searchMode&&remotePage<remotePages){const q=$("#search").value.trim(),d=await getJson("/api/tmdb-search?q="+encodeURIComponent(q)+"&page="+(remotePage+1));remotePage++;remotePages=Number(d.total_pages||remotePages);movies=dedupe([...movies,...(d.movies||[])]);}
       else if(!searchMode&&discoverPage<discoverPages){const d=await getJson("/api/tmdb-discover?category="+encodeURIComponent($("#discoverCategory").value)+"&page="+(discoverPage+1));discoverPage++;discoverMovies=dedupe([...discoverMovies,...(d.movies||[])]);movies=dedupe([...localMovies,...discoverMovies]);}
-      else {page++;}page++;fillFilters();
+      else {page+=2;}fillFilters();
     }catch(e){status.textContent=e.message;}finally{busy=false;render();}
   }
   async function remoteSearch(){
