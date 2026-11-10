@@ -116,3 +116,8 @@ dialog{border-radius:14px;background:#111318;border-color:#3a3c42}
 .video-section h2{margin:16px 0 4px;font-family:'Space Grotesk',sans-serif}
 footer .brand{display:inline-flex}
 @media(max-width:760px){.topbar nav{overflow-x:auto;justify-content:flex-start;white-space:nowrap;padding-bottom:4px;scrollbar-width:thin}.topbar nav a{flex:0 0 auto}.topbar .actions{display:none}}
+
+/* CineVerse community gallery */
+.community-video-card .community-player{aspect-ratio:16/9;background:#050508;overflow:hidden;border-radius:14px 14px 0 0}
+.community-video-card .community-player video{display:block;width:100%;height:100%;object-fit:contain;background:#050508}
+.community-video-card .movie-info .btn{margin-top:10px}
