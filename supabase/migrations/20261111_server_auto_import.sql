@@ -29,6 +29,21 @@ begin
     return jsonb_build_object('duplicate',true,'movie_id',v_existing);
   end if;
 
+  -- Reuse an existing catalog entry with the same TMDB ID instead of creating a duplicate title.
+  select id into v_existing from public.movies
+    where tmdb_id=nullif(p_movie->>'tmdb_id','')::bigint
+    order by created_at desc limit 1;
+  if v_existing is not null then
+    update public.movies
+      set video_url=p_movie->>'video_url',
+          watch_url=p_movie->>'watch_url',
+          download_url=p_movie->>'download_url',
+          published=true
+      where id=v_existing;
+    insert into public.server_media_imports(source_key,movie_id) values(p_source_key,v_existing);
+    return jsonb_build_object('duplicate',true,'movie_id',v_existing,'linked_existing_movie',true);
+  end if;
+
   insert into public.movies (
     title, release_year, genre, language, quality, description,
     poster_url, trailer_url, download_url, published, tmdb_id,
