@@ -50,16 +50,16 @@
     const localResult=window.cineverseSupabase
       ? await window.cineverseSupabase.from("movies").select("id,title,release_year,genre,language,quality,description,poster_url,backdrop_url,trailer_url,watch_url,video_url,download_url,download_links,published,created_at,media_type,rating,cast_members,runtime_minutes,content_status,seasons,episodes,tags,tmdb_id").eq("published",true).order("created_at",{ascending:false})
       : {data:[],error:null};
-    const {data:assets}=window.cineverseSupabase
-      ? await window.cineverseSupabase.from("movie_media_assets").select("movie_id,public_url").eq("is_active",true)
-      : {data:[]};
-    const assetIds=new Set((assets||[]).filter(x=>safeUrl(x.public_url)).map(x=>x.movie_id));
-    // Server-imported movies have a real video_url; hide TMDB-only information cards.
-    // Keep series entries intact because their playable files live in series_episodes.
-    localMovies=(localResult?.data||[]).filter(m=>(m.media_type||"movie")!=="movie"||hasPlayableLink(m,assetIds));
+    const {data:importRows,error:importError}=window.cineverseSupabase
+      ? await window.cineverseSupabase.rpc("cineverse_public_server_import_movie_ids")
+      : {data:[],error:null};
+    const importedIds=new Set((importRows||[]).map(x=>x.movie_id).filter(Boolean));
+    // Only records created by the server-side folder importer are shown.
+    localMovies=(localResult?.data||[]).filter(m=>importedIds.has(m.id));
     movies=[...localMovies];discoverMovies=[];discoverPage=1;discoverPages=1;
     fillFilters();render();
-    if(localResult?.error)status.textContent="Could not load CineVerse collection.";
+    if(importError)status.textContent="Could not verify server-uploaded titles. Apply the latest Supabase migration.";
+    else if(localResult?.error)status.textContent="Could not load CineVerse collection.";
   }
   async function loadMore(){
     if(busy)return;
