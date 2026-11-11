@@ -4,6 +4,7 @@
   const PAGE_SIZE=24;
   const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   const safeUrl=s=>/^https:\/\//i.test(s||"")?s:"";
+  const hasPlayableLink=(m,assetIds)=>[m.video_url,m.watch_url,m.download_url].some(safeUrl)||(Array.isArray(m.download_links)&&m.download_links.some(x=>safeUrl(x?.url)))||assetIds.has(m.id);
   const typeLabel=m=>m.media_type==="series"?"SERIES":m.media_type==="anime"?"ANIME":"MOVIE";
   function card(m){
     const p=safeUrl(m.poster_url),external=m.source==="tmdb",href=external?"tmdb-movie.html?id="+encodeURIComponent(m.tmdb_id):(m.media_type==="series"?"series.html?id=":"movie.html?id=")+encodeURIComponent(m.id);
@@ -24,15 +25,15 @@
     grid.innerHTML=shown.map(card).join("");
     $("#count").textContent=all.length?all.length+" titles":"";
     $("#empty").classList.toggle("hidden",all.length>0);
-    const canLoad=searchMode?remotePage<remotePages:discoverPage<discoverPages;
+    const canLoad=shown.length<all.length;
     $("#loadMore").classList.toggle("hidden",!all.length||(!canLoad&&shown.length>=all.length));
-    $("#loadMore").textContent=busy?"Loading…":(canLoad?"Load more movies":"Show more");
-    if(!busy)status.textContent=all.length?(searchMode?"Search results · CineVerse + TMDB":"CineVerse collection · TMDB discovery"):"No titles found. Try another search or category.";
+    $("#loadMore").textContent=busy?"Loading…":"Show more";
+    if(!busy)status.textContent=all.length?"CineVerse collection · titles with watch/download links":"No titles with watch or download links found.";
     $("#reset").onclick=reset;
   }
   function reset(){
     ["#search","#genre","#language","#quality","#kind"].forEach(s=>$(s).value="");
-    category="";page=1;searchMode=false;movies=[...localMovies,...discoverMovies];
+    category="";page=1;searchMode=false;movies=[...localMovies];
     $("#chips").querySelectorAll("[data-filter]").forEach(x=>x.classList.toggle("selected",!x.dataset.filter));render();
   }
   function fillFilters(){
@@ -46,30 +47,26 @@
   async function getJson(url){const r=await fetch(url);const d=await r.json();if(!r.ok)throw Error(d.error||"Catalog request failed");return d}
   async function load(){
     $("#year").textContent=new Date().getFullYear();status.textContent="Loading CineVerse collection…";
-    const categorySelect=$("#discoverCategory"),discoverCategory=categorySelect?categorySelect.value:"popular";
-    const [localResult,discovery]=await Promise.all([
-      window.cineverseSupabase?window.cineverseSupabase.from("movies").select("id,title,release_year,genre,language,quality,description,poster_url,backdrop_url,trailer_url,download_url,published,created_at,media_type,rating,cast_members,runtime_minutes,content_status,seasons,episodes,tags,tmdb_id").eq("published",true).order("created_at",{ascending:false}):Promise.resolve({data:[],error:null}),
-      getJson("/api/tmdb-discover?category="+encodeURIComponent(discoverCategory)+"&page=1").catch(e=>({movies:[],error:e.message,total_pages:1}))
-    ]);
-    localMovies=localResult?.data||[];discoverMovies=discovery.movies||[];discoverPage=1;discoverPages=Number(discovery.total_pages||1);
-    movies=dedupe([...localMovies,...discoverMovies]);if(discovery.error&&!localMovies.length)status.textContent=discovery.error;
+    const localResult=window.cineverseSupabase
+      ? await window.cineverseSupabase.from("movies").select("id,title,release_year,genre,language,quality,description,poster_url,backdrop_url,trailer_url,watch_url,video_url,download_url,download_links,published,created_at,media_type,rating,cast_members,runtime_minutes,content_status,seasons,episodes,tags,tmdb_id").eq("published",true).order("created_at",{ascending:false})
+      : {data:[],error:null};
+    const {data:assets}=window.cineverseSupabase
+      ? await window.cineverseSupabase.from("movie_media_assets").select("movie_id,public_url").eq("is_active",true)
+      : {data:[]};
+    const assetIds=new Set((assets||[]).filter(x=>safeUrl(x.public_url)).map(x=>x.movie_id));
+    localMovies=(localResult?.data||[]).filter(m=>(m.media_type||"movie")!=="movie"||hasPlayableLink(m,assetIds));
+    movies=[...localMovies];discoverMovies=[];discoverPage=1;discoverPages=1;
     fillFilters();render();
+    if(localResult?.error)status.textContent="Could not load CineVerse collection.";
   }
   async function loadMore(){
-    if(busy)return;busy=true;render();
-    try{
-      if(searchMode&&remotePage<remotePages){const q=$("#search").value.trim(),d=await getJson("/api/tmdb-search?q="+encodeURIComponent(q)+"&page="+(remotePage+1));remotePage++;remotePages=Number(d.total_pages||remotePages);movies=dedupe([...movies,...(d.movies||[])]);}
-      else if(!searchMode&&discoverPage<discoverPages){const d=await getJson("/api/tmdb-discover?category="+encodeURIComponent($("#discoverCategory").value)+"&page="+(discoverPage+1));discoverPage++;discoverMovies=dedupe([...discoverMovies,...(d.movies||[])]);movies=dedupe([...localMovies,...discoverMovies]);}
-      fillFilters();page++;
-    }catch(e){status.textContent=e.message;}finally{busy=false;render();}
+    if(busy)return;
+    busy=true;render();
+    page++;
+    busy=false;render();
   }
   async function remoteSearch(){
-    const q=$("#search").value.trim();page=1;
-    if(q.length<2){searchMode=false;movies=dedupe([...localMovies,...discoverMovies]);render();return;}
-    busy=true;searchMode=true;remotePage=1;remotePages=1;status.textContent="Searching CineVerse and TMDB…";render();
-    try{const d=await getJson("/api/tmdb-search?q="+encodeURIComponent(q)+"&page=1");movies=dedupe([...localMovies,...(d.movies||[])]);remotePages=Number(d.total_pages||1);fillFilters();}
-    catch(e){movies=localMovies;status.textContent=e.message;}
-    finally{busy=false;render();}
+    page=1;searchMode=false;movies=[...localMovies];render();
   }
   $("#search").oninput=()=>{clearTimeout(searchTimer);searchTimer=setTimeout(remoteSearch,450);};
   ["#genre","#language","#quality","#kind","#sort"].forEach(s=>$(s).onchange=()=>{page=1;render();});
