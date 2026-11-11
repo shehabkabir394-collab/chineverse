@@ -4,7 +4,7 @@
   const PAGE_SIZE=24;
   const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   const safeUrl=s=>/^https:\/\//i.test(s||"")?s:"";
-  const hasPlayableLink=(m,assetIds)=>[m.video_url,m.download_url].some(safeUrl)||(Array.isArray(m.download_links)&&m.download_links.some(x=>safeUrl(x?.url)))||assetIds.has(m.id);
+  const hasPlayableLink=(m,assetIds)=>[m.video_url,m.watch_url,m.download_url].some(safeUrl)||(Array.isArray(m.download_links)&&m.download_links.some(x=>safeUrl(x?.url)))||assetIds.has(m.id);
   const typeLabel=m=>m.media_type==="series"?"SERIES":m.media_type==="anime"?"ANIME":"MOVIE";
   function card(m){
     const p=safeUrl(m.poster_url),external=m.source==="tmdb",href=external?"tmdb-movie.html?id="+encodeURIComponent(m.tmdb_id):(m.media_type==="series"?"series.html?id=":"movie.html?id=")+encodeURIComponent(m.id);
@@ -50,19 +50,16 @@
     const localResult=window.cineverseSupabase
       ? await window.cineverseSupabase.from("movies").select("id,title,release_year,genre,language,quality,description,poster_url,backdrop_url,trailer_url,watch_url,video_url,download_url,download_links,published,created_at,media_type,rating,cast_members,runtime_minutes,content_status,seasons,episodes,tags,tmdb_id").eq("published",true).order("created_at",{ascending:false})
       : {data:[],error:null};
-    const {data:imports,error:importError}=window.cineverseSupabase
-      ? await window.cineverseSupabase.from("server_media_imports").select("movie_id")
-      : {data:[],error:null};
-    const importedIds=new Set((imports||[]).map(x=>x.movie_id).filter(Boolean));
     const {data:assets}=window.cineverseSupabase
       ? await window.cineverseSupabase.from("movie_media_assets").select("movie_id,public_url").eq("is_active",true)
       : {data:[]};
     const assetIds=new Set((assets||[]).filter(x=>safeUrl(x.public_url)).map(x=>x.movie_id));
-    localMovies=(localResult?.data||[]).filter(m=>importedIds.has(m.id)&&((m.media_type||"movie")!=="movie"||hasPlayableLink(m,assetIds)));
+    // Server-imported movies have a real video_url; hide TMDB-only information cards.
+    // Keep series entries intact because their playable files live in series_episodes.
+    localMovies=(localResult?.data||[]).filter(m=>(m.media_type||"movie")!=="movie"||hasPlayableLink(m,assetIds));
     movies=[...localMovies];discoverMovies=[];discoverPage=1;discoverPages=1;
     fillFilters();render();
-    if(importError)status.textContent="Server import list is not readable. Check server_media_imports SELECT policy.";
-    else if(localResult?.error)status.textContent="Could not load CineVerse collection.";
+    if(localResult?.error)status.textContent="Could not load CineVerse collection.";
   }
   async function loadMore(){
     if(busy)return;
