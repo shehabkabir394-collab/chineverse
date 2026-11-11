@@ -6,7 +6,7 @@
   const safeUrl=s=>/^https:\/\//i.test(s||"")?s:"";
   const typeLabel=m=>m.media_type==="series"?"SERIES":m.media_type==="anime"?"ANIME":"MOVIE";
   function card(m){
-    const p=safeUrl(m.poster_url),external=m.source==="tmdb",href=external?"tmdb-movie.html?id="+encodeURIComponent(m.tmdb_id):"movie.html?id="+encodeURIComponent(m.id);
+    const p=safeUrl(m.poster_url),external=m.source==="tmdb",href=external?"tmdb-movie.html?id="+encodeURIComponent(m.tmdb_id):(m.media_type==="series"?"series.html?id=":"movie.html?id=")+encodeURIComponent(m.id);
     return `<article class="movie-card"><a class="poster" href="${esc(href)}" aria-label="View ${esc(m.title)} details">${p?`<img loading="lazy" src="${esc(p)}" alt="${esc(m.title)} poster">`:'<div class="poster-placeholder"><b>CV</b><small>CINEMA UNIVERSE</small></div>'}<span class="quality">${esc(m.quality||"HD")}</span><span class="type-pill">${typeLabel(m)}</span><span class="overlay">▶<small>View details</small></span></a><div class="movie-info"><h3><a href="${esc(href)}">${esc(m.title)}</a></h3><p>${esc(m.release_year||"Year unknown")} · ${esc((m.genre||"").split(",")[0]||"Movie")}</p><p class="card-rating">${m.rating!=null?"★ "+esc(m.rating):""} ${m.language?"· "+esc(m.language):""}</p></div></article>`;
   }
   function filtered(){
