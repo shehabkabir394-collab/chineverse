@@ -27,7 +27,7 @@ export async function onRequestPost({request,env}){
   if(!/^[A-Z]{2}$/.test(region))return json({error:"Invalid region."},400);
   const token=env.TMDB_API_READ_ACCESS_TOKEN;if(!token)return json({error:"TMDB is not configured. Add TMDB_API_READ_ACCESS_TOKEN in Cloudflare Pages → Settings → Variables and Secrets."},503);
   const headers={Authorization:"Bearer "+token,accept:"application/json"};
-  const requests=Array.from({length:pages},(_,i)=>fetch(TMDB_API+"/discover/tv?include_adult=false&language=en-US&sort_by="+(category==="popular"?"popularity.desc":category==="top_rated"?"vote_average.desc&vote_count.gte=10":category==="airing_today"?"popularity.desc&air_date.gte="+new Date().toISOString().slice(0,10):"popularity.desc")+"&with_origin_country="+countries[country]+"&page="+(i+1),{headers,signal:AbortSignal.timeout(12000)}));
+  const requests=Array.from({length:pages},(_,i)=>fetch(TMDB_API+"/discover/tv?include_adult=false&language=en-US&sort_by="+(category==="popular"?"popularity.desc":"vote_average.desc&vote_count.gte=10")+"&with_origin_country="+countries[country]+"&page="+(i+1),{headers,signal:AbortSignal.timeout(12000)}));
   const [responses,genreResponse]=await Promise.all([Promise.all(requests),fetch(TMDB_API+"/genre/tv/list?language=en-US",{headers,signal:AbortSignal.timeout(10000)})]);
   const failed=responses.find(x=>!x.ok);if(failed)return json({error:"TMDB drama list failed (HTTP "+failed.status+")."},502);
   if(!genreResponse.ok)return json({error:"TMDB TV genres could not be loaded."},502);
