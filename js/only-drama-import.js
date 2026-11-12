@@ -2,7 +2,9 @@
  const $=s=>document.querySelector(s),db=()=>window.cineverseSupabase;
  const state={items:[],existing:new Set(),selected:new Set()};
  const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
- const key=x=>String(x.tmdb_id);\n const titleKey=x=>String(x.title||"").trim().toLowerCase()+"|"+(x.release_year??"");\n const isExisting=x=>state.existing.has(key(x))||state.existing.has("title:"+titleKey(x));
+ const key=x=>String(x.tmdb_id);
+ const titleKey=x=>String(x.title||"").trim().toLowerCase()+"|"+(x.release_year??"");
+ const isExisting=x=>state.existing.has(key(x))||state.existing.has("title:"+titleKey(x));
  function msg(s,bad=false){$("#dramaImportMsg").textContent=s;$("#dramaImportMsg").classList.toggle("error",bad)}
  async function token(){const {data,error}=await db().auth.getSession();if(error)throw error;const t=data?.session?.access_token;if(!t)throw Error("Admin হিসেবে আবার লগইন করো।");return t}
  function render(){
