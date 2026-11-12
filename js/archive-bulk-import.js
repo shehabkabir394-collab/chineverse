@@ -119,7 +119,7 @@
         watch_url: row.watch_url, download_url: row.download_url,
         license_name: "Internet Archive license candidate — verify exact item before publishing",
         license_url: row.license || null, commercial_use: true, redistribution_allowed: true,
-        attribution_required: /licenses\\/(by|by-sa)\\//i.test(row.license || ""),
+        attribution_required: /licenses\/(by|by-sa)\//i.test(row.license || ""),
         attribution_text: "Archive item: " + row.archive_url + "\\nFile: " + row.file_name +
           "\\nExact title/year matched automatically. Admin must inspect the item-level rights before publishing.",
         rights_verified: false, is_active: false
