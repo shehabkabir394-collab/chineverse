@@ -71,12 +71,24 @@
       await token();
       say("Checking existing CineVerse titles and video sources…");
       const { data: existing, error: existingError } = await db().from("movies")
-        .select("id,title,release_year,tmdb_id").in("tmdb_id", candidates.map(row => row.movie.tmdb_id));
+        .select("id,title,release_year,tmdb_id").limit(5000);
       if (existingError) throw new Error(existingError.message);
-      const byTmdb = new Map((existing || []).map(movie => [Number(movie.tmdb_id), movie]));
-      const allMovies = existing || [];
-      const missing = candidates.filter(row => !byTmdb.has(Number(row.movie.tmdb_id)));
-      const missingKeys = new Set(missing.map(row => titleKey(row.movie)));
+      const byTmdb = new Map((existing || []).filter(movie => movie.tmdb_id != null).map(movie => [Number(movie.tmdb_id), movie]));
+      const byTitle = new Map();
+      for (const movie of existing || []) {
+        const key = titleKey(movie);
+        if (!byTitle.has(key)) byTitle.set(key, []);
+        byTitle.get(key).push(movie);
+      }
+      const ambiguous = new Set();
+      for (const row of candidates) {
+        const id = Number(row.movie.tmdb_id);
+        if (byTmdb.has(id)) continue;
+        const matches = byTitle.get(titleKey(row.movie)) || [];
+        if (matches.length === 1) byTmdb.set(id, matches[0]);
+        else if (matches.length > 1) ambiguous.add(id);
+      }
+      const missing = candidates.filter(row => !byTmdb.has(Number(row.movie.tmdb_id)) && !ambiguous.has(Number(row.movie.tmdb_id)));
       let inserted = [];
       if (missing.length) {
         say("Adding " + missing.length + " new movie records as unpublished drafts…");
