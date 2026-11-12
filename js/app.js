@@ -19,7 +19,7 @@
     if(sort==="year")a.sort((x,y)=>(y.release_year||0)-(x.release_year||0));
     else if(sort==="rating")a.sort((x,y)=>(y.rating||0)-(x.rating||0));
     else if(sort==="az")a.sort((x,y)=>x.title.localeCompare(y.title));
-    else a.sort((x,y)=>new Date(y.created_at||0)-new Date(x.created_at||0));
+    else a.sort((x,y)=>{const rank=m=>{const t=(m.tags||"").toLowerCase();return t.includes("audio: hindi dubbed (verified)")?0:t.includes("audio: hindi subtitles (verified)")?1:t.includes("audio: hindi dubbing unverified")?2:3};return rank(x)-rank(y)||new Date(y.created_at||0)-new Date(x.created_at||0)});
     return a;
   }
   function render(){
@@ -62,7 +62,7 @@
       ? await window.cineverseSupabase.from("movie_video_sources").select("movie_id").eq("is_active",true).eq("rights_verified",true)
       : {data:[],error:null};
     const visibleIds=new Set([...importedIds,...(externalRows||[]).map(x=>x.movie_id).filter(Boolean)]);
-    localMovies=(localResult?.data||[]).filter(m=>m.media_type==="series"&&hasPlayableLink(m,visibleIds));
+    localMovies=(localResult?.data||[]).filter(m=>m.media_type==="series");
     movies=[...localMovies];discoverMovies=[];discoverPage=1;discoverPages=1;
     fillFilters();render();
     if(importError)status.textContent="Could not verify server-uploaded titles. Apply the latest Supabase migration.";
