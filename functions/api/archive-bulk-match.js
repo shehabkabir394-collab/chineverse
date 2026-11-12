@@ -10,7 +10,7 @@ const json = (data, status = 200) => new Response(JSON.stringify(data), {
 
 async function requireAdmin(request) {
   const authorization = request.headers.get("Authorization") || "";
-  if (!/^Bearer\\s+\\S+$/i.test(authorization)) throw new Error("Administrator sign-in required.");
+  if (!/^Bearer\s+\S+$/i.test(authorization)) throw new Error("Administrator sign-in required.");
   const headers = { apikey: SUPABASE_PUBLIC_KEY, Authorization: authorization };
   const userResponse = await fetch(SUPABASE_URL + "/auth/v1/user", { headers, signal: AbortSignal.timeout(8000) });
   if (!userResponse.ok) throw new Error("Your admin session expired. Sign in again.");
@@ -24,12 +24,12 @@ async function requireAdmin(request) {
 
 function normTitle(value) {
   return String(value || "")
-    .replace(/\\s*\\(\\d{4}\\)\\s*$/, "")
+    .replace(/\s*\(\d{4}\)\s*$/, "")
     .normalize("NFKC").toLocaleLowerCase()
-    .replace(/[^\\p{L}\\p{N}]+/gu, " ").trim();
+    .replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 }
 function yearOf(value) {
-  const match = String(value || "").match(/(?:18|19|20|21)\\d{2}/);
+  const match = String(value || "").match(/(?:18|19|20|21)\d{2}/);
   return match ? Number(match[0]) : null;
 }
 function allowedCommercialLicense(raw) {
@@ -42,8 +42,8 @@ function allowedCommercialLicense(raw) {
   return path.includes("/publicdomain/zero/1.0") ||
     path.includes("/publicdomain/mark/1.0") ||
     path.includes("/licenses/publicdomain") ||
-    /\\/licenses\\/by\\/(?:1\\.0|2\\.0|2\\.5|3\\.0|4\\.0)/.test(path) ||
-    /\\/licenses\\/by-sa\\/(?:1\\.0|2\\.0|2\\.5|3\\.0|4\\.0)/.test(path);
+    /\/licenses\/by\/(?:1\.0|2\.0|2\.5|3\.0|4\.0)/.test(path) ||
+    /\/licenses\/by-sa\/(?:1\.0|2\.0|2\.5|3\.0|4\.0)/.test(path);
 }
 function fileRank(file) {
   const name = String(file.name || "").toLowerCase();
@@ -56,7 +56,7 @@ function videoFile(files) {
     .filter(file => {
       const name = String(file.name || "");
       const format = String(file.format || "").toLowerCase();
-      return /\\.(mp4|m4v|webm|ogv|ogg|mkv|mpg|mpeg)$/i.test(name) &&
+      return /\.(mp4|m4v|webm|ogv|ogg|mkv|mpg|mpeg)$/i.test(name) &&
         !/thumb|sample|preview|trailer|\.ia\./i.test(name) &&
         Number(file.size || 0) > 1024 * 1024 &&
         !/metadata|thumbnail|image/i.test(format);
@@ -67,7 +67,7 @@ function videoFile(files) {
 async function archiveCandidate(movie) {
   const title = String(movie.title || "").trim();
   const year = Number(movie.release_year);
-  const safeTitle = title.replace(/\\\\/g, "\\\\\\\\").replace(/"/g, '\\"');
+  const safeTitle = title.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
   const params = new URLSearchParams();
   params.set("q", 'mediatype:movies AND title:"' + safeTitle + '"');
   ["identifier", "title", "year", "date", "licenseurl", "rights"].forEach(field => params.append("fl[]", field));
