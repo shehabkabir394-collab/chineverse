@@ -35,5 +35,11 @@
  if(res.error){msg(res.error.message,true);return}msg("Source saved.");clear();await list();
  };
  $("#evsClear").onclick=clear;
- document.addEventListener("DOMContentLoaded",()=>{const dashboard=$("#dashboard"),grid=dashboard?.querySelector(".admin-grid");if(grid)dashboard.insertBefore(panel,grid);db().auth.onAuthStateChange(async(event,session)=>{if(event!=="SIGNED_IN"||!session)return;const {data:admin}=await db().from("admin_users").select("user_id").eq("user_id",session.user.id).maybeSingle();if(admin){await loadTitles();await list();}});});
+ async function loadForSession(session){if(!session)return;const {data:admin,error}=await db().from("admin_users").select("user_id").eq("user_id",session.user.id).maybeSingle();if(!error&&admin){await loadTitles();await list();}}
+ function init(){const dashboard=$("#dashboard"),grid=dashboard?.querySelector(".admin-grid");if(grid&&!panel.isConnected)dashboard.insertBefore(panel,grid);
+ let loadedUser=null;const handle=async session=>{if(!session||loadedUser===session.user.id)return;loadedUser=session.user.id;await loadForSession(session);};
+ db().auth.onAuthStateChange((_event,session)=>{if(session)handle(session);else loadedUser=null;});
+ db().auth.getSession().then(({data})=>handle(data?.session));
+ }
+ if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init,{once:true});else init();
 })();
