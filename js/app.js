@@ -54,12 +54,19 @@
       ? await window.cineverseSupabase.rpc("cineverse_public_server_import_movie_ids")
       : {data:[],error:null};
     const importedIds=new Set((importRows||[]).map(x=>x.movie_id).filter(Boolean));
-    // Only records created by the server-side folder importer are shown.
-    localMovies=(localResult?.data||[]).filter(m=>importedIds.has(m.id));
+    // Also show published catalog titles with an active, rights-verified external source.
+    // Public RLS exposes only verified active sources belonging to published movies.
+    const {data:externalRows,error:externalError}=window.cineverseSupabase
+      ? await window.cineverseSupabase.from("movie_video_sources").select("movie_id").eq("is_active",true).eq("rights_verified",true)
+      : {data:[],error:null};
+    const visibleIds=new Set([...importedIds,...(externalRows||[]).map(x=>x.movie_id).filter(Boolean)]);
+    localMovies=(localResult?.data||[]).filter(m=>visibleIds.has(m.id));
     movies=[...localMovies];discoverMovies=[];discoverPage=1;discoverPages=1;
     fillFilters();render();
     if(importError)status.textContent="Could not verify server-uploaded titles. Apply the latest Supabase migration.";
     else if(localResult?.error)status.textContent="Could not load CineVerse collection.";
+    else if(externalError)status.textContent="Could not load external source titles. Check the external video sources migration and public read policy.";
+    else if(!localMovies.length)status.textContent="No published titles with an active authorized video source were found.";
   }
   async function loadMore(){
     if(busy)return;
