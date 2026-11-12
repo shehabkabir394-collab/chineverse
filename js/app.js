@@ -7,12 +7,12 @@
   const hasPlayableLink=(m,assetIds)=>[m.video_url,m.watch_url,m.download_url].some(safeUrl)||(Array.isArray(m.download_links)&&m.download_links.some(x=>safeUrl(x?.url)))||assetIds.has(m.id);
   const typeLabel=m=>"DRAMA";
   function card(m){
-    const p=safeUrl(m.poster_url),external=m.source==="tmdb",href=external?"tmdb-movie.html?id="+encodeURIComponent(m.tmdb_id):(m.media_type==="series"?"series.html?id=":"movie.html?id=")+encodeURIComponent(m.id);
-    return `<article class="movie-card"><a class="poster" href="${esc(href)}" aria-label="View ${esc(m.title)} details">${p?`<img loading="lazy" src="${esc(p)}" alt="${esc(m.title)} poster">`:'<div class="poster-placeholder"><b>CV</b><small>CINEMA UNIVERSE</small></div>'}<span class="quality">${esc(m.quality||"HD")}</span><span class="type-pill">${typeLabel(m)}</span><span class="overlay">▶<small>View details</small></span></a><div class="movie-info"><h3><a href="${esc(href)}">${esc(m.title)}</a></h3><p>${esc(m.release_year||"Year unknown")} · ${esc((m.genre||"").split(",")[0]||"Movie")}</p><p class="card-rating">${m.rating!=null?"★ "+esc(m.rating):""} ${m.language?"· "+esc(m.language):""}</p></div></article>`;
+    const p=safeUrl(m.poster_url),external=m.source==="tmdb",href=external?"tmdb-movie.html?id="+encodeURIComponent(m.tmdb_id):("series.html?id=")+encodeURIComponent(m.id);
+    return `<article class="movie-card"><a class="poster" href="${esc(href)}" aria-label="View ${esc(m.title)} details">${p?`<img loading="lazy" src="${esc(p)}" alt="${esc(m.title)} poster">`:'<div class="poster-placeholder"><b>OD</b><small>ONLY DRAMA</small></div>'}<span class="quality">${esc(m.quality||"HD")}</span><span class="type-pill">${typeLabel(m)}</span><span class="overlay">▶<small>View details</small></span></a><div class="movie-info"><h3><a href="${esc(href)}">${esc(m.title)}</a></h3><p>${esc(m.release_year||"Year unknown")} · ${esc((m.genre||"").split(",")[0]||"Drama")}</p><p class="card-rating">${m.rating!=null?"★ "+esc(m.rating):""} ${m.language?"· "+esc(m.language):""}</p></div></article>`;
   }
   function filtered(){
-    const q=$("#search").value.toLowerCase().trim(),g=$("#genre").value,l=$("#language").value,z=$("#quality").value,k=$("#kind").value;
-    let a=movies.filter(m=>m.media_type==="series"&&(!q||[m.title,m.genre,m.language,m.release_year,m.description,m.cast_members,m.tags].join(" ").toLowerCase().includes(q))&&(!category||[m.genre,m.language,m.quality,m.tags].join(" ").toLowerCase().includes(category.toLowerCase()))&&(!g||(m.genre||"").toLowerCase().includes(g.toLowerCase()))&&(!l||m.language===l)&&(!z||m.quality===z)&&(!k||m.media_type===k));
+    const q=$("#search").value.toLowerCase().trim(),g=$("#genre").value,l=$("#language").value,z=$("#quality").value;
+    let a=movies.filter(m=>m.media_type==="series"&&(!q||[m.title,m.genre,m.language,m.release_year,m.description,m.cast_members,m.tags].join(" ").toLowerCase().includes(q))&&(!category||[m.genre,m.language,m.quality,m.tags].join(" ").toLowerCase().includes(category.toLowerCase()))&&(!g||(m.genre||"").toLowerCase().includes(g.toLowerCase()))&&(!l||m.language===l)&&(!z||m.quality===z));
     const sort=$("#sort").value;
     if(sort==="year")a.sort((x,y)=>(y.release_year||0)-(x.release_year||0));
     else if(sort==="rating")a.sort((x,y)=>(y.rating||0)-(x.rating||0));
@@ -32,7 +32,7 @@
     $("#reset").onclick=reset;
   }
   function reset(){
-    ["#search","#genre","#language","#quality","#kind"].forEach(s=>$(s).value="");
+    ["#search","#genre","#language","#quality"].forEach(s=>$(s).value="");
     category="";page=1;searchMode=false;movies=[...localMovies];
     $("#chips").querySelectorAll("[data-filter]").forEach(x=>x.classList.toggle("selected",!x.dataset.filter));render();
   }
@@ -78,11 +78,11 @@
     page=1;searchMode=false;movies=[...localMovies];render();
   }
   $("#search").oninput=()=>{clearTimeout(searchTimer);searchTimer=setTimeout(remoteSearch,450);};
-  ["#genre","#language","#quality","#kind","#sort"].forEach(s=>$(s).onchange=()=>{page=1;render();});
+  ["#genre","#language","#quality","#sort"].forEach(s=>$(s).onchange=()=>{page=1;render();});
   if($("#discoverCategory"))$("#discoverCategory").onchange=()=>{page=1;searchMode=false;$("#search").value="";load();};
   $("#chips").onclick=e=>{const b=e.target.closest("[data-filter]");if(!b)return;category=b.dataset.filter;page=1;$("#chips").querySelectorAll("[data-filter]").forEach(x=>x.classList.toggle("selected",x===b));render();};
   document.querySelectorAll("nav [data-filter]").forEach(a=>a.onclick=()=>{category=a.dataset.filter;page=1;render();});
-  document.querySelectorAll("nav [data-kind]").forEach(a=>a.onclick=()=>{$("#kind").value=a.dataset.kind;page=1;render();});
+
   $("#loadMore").onclick=loadMore;
   $("#lang").onclick=()=>{lang=lang==="en"?"bn":"en";document.documentElement.lang=lang;$(".hero-copy>p:not(.eyebrow)").textContent=lang==="bn"?"মুভি, ওয়েব সিরিজ ও অ্যানিমে খুঁজুন। Genre, রেটিং ও কোয়ালিটি ফিল্টার ব্যবহার করুন।":"Discover movies, series and anime. Explore genres, ratings and quality options.";$ (".hero-copy .primary").textContent=lang==="bn"?"▶ ক্যাটালগ দেখুন":"▶ Explore Catalog";$("#lang").textContent=lang==="bn"?"English":"বাংলা";};
   $("#close").onclick=()=>$("#dialog").close();$("#dialog").onclick=e=>{if(e.target===$("#dialog"))$("#dialog").close();};load();
