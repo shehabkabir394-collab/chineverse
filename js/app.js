@@ -5,14 +5,14 @@
   const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   const safeUrl=s=>/^https:\/\//i.test(s||"")?s:"";
   const hasPlayableLink=(m,assetIds)=>[m.video_url,m.watch_url,m.download_url].some(safeUrl)||(Array.isArray(m.download_links)&&m.download_links.some(x=>safeUrl(x?.url)))||assetIds.has(m.id);
-  const typeLabel=m=>m.media_type==="series"?"SERIES":m.media_type==="anime"?"ANIME":"MOVIE";
+  const typeLabel=m=>"DRAMA";
   function card(m){
     const p=safeUrl(m.poster_url),external=m.source==="tmdb",href=external?"tmdb-movie.html?id="+encodeURIComponent(m.tmdb_id):(m.media_type==="series"?"series.html?id=":"movie.html?id=")+encodeURIComponent(m.id);
     return `<article class="movie-card"><a class="poster" href="${esc(href)}" aria-label="View ${esc(m.title)} details">${p?`<img loading="lazy" src="${esc(p)}" alt="${esc(m.title)} poster">`:'<div class="poster-placeholder"><b>CV</b><small>CINEMA UNIVERSE</small></div>'}<span class="quality">${esc(m.quality||"HD")}</span><span class="type-pill">${typeLabel(m)}</span><span class="overlay">▶<small>View details</small></span></a><div class="movie-info"><h3><a href="${esc(href)}">${esc(m.title)}</a></h3><p>${esc(m.release_year||"Year unknown")} · ${esc((m.genre||"").split(",")[0]||"Movie")}</p><p class="card-rating">${m.rating!=null?"★ "+esc(m.rating):""} ${m.language?"· "+esc(m.language):""}</p></div></article>`;
   }
   function filtered(){
     const q=$("#search").value.toLowerCase().trim(),g=$("#genre").value,l=$("#language").value,z=$("#quality").value,k=$("#kind").value;
-    let a=movies.filter(m=>(!q||[m.title,m.genre,m.language,m.release_year,m.description,m.cast_members,m.tags].join(" ").toLowerCase().includes(q))&&(!category||[m.genre,m.language,m.quality,m.tags].join(" ").toLowerCase().includes(category.toLowerCase()))&&(!g||(m.genre||"").toLowerCase().includes(g.toLowerCase()))&&(!l||m.language===l)&&(!z||m.quality===z)&&(!k||m.media_type===k));
+    let a=movies.filter(m=>m.media_type==="series"&&(!q||[m.title,m.genre,m.language,m.release_year,m.description,m.cast_members,m.tags].join(" ").toLowerCase().includes(q))&&(!category||[m.genre,m.language,m.quality,m.tags].join(" ").toLowerCase().includes(category.toLowerCase()))&&(!g||(m.genre||"").toLowerCase().includes(g.toLowerCase()))&&(!l||m.language===l)&&(!z||m.quality===z)&&(!k||m.media_type===k));
     const sort=$("#sort").value;
     if(sort==="year")a.sort((x,y)=>(y.release_year||0)-(x.release_year||0));
     else if(sort==="rating")a.sort((x,y)=>(y.rating||0)-(x.rating||0));
@@ -28,7 +28,7 @@
     const canLoad=shown.length<all.length;
     $("#loadMore").classList.toggle("hidden",!all.length||(!canLoad&&shown.length>=all.length));
     $("#loadMore").textContent=busy?"Loading…":"Show more";
-    if(!busy)status.textContent=all.length?"CineVerse collection · titles with watch/download links":"No titles with watch or download links found.";
+    if(!busy)status.textContent=all.length?"Only Drama · Asian drama titles with authorized watch/download links":"No dramas with authorized watch or download links found.";
     $("#reset").onclick=reset;
   }
   function reset(){
@@ -46,7 +46,7 @@
   const dedupe=list=>{const seen=new Set();return list.filter(m=>{const k=m.tmdb_id?"tmdb:"+m.tmdb_id:(m.title||"").toLowerCase()+"|"+(m.release_year||"");if(seen.has(k))return false;seen.add(k);return true})};
   async function getJson(url){const r=await fetch(url);const d=await r.json();if(!r.ok)throw Error(d.error||"Catalog request failed");return d}
   async function load(){
-    $("#year").textContent=new Date().getFullYear();status.textContent="Loading CineVerse collection…";
+    $("#year").textContent=new Date().getFullYear();status.textContent="Loading Only Drama…";
     const localResult=window.cineverseSupabase
       ? await window.cineverseSupabase.from("movies").select("id,title,release_year,genre,language,quality,description,poster_url,backdrop_url,trailer_url,watch_url,video_url,download_url,download_links,published,created_at,media_type,rating,cast_members,runtime_minutes,content_status,seasons,episodes,tags,tmdb_id").eq("published",true).order("created_at",{ascending:false})
       : {data:[],error:null};
@@ -64,9 +64,9 @@
     movies=[...localMovies];discoverMovies=[];discoverPage=1;discoverPages=1;
     fillFilters();render();
     if(importError)status.textContent="Could not verify server-uploaded titles. Apply the latest Supabase migration.";
-    else if(localResult?.error)status.textContent="Could not load CineVerse collection.";
+    else if(localResult?.error)status.textContent="Could not load Only Drama collection.";
     else if(externalError)status.textContent="Could not load external source titles. Check the external video sources migration and public read policy.";
-    else if(!localMovies.length)status.textContent="No published titles with an active authorized video source were found.";
+    else if(!localMovies.length)status.textContent="No published dramas with an active authorized video source were found.";
   }
   async function loadMore(){
     if(busy)return;
