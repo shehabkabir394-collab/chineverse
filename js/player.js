@@ -3,7 +3,7 @@
  function mount({video,sources=[],storageKey="cv-player",subtitles=[]}){
   if(!video||!sources.length)return;
   const wrap=document.createElement("div");wrap.className="cv-player";video.parentNode.insertBefore(wrap,video);wrap.appendChild(video);video.controls=false;video.playsInline=true;
-  const ordered=[...sources].filter(x=>x&&x.url).sort((a,b)=>Number(a.quality.replace(/p/i,""))-Number(b.quality.replace(/p/i,"")));
+  let ordered=[...sources].filter(x=>x&&x.url).sort((a,b)=>Number(a.quality.replace(/p/i,""))-Number(b.quality.replace(/p/i,"")));
   const best=()=>{const c=navigator.connection||{};const q=(c.effectiveType==="2g"||c.effectiveType==="slow-2g"||Number(c.downlink)<1.5)?"420p":(c.effectiveType==="3g"||Number(c.downlink)<4)?"720p":"1080p";return ordered.find(x=>x.quality===q)||ordered[ordered.length-1]};
   const initial=best(),saved=Number(localStorage.getItem(storageKey)||0);
   const controls=document.createElement("div");controls.className="cv-controls";
@@ -33,7 +33,7 @@
   let saveAt=0;video.addEventListener("timeupdate",()=>{if(video.currentTime-saveAt>8){saveAt=video.currentTime;localStorage.setItem(storageKey,String(Math.floor(saveAt)))}});video.addEventListener("ended",()=>localStorage.removeItem(storageKey));
   wrap.tabIndex=0;wrap.addEventListener("keydown",e=>{if(["INPUT","SELECT","BUTTON"].includes(e.target.tagName))return;if(e.code==="Space"){e.preventDefault();video.paused?video.play():video.pause()}else if(e.key==="ArrowRight")video.currentTime+=10;else if(e.key==="ArrowLeft")video.currentTime-=10;else if(e.key.toLowerCase()==="f")$(".cv-full").click()});
   let tap=0;video.addEventListener("touchend",e=>{const x=e.changedTouches[0].clientX,r=video.getBoundingClientRect();if(Math.abs(x-(r.left+r.width/2))<r.width*.12)return;const now=Date.now();if(now-tap<320){video.currentTime+=x<r.left+r.width/2?-10:10;tap=0}else tap=now},{passive:true});
-  return {video,wrap,setSource};
+  function setSources(next){ordered=[...next].filter(x=>x&&x.url).sort((a,b)=>Number(a.quality.replace(/p/i,""))-Number(b.quality.replace(/p/i,"")));quality.innerHTML="<option value=\"auto\">Auto</option>"+ordered.map(x=>"<option value=\""+esc(x.quality)+"\">"+esc(x.quality)+"</option>").join("");if(ordered.length)setSource(ordered[0]);}return {video,wrap,setSource,setSources};
  }
  window.CineVersePlayer={mount};
 })();
