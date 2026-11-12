@@ -7,7 +7,7 @@ function parseName(filename){
  const ep=base.match(/\bS(\d{1,2})E(\d{1,3})\b/i);
  let cleaned=base.replace(/[._]+/g," ");
  if(ep) cleaned=cleaned.slice(0,ep.index);
- cleaned=cleaned.replace(/\b(480p|720p|1080p|2160p|4k|uhd|web[ .-]?dl|webrip|bluray|brrip|hdtv|x264|x265|h264|h265|hevc|aac|dts|ddp|proper|repack)\b/ig," ").replace(/\bDDP\s*\d+(?:[ .]\d+)?\b/ig," ").replace(/\b\d+(?:[ .]\d+)?\s*(?:CH|CHANNELS?)\b/ig," ").replace(/\s+/g," ").trim();
+ cleaned=cleaned.replace(/\b(audiofixed|480p|720p|1080p|2160p|4k|uhd|web[ .-]?dl|webrip|bluray|brrip|hdtv|x264|x265|h264|h265|hevc|aac|dts|ddp|proper|repack)\b/ig," ").replace(/\bDDP\s*\d+(?:[ .]\d+)?\b/ig," ").replace(/\b\d+(?:[ .]\d+)?\s*(?:CH|CHANNELS?)\b/ig," ").replace(/\s+/g," ").trim();
  const yearMatch=cleaned.match(/\b(19\d{2}|20\d{2})\b/);
  const title=(yearMatch?cleaned.slice(0,yearMatch.index):cleaned).replace(/[()\[\]-]+$/g,"").trim();
  return {title,year:yearMatch?Number(yearMatch[1]):null,season:ep?Number(ep[1]):null,episode:ep?Number(ep[2]):null};
@@ -18,6 +18,11 @@ async function saveMovie(env,sourceKey,movie){
  const supa=env.SUPABASE_URL.replace(/\/$/,"");
  const resp=await fetch(supa+"/rest/v1/rpc/cineverse_import_server_movie",{method:"POST",headers:{"apikey":env.SUPABASE_SERVICE_ROLE_KEY,"Authorization":"Bearer "+env.SUPABASE_SERVICE_ROLE_KEY,"Content-Type":"application/json"},body:JSON.stringify({p_source_key:sourceKey,p_movie:movie})});
  const result=await resp.json().catch(()=>null);if(!resp.ok)throw new Error("Supabase movie import failed: "+JSON.stringify(result));return result;
+}
+async function saveQualityAsset(env,rpc,args){
+ const supa=env.SUPABASE_URL.replace(/\/$/,"");
+ const resp=await fetch(supa+"/rest/v1/rpc/"+rpc,{method:"POST",headers:{"apikey":env.SUPABASE_SERVICE_ROLE_KEY,"Authorization":"Bearer "+env.SUPABASE_SERVICE_ROLE_KEY,"Content-Type":"application/json"},body:JSON.stringify(args)});
+ const result=await resp.json().catch(()=>null);if(!resp.ok)throw new Error("Supabase quality asset import failed: "+JSON.stringify(result));return result;
 }
 async function saveEpisode(env,sourceKey,series,episode){
  const supa=env.SUPABASE_URL.replace(/\/$/,"");
@@ -45,6 +50,16 @@ export async function onRequestPost({request,env}){
   if(!chosen)return json({error:"No confident TMDB "+(isEpisode?"series":"movie")+" title match",parsed_title:parsed.title,parsed_year:parsed.year,season:parsed.season,episode:parsed.episode},422);
   const id=chosen.id;
   const videoUrl=videoUrlFor(env,relative);
+  if(body.asset_quality!==undefined){
+   const quality=String(body.asset_quality);
+   const fileSize=Number(body.file_size||0);
+   if(!["720p","1080p"].includes(quality)||!Number.isSafeInteger(fileSize)||fileSize<=0)return json({error:"Invalid asset_quality or file_size"},400);
+   const common={p_tmdb_id:id,p_quality:quality,p_object_key:relative,p_public_url:videoUrl,p_mime_type:String(body.mime_type||"video/mp4"),p_file_size:fileSize};
+   const assetResult=isEpisode
+    ?await saveQualityAsset(env,"cineverse_import_server_episode_asset",{...common,p_season:parsed.season,p_episode:parsed.episode})
+    :await saveQualityAsset(env,"cineverse_import_server_movie_asset",common);
+   return json({ok:true,type:isEpisode?"series_episode_asset":"movie_asset",...assetResult,tmdb_id:id,quality,video_url:videoUrl});
+  }
   if(isEpisode){
    const [show,credits,videos,seasonData]=await Promise.all([
     tmdb("/tv/"+id+"?language=en-US",headers),
