@@ -35,5 +35,5 @@
  if(res.error){msg(res.error.message,true);return}msg("Source saved.");clear();await list();
  };
  $("#evsClear").onclick=clear;
- document.addEventListener("DOMContentLoaded",()=>{const dashboard=$("#dashboard"),grid=dashboard?.querySelector(".admin-grid");if(grid)dashboard.insertBefore(panel,grid);loadTitles();list();});
+ document.addEventListener("DOMContentLoaded",()=>{const dashboard=$("#dashboard"),grid=dashboard?.querySelector(".admin-grid");if(grid)dashboard.insertBefore(panel,grid);db().auth.onAuthStateChange(async(event,session)=>{if(event!=="SIGNED_IN"||!session)return;const {data:admin}=await db().from("admin_users").select("user_id").eq("user_id",session.user.id).maybeSingle();if(admin){await loadTitles();await list();}});});
 })();
