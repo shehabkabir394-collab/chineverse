@@ -53,7 +53,7 @@ export async function onRequestPost({request,env}){
   if(body.asset_quality!==undefined){
    const quality=String(body.asset_quality);
    const fileSize=Number(body.file_size||0);
-   if(!["720p","1080p"].includes(quality)||!Number.isSafeInteger(fileSize)||fileSize<=0)return json({error:"Invalid asset_quality or file_size"},400);
+   if(!["420p","720p","1080p"].includes(quality)||!Number.isSafeInteger(fileSize)||fileSize<=0)return json({error:"Invalid asset_quality or file_size"},400);
    const common={p_tmdb_id:id,p_quality:quality,p_object_key:relative,p_public_url:videoUrl,p_mime_type:String(body.mime_type||"video/mp4"),p_file_size:fileSize};
    const assetResult=isEpisode
     ?await saveQualityAsset(env,"cineverse_import_server_episode_asset",{...common,p_season:parsed.season,p_episode:parsed.episode})
