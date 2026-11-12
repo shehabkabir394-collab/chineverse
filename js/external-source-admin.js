@@ -1,7 +1,7 @@
 (()=> {
  const $=s=>document.querySelector(s),db=()=>window.cineverseSupabase;
  const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
- const panel=document.createElement("section");panel.className="panel bulk-panel";panel.id="externalSourcesPanel";
+ const panel=document.querySelector("#externalSourcesPanel")||document.createElement("section");panel.className="panel bulk-panel";panel.id="externalSourcesPanel";
  panel.innerHTML=`<div class="toolbar"><div><h3>External Video Sources</h3><p class="muted">Attach authorized external embeds or direct streams without storing videos on your server.</p></div><span class="tiny muted">Rights review required</span></div>
  <form id="externalSourceForm" class="form"><input id="evsId" type="hidden">
  <label>Movie / Series<select id="evsMovie" required><option value="">Select a title</option></select></label>
