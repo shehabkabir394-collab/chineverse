@@ -36,10 +36,30 @@
  };
  $("#evsClear").onclick=clear;
  async function loadForSession(session){if(!session)return;const {data:admin,error}=await db().from("admin_users").select("user_id").eq("user_id",session.user.id).maybeSingle();if(!error&&admin){await loadTitles();await list();}}
- function init(){const dashboard=$("#dashboard"),grid=dashboard?.querySelector(".admin-grid");if(grid&&!panel.isConnected)dashboard.insertBefore(panel,grid);
- let loadedUser=null;const handle=async session=>{if(!session||loadedUser===session.user.id)return;loadedUser=session.user.id;await loadForSession(session);};
- db().auth.onAuthStateChange((_event,session)=>{if(session)handle(session);else loadedUser=null;});
- db().auth.getSession().then(({data})=>handle(data?.session));
+ function init(){
+  const dashboard=$("#dashboard"),grid=dashboard?.querySelector(".admin-grid");
+  if(!dashboard||!grid)return;
+  if(!panel.isConnected)dashboard.insertBefore(panel,grid);
+  let loadedUser=null,loadingUser=null;
+  const maybeLoad=async()=>{
+   if(dashboard.classList.contains("hidden"))return;
+   const {data,error}=await db().auth.getSession();
+   const session=data?.session;
+   if(error||!session){loadedUser=null;return;}
+   const id=session.user.id;
+   if(loadedUser===id||loadingUser===id)return;
+   loadingUser=id;
+   try{await loadForSession(session);loadedUser=id;}
+   finally{loadingUser=null;}
+  };
+  const observer=new MutationObserver(()=>{maybeLoad();});
+  observer.observe(dashboard,{attributes:true,attributeFilter:["class"]});
+  db().auth.onAuthStateChange((_event,session)=>{
+   if(!session){loadedUser=null;return;}
+   // Defer Supabase queries until after the auth callback has returned.
+   setTimeout(()=>maybeLoad(),0);
+  });
+  maybeLoad();
  }
  if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init,{once:true});else init();
 })();
