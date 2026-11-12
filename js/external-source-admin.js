@@ -4,7 +4,7 @@
  const panel=document.querySelector("#externalSourcesPanel")||document.createElement("section");panel.className="panel bulk-panel";panel.id="externalSourcesPanel";
  panel.innerHTML=`<div class="toolbar"><div><h3>External Video Sources</h3><p class="muted">Attach authorized external embeds or direct streams without storing videos on your server.</p></div><span class="tiny muted">Rights review required</span></div>
  <form id="externalSourceForm" class="form"><input id="evsId" type="hidden">
- <label>Movie / Series<select id="evsMovie" required><option value="">Select a title</option></select></label>
+ <label>Drama<select id="evsMovie" required><option value="">Select a drama</option></select></label>
  <div class="row"><label>Source type<select id="evsType"><option value="embed">External Embed</option><option value="direct">Direct Video URL</option><option value="local">Local / R2</option></select></label><label>Provider<input id="evsProvider" placeholder="Internet Archive, YouTube, Vimeo…"></label></div>
  <div class="row"><label>Quality<select id="evsQuality"><option>Auto</option><option>420p</option><option>480p</option><option>720p</option><option>1080p</option><option>2K</option><option>4K UHD</option></select></label><label>Watch / Embed URL<input id="evsWatch" type="url" placeholder="https://…"></label></div>
  <label>Direct Download URL (only if explicitly permitted)<input id="evsDownload" type="url" placeholder="https://…"></label>
@@ -17,7 +17,7 @@
  function msg(s,bad=false){$("#evsMsg").textContent=s;$("#evsMsg").classList.toggle("error",bad)}
  function val(id){return $("#"+id).value.trim()||null}
  function clear(){ $("#externalSourceForm").reset();$("#evsId").value="";$("#evsActive").checked=false;$("#evsVerified").checked=false; }
- async function loadTitles(){const {data,error}=await db().from("movies").select("id,title,release_year").order("title");if(error){msg(error.message,true);return}
+ async function loadTitles(){const {data,error}=await db().from("movies").select("id,title,release_year").eq("media_type","series").order("title");if(error){msg(error.message,true);return}
  $("#evsMovie").innerHTML='<option value="">Select a title</option>'+(data||[]).map(m=>'<option value="'+esc(m.id)+'">'+esc(m.title)+' ('+esc(m.release_year||"—")+')</option>').join("");}
  async function list(){const {data,error}=await db().from("movie_video_sources").select("*,movies(title)").order("created_at",{ascending:false}).limit(100);if(error){$("#evsList").textContent="Run the external video sources SQL migration first: "+error.message;return}
  $("#evsList").innerHTML=(data||[]).map(x=>'<article class="admin-movie"><div class="admin-movie-info"><b>'+esc(x.movies?.title||"Title")+' · '+esc(x.provider||x.source_type)+'</b><small>'+esc(x.source_type)+' · '+esc(x.quality)+' · '+(x.is_active&&x.rights_verified?"Published":"Draft / unverified")+'</small></div><button class="mini" data-edit="'+x.id+'">Edit</button><button class="mini danger" data-del="'+x.id+'">Delete</button></article>').join("")||'<p class="muted">No external sources added yet.</p>';
