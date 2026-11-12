@@ -5,7 +5,7 @@ create table if not exists public.series_episode_media_assets (
  series_id uuid not null references public.movies(id) on delete cascade,
  season_number integer not null,
  episode_number integer not null,
- quality text not null check (quality in ('720p','1080p')),
+ quality text not null check (quality in ('420p','720p','1080p')),
  object_key text not null unique,
  public_url text not null,
  mime_type text not null default 'video/mp4',
@@ -31,7 +31,7 @@ create or replace function public.cineverse_import_server_movie_asset(
 declare v_movie_id uuid;
 begin
  if coalesce(auth.role(),'') <> 'service_role' then raise exception 'service_role required' using errcode='42501'; end if;
- if p_quality not in ('720p','1080p') or p_file_size <= 0 then raise exception 'invalid asset metadata'; end if;
+ if p_quality not in ('420p','720p','1080p') or p_file_size <= 0 then raise exception 'invalid asset metadata'; end if;
  select id into v_movie_id from public.movies where tmdb_id=p_tmdb_id and media_type='movie' order by created_at desc limit 1;
  if v_movie_id is null then raise exception 'movie must be imported before adding quality assets'; end if;
  insert into public.movie_media_assets(movie_id,quality,object_key,public_url,mime_type,file_size,is_active)
