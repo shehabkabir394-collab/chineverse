@@ -60,7 +60,7 @@
     }
   }
   function titleKey(movie) {
-    return String(movie.title || "").normalize("NFKC").toLowerCase().replace(/[^\\p{L}\\p{N}]+/gu, " ").trim() + "|" + (movie.release_year || "");
+    return String(movie.title || "").normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim() + "|" + (movie.release_year || "");
   }
   async function importCandidates() {
     const button = $("#archiveBulkImport");
