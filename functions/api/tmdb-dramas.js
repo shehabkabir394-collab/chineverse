@@ -37,7 +37,7 @@ export async function onRequestPost({request,env}){
   const dramas=await pool(unique,4,async item=>{
    try{
     const r=await fetch(TMDB_API+"/tv/"+item.id+"/watch/providers",{headers,signal:AbortSignal.timeout(9000)});
-    if(!r.ok)return null;const d=await r.json(),market=d.results?.[region];if(!market)return null;
+    if(!r.ok)return null;const d=await r.json(),market=d.results?.[region]||{};
     const free=[...(market?.free||[]),...(market?.ads||[])];
     const providers=[...new Set(free.map(x=>x.provider_name).filter(Boolean))];
     const year=String(item.first_air_date||"").slice(0,4);
