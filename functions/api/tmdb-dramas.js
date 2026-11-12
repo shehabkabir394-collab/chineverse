@@ -37,14 +37,14 @@ export async function onRequestPost({request,env}){
   const dramas=await pool(unique,4,async item=>{
    try{
     const r=await fetch(TMDB_API+"/tv/"+item.id+"/watch/providers",{headers,signal:AbortSignal.timeout(9000)});
-    if(!r.ok)return null;const d=await r.json(),market=d.results?.[region];if(!market)return null;
-    const free=[...(market.free||[]),...(market.ads||[])];if(!free.length||!market.link)return null;
+    if(!r.ok)return null;const d=await r.json(),market=d.results?.[region]||{};
+    const free=[...(market?.free||[]),...(market?.ads||[])];
     const providers=[...new Set(free.map(x=>x.provider_name).filter(Boolean))];
     const year=String(item.first_air_date||"").slice(0,4);
-    return {tmdb_id:Number(item.id),title:String(item.name).slice(0,180),media_type:"series",release_year:/^\d{4}$/.test(year)?Number(year):null,genre:(item.genre_ids||[]).map(id=>genres.get(id)).filter(Boolean).join(", "),language:lang[item.original_language]||item.original_language||country,quality:"Other",rating:Number.isFinite(Number(item.vote_average))?Math.round(Number(item.vote_average)*10)/10:null,description:String(item.overview||"").slice(0,5000),poster_url:image(item.poster_path,"w500"),backdrop_url:image(item.backdrop_path,"w1280"),trailer_url:null,watch_url:market.link,video_url:null,download_url:null,download_links:[],cast_members:"",runtime_minutes:null,content_status:item.status||"Released",seasons:item.number_of_seasons||null,episodes:item.number_of_episodes||null,tags:"Country: "+country+", Free providers: "+providers.join(", "),published:false,free_providers:providers,provider_region:region}; 
+    return {tmdb_id:Number(item.id),title:String(item.name).slice(0,180),media_type:"series",release_year:/^\d{4}$/.test(year)?Number(year):null,genre:(item.genre_ids||[]).map(id=>genres.get(id)).filter(Boolean).join(", "),language:lang[item.original_language]||item.original_language||country,quality:"Other",rating:Number.isFinite(Number(item.vote_average))?Math.round(Number(item.vote_average)*10)/10:null,description:String(item.overview||"").slice(0,5000),poster_url:image(item.poster_path,"w500"),backdrop_url:image(item.backdrop_path,"w1280"),trailer_url:null,watch_url:providers.length&&market?.link?market.link:null,video_url:null,download_url:null,download_links:[],cast_members:"",runtime_minutes:null,content_status:item.status||"Released",seasons:item.number_of_seasons||null,episodes:item.number_of_episodes||null,tags:"Country: "+country+", Audio: Hindi dubbing unverified"+(providers.length?", Free providers: "+providers.join(", "):""),published:false,free_providers:providers,provider_region:region,audio_status:"unverified"}; 
    }catch{return null;}
   });
   const results=dramas.filter(Boolean);
-  return json({country,region,category,pages,count:results.length,checked:unique.length,without_free_link:unique.length-results.length,dramas:results});
+  return json({country,region,category,pages,count:results.length,checked:unique.length,with_free_link:results.filter(x=>x.watch_url).length,without_free_link:results.filter(x=>!x.watch_url).length,dramas:results});
  }catch(e){return json({error:e?.name==="TimeoutError"?"TMDB took too long to respond. Try fewer pages.":e?.message||"Could not load dramas."},400);}
 }
