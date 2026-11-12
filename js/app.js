@@ -62,7 +62,7 @@
       ? await window.cineverseSupabase.from("movie_video_sources").select("movie_id").eq("is_active",true).eq("rights_verified",true)
       : {data:[],error:null};
     const visibleIds=new Set([...importedIds,...(externalRows||[]).map(x=>x.movie_id).filter(Boolean)]);
-    localMovies=(localResult?.data||[]).filter(m=>visibleIds.has(m.id));
+    localMovies=(localResult?.data||[]).filter(m=>m.media_type==="series"&&hasPlayableLink(m,visibleIds));
     movies=[...localMovies];discoverMovies=[];discoverPage=1;discoverPages=1;
     fillFilters();render();
     if(importError)status.textContent="Could not verify server-uploaded titles. Apply the latest Supabase migration.";
