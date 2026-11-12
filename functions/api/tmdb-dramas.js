@@ -23,7 +23,7 @@ export async function onRequestPost({request,env}){
   const body=await request.json(),country=body?.country,pages=Number(body?.pages||1),category=body?.category||"popular",region=String(body?.region||"BD").toUpperCase();
   if(!countries[country])return json({error:"Choose Korean, Chinese, Japanese or Thai drama."},400);
   if(!Number.isInteger(pages)||pages<1||pages>5)return json({error:"Choose 1 to 5 pages."},400);
-  if(!["popular","top_rated","airing_today","on_the_air"].includes(category))return json({error:"Unsupported drama list."},400);
+  if(!["popular","top_rated"].includes(category))return json({error:"Unsupported drama list."},400);
   if(!/^[A-Z]{2}$/.test(region))return json({error:"Invalid region."},400);
   const token=env.TMDB_API_READ_ACCESS_TOKEN;if(!token)return json({error:"TMDB is not configured. Add TMDB_API_READ_ACCESS_TOKEN in Cloudflare Pages → Settings → Variables and Secrets."},503);
   const headers={Authorization:"Bearer "+token,accept:"application/json"};
