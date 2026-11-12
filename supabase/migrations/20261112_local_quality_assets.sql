@@ -48,7 +48,7 @@ create or replace function public.cineverse_import_server_episode_asset(
 declare v_series_id uuid; v_episode_id uuid;
 begin
  if coalesce(auth.role(),'') <> 'service_role' then raise exception 'service_role required' using errcode='42501'; end if;
- if p_quality not in ('720p','1080p') or p_file_size <= 0 then raise exception 'invalid asset metadata'; end if;
+ if p_quality not in ('420p','720p','1080p') or p_file_size <= 0 then raise exception 'invalid asset metadata'; end if;
  select id into v_series_id from public.movies where tmdb_id=p_tmdb_id and media_type='series' order by created_at desc limit 1;
  if v_series_id is null then raise exception 'series must be imported before adding quality assets'; end if;
  select id into v_episode_id from public.series_episodes where series_id=v_series_id and season_number=p_season and episode_number=p_episode;
