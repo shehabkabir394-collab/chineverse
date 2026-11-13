@@ -37,7 +37,7 @@
    await token();
    let done=0;
    for(let i=0;i<chosen.length;i+=25){
-    const audio=$("#dramaAudioStatus").value;const audioLabel=audio==="hindi_dubbed"?"Hindi Dubbed (verified)":audio==="hindi_subtitles"?"Hindi Subtitles (verified)":audio==="original"?"Original Audio":"Hindi dubbing unverified";const rows=chosen.slice(i,i+25).map(({free_providers,provider_region,audio_status,...row})=>({...row,tags:(row.tags||"").replace(/Audio: [^,]+/,"Audio: "+audioLabel),published:$("#dramaPublish").checked}));
+    const audio=$("#dramaAudioStatus").value;const audioLabel=audio==="hindi_dubbed"?"Hindi Dubbed (verified)":audio==="hindi_subtitles"?"Hindi Subtitles (verified)":audio==="original"?"Original Audio":"Hindi dubbing unverified";const rows=chosen.slice(i,i+25).map(({free_providers,provider_region,watch_sources,audio_status,...row})=>({...row,tags:(row.tags||"").replace(/Audio: [^,]+/,"Audio: "+audioLabel),published:$("#dramaPublish").checked}));
     const {error}=await db().from("movies").insert(rows);if(error)throw Error("Imported "+done+" before error: "+error.message);done+=rows.length;
    }
    chosen.forEach(x=>{state.existing.add(key(x));state.existing.add("title:"+titleKey(x));state.selected.delete(key(x))});render();
