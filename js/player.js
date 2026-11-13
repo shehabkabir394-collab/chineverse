@@ -18,7 +18,7 @@
    const isHls=/\\.m3u8(?:$|[?#])/i.test(src.url);
    const ready=()=>{if(token!==sourceToken)return;if(t>0&&Number.isFinite(video.duration))video.currentTime=Math.min(t,Math.max(0,video.duration-2));if(was)video.play().catch(()=>{});};
    if(isHls&&!video.canPlayType("application/vnd.apple.mpegurl")){
-    try{const Hls=await loadHlsLibrary();if(token!==sourceToken)return;if(Hls&&Hls.isSupported()){activeHls=new Hls({enableWorker:true});activeHls.loadSource(src.url);activeHls.attachMedia(video);activeHls.on(Hls.Events.MANIFEST_PARSED,ready);activeHls.on(Hls.Events.ERROR,(_,data)=>{if(data.fatal){$(\".cv-buffer\").hidden=true;video.dispatchEvent(new Event("error"));}});return;}}
+    try{const Hls=await loadHlsLibrary();if(token!==sourceToken)return;if(Hls&&Hls.isSupported()){activeHls=new Hls({enableWorker:true});activeHls.loadSource(src.url);activeHls.attachMedia(video);activeHls.on(Hls.Events.MANIFEST_PARSED,ready);activeHls.on(Hls.Events.ERROR,(_,data)=>{if(data.fatal){$(".cv-buffer").hidden=true;video.dispatchEvent(new Event("error"));}});return;}}
     catch(e){console.error("HLS player could not load",e);}
    }
    video.src=src.url;video.load();video.addEventListener("loadedmetadata",ready,{once:true});
