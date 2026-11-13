@@ -12,7 +12,17 @@
   wrap.appendChild(controls);
   const $=s=>controls.querySelector(s),play=$(".cv-play"),seek=$(".cv-seek"),time=$(".cv-time"),quality=$(".cv-quality"),subs=$(".cv-subtitles");
   const fmt=t=>{if(!Number.isFinite(t))return"0:00";const h=Math.floor(t/3600),m=Math.floor(t%3600/60),s=Math.floor(t%60);return h?h+":"+String(m).padStart(2,"0")+":"+String(s).padStart(2,"0"):m+":"+String(s).padStart(2,"0")};
-  function setSource(src,keep=true){const t=keep?video.currentTime:0,was=!video.paused;video.src=src.url;video.load();video.addEventListener("loadedmetadata",()=>{if(t>0)video.currentTime=Math.min(t,Math.max(0,video.duration-2));if(was)video.play().catch(()=>{});},{once:true});quality.value=src.quality;}
+  let activeHls=null,sourceToken=0;
+  function loadHlsLibrary(){if(window.Hls)return Promise.resolve(window.Hls);if(window.__odHlsPromise)return window.__odHlsPromise;window.__odHlsPromise=new Promise((resolve,reject)=>{const script=document.createElement("script");script.src="https://cdn.jsdelivr.net/npm/hls.js@1.6.15/dist/hls.min.js";script.onload=()=>resolve(window.Hls);script.onerror=reject;document.head.appendChild(script);});return window.__odHlsPromise;}
+  async function setSource(src,keep=true){const token=++sourceToken,t=keep?video.currentTime:0,was=!video.paused; if(activeHls){activeHls.destroy();activeHls=null;} video.pause();video.removeAttribute("src");video.load();quality.value=src.quality||"auto";
+   const isHls=/\\.m3u8(?:$|[?#])/i.test(src.url);
+   const ready=()=>{if(token!==sourceToken)return;if(t>0&&Number.isFinite(video.duration))video.currentTime=Math.min(t,Math.max(0,video.duration-2));if(was)video.play().catch(()=>{});};
+   if(isHls&&!video.canPlayType("application/vnd.apple.mpegurl")){
+    try{const Hls=await loadHlsLibrary();if(token!==sourceToken)return;if(Hls&&Hls.isSupported()){activeHls=new Hls({enableWorker:true});activeHls.loadSource(src.url);activeHls.attachMedia(video);activeHls.on(Hls.Events.MANIFEST_PARSED,ready);activeHls.on(Hls.Events.ERROR,(_,data)=>{if(data.fatal){$(".cv-buffer").hidden=true;video.dispatchEvent(new Event("error"));}});return;}}
+    catch(e){console.error("HLS player could not load",e);}
+   }
+   video.src=src.url;video.load();video.addEventListener("loadedmetadata",ready,{once:true});
+  }
   setSource(initial,false);quality.value="auto";
   quality.addEventListener("change",()=>{const src=quality.value==="auto"?best():ordered.find(x=>x.quality===quality.value);if(src)setSource(src)});
   play.addEventListener("click",()=>video.paused?video.play().catch(()=>{}):video.pause());
