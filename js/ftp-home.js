@@ -10,7 +10,7 @@
  function card(x,m){
   const name=nm(x),p=pth(x),meta=m||{},poster=meta.poster||"",title=meta.title||clean(name)||name;
   const href="ftp-series.html?path="+encodeURIComponent(p)+"&title="+encodeURIComponent(title)+(meta.id?"&tmdb="+encodeURIComponent(meta.id):"");
-  return '<article class="movie-card"><a class="poster" href="'+href+'" aria-label="View '+esc(title)+' details">'+(poster?'<img loading="lazy" src="'+esc(poster)+'" alt="'+esc(title)+' poster">':'<div class="poster-placeholder"><b>OD</b><small>FTP DRAMA</small></div>')+'<span class="quality">FTP</span><span class="type-pill">DRAMA</span><span class="overlay">▶<small>View details</small></span></a><div class="movie-info"><h3><a href="'+href+'">'+esc(title)+'</a></h3><p>'+esc(meta.year||"FTP Library")+' · '+esc((meta.genres||[]).slice(0,1).join("")||"Drama")+'</p>'+(meta.rating!=null?'<p class="card-rating">★ '+esc(meta.rating)+'</p>':'')+'</div></article>';
+  return '<article class="movie-card"><a class="poster" href="'+href+'" aria-label="View '+esc(title)+' details">'+(poster?'<img loading="lazy" src="'+esc(poster)+'" alt="'+esc(title)+' poster">':'<div class="poster-placeholder ftp-auto-poster"><b>OD</b><strong>'+esc(title)+'</strong><small>ONLY DRAMA</small></div>')+'<span class="quality">FTP</span><span class="type-pill">DRAMA</span><span class="overlay">▶<small>View details</small></span></a><div class="movie-info"><h3><a href="'+href+'">'+esc(title)+'</a></h3><p>'+esc(meta.year||"FTP Library")+' · '+esc((meta.genres||[]).slice(0,1).join("")||"Drama")+'</p>'+(meta.rating!=null?'<p class="card-rating">★ '+esc(meta.rating)+'</p>':'')+'</div></article>';
  }
  async function enrich(folder){
   const title=clean(nm(folder));if(title.length<2)return {match:null};
