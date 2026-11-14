@@ -52,23 +52,17 @@
     const localResult=window.cineverseSupabase
       ? await window.cineverseSupabase.from("movies").select("id,title,release_year,genre,language,quality,description,poster_url,backdrop_url,trailer_url,watch_url,video_url,download_url,download_links,published,created_at,media_type,rating,cast_members,runtime_minutes,content_status,seasons,episodes,tags,tmdb_id").eq("published",true).order("created_at",{ascending:false})
       : {data:[],error:null};
-    const {data:importRows,error:importError}=window.cineverseSupabase
-      ? await window.cineverseSupabase.rpc("cineverse_public_server_import_movie_ids")
+    // Only list titles that have an active Cloudflare R2 upload.
+    const {data:r2Rows,error:r2Error}=window.cineverseSupabase
+      ? await window.cineverseSupabase.from("movie_media_assets").select("movie_id").eq("is_active",true)
       : {data:[],error:null};
-    const importedIds=new Set((importRows||[]).map(x=>x.movie_id).filter(Boolean));
-    // Also show published catalog titles with an active, rights-verified external source.
-    // Public RLS exposes only verified active sources belonging to published movies.
-    const {data:externalRows,error:externalError}=window.cineverseSupabase
-      ? await window.cineverseSupabase.from("movie_video_sources").select("movie_id").eq("is_active",true).eq("rights_verified",true)
-      : {data:[],error:null};
-    const visibleIds=new Set([...importedIds,...(externalRows||[]).map(x=>x.movie_id).filter(Boolean)]);
-    localMovies=(localResult?.data||[]).filter(m=>m.media_type==="series");
+    const r2Ids=new Set((r2Rows||[]).map(x=>x.movie_id).filter(Boolean));
+    localMovies=(localResult?.data||[]).filter(m=>m.media_type==="series"&&r2Ids.has(m.id));
     movies=[...localMovies];discoverMovies=[];discoverPage=1;discoverPages=1;
     fillFilters();render();
-    if(importError)status.textContent="Could not verify server-uploaded titles. Apply the latest Supabase migration.";
+    if(r2Error)status.textContent="Could not load Cloudflare R2 video records. Check movie_media_assets public read policy.";
     else if(localResult?.error)status.textContent="Could not load Only Drama collection.";
-    else if(externalError)status.textContent="Could not load external source titles. Check the external video sources migration and public read policy.";
-    else if(!localMovies.length)status.textContent="No published dramas with an active authorized video source were found.";
+    else if(!localMovies.length)status.textContent="No published dramas with an active Cloudflare R2 video were found.";
   }
   async function loadMore(){
     if(busy)return;
