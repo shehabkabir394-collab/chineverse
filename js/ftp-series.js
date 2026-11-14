@@ -7,7 +7,7 @@
  const pth=(x,base)=>x.path||x.full_path||x.href||base.replace(/\/$/,"")+"/"+nm(x);
  const dir=x=>x.is_dir===true||x.is_directory===true||x.directory===true||x.type==="directory"||x.type==="dir"||x.kind==="directory"||x.is_dir==="true";
  const vid=x=>/\.(mkv|mp4|m4v|webm|avi|mov)$/i.test(nm(x));
- const root=$("#ftpSeriesDetail");
+ const root=$("#ftpSeriesDetail");let playerApi=null;
  async function apiList(p){const r=await fetch(BRIDGE+"/api/list?path="+encodeURIComponent(p),{cache:"no-store"});if(!r.ok)throw Error("FTP HTTP "+r.status);return listOf(await r.json())}
  async function load(){
   if(!path){root.textContent="Drama path missing.";return}
@@ -42,9 +42,11 @@
  }
  function play(p,name){
   const v=$("#ftpEpisodePlayer"),section=$("#ftpEpisodePlayerSection");
-  $("#ftpEpisodeNow").textContent=name;v.pause();v.src=BRIDGE+"/stream?path="+encodeURIComponent(p);v.load();
+  $("#ftpEpisodeNow").textContent=name;const source={quality:"1080p",url:BRIDGE+"/stream?path="+encodeURIComponent(p),mime:"video/x-matroska"};
   $("#ftpEpisodeNote").textContent="ভিডিও চালু হচ্ছে। ব্রাউজারে MKV বা E-AC-3 অডিও সমর্থিত না হলে শব্দ নাও আসতে পারে।";
-  section.scrollIntoView({behavior:"smooth",block:"start"});v.play().catch(()=>{$("#ftpEpisodeNote").textContent="Play চাপুন। শব্দ না এলে AAC অডিও সংস্করণ প্রয়োজন হতে পারে।"});
+  section.scrollIntoView({behavior:"smooth",block:"start"});
+  if(window.CineVersePlayer){if(!playerApi)playerApi=window.CineVersePlayer.mount({video:v,sources:[source],storageKey:"od-ftp-"+encodeURIComponent(path)+"-"+encodeURIComponent(p)});else playerApi.setSources([source]);}
+  else{v.src=source.url;v.load();}v.play().catch(()=>{$("#ftpEpisodeNote").textContent="Play চাপুন। শব্দ না এলে AAC অডিও সংস্করণ প্রয়োজন হতে পারে।"});
  }
  load();
 })();
