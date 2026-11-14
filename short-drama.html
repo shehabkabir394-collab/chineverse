@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="bn">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="Short drama discovery across 23 supported platforms.">
+<meta name="theme-color" content="#09090d">
+<title>Short Drama — Only Drama</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/only-drama.css">
+<link rel="stylesheet" href="css/short-drama.css">
+</head>
+<body>
+<header class="topbar"><a class="brand" href="./"><span class="mark">OD</span>Only Drama</a><nav><a href="./">HOME</a><a class="active" href="./short-drama.html">SHORT DRAMA</a></nav><div class="actions"><a href="./admin.html">Admin</a></div></header>
+<main class="short-wrap">
+<section class="short-hero"><p class="eyebrow">23 PLATFORMS • SHORT STORIES</p><h1>Short <em>Drama</em></h1><p>Explore short dramas from supported platforms in one place.</p></section>
+<section class="short-controls">
+<label>Platform<select id="platform"></select></label>
+<label>Language<select id="apiLang"><option value="en">English</option><option value="in">India</option><option value="id">Indonesia</option><option value="ko">Korean</option><option value="th">Thai</option></select></label>
+<label class="short-search">Search<input id="query" type="search" placeholder="Search drama title…"></label>
+<button id="searchBtn" class="btn primary">Search</button>
+</section>
+<div class="short-status" id="shortStatus" role="status">Choose a platform to load dramas.</div>
+<div class="short-grid" id="shortGrid"></div>
+<div class="short-actions"><button id="moreBtn" class="btn ghost" hidden>Load more</button></div>
+<dialog id="shortDialog"><button id="dialogClose" class="close" aria-label="Close">×</button><div id="shortDialogBody"></div></dialog>
+<p class="short-note">Short Drama catalog data is supplied by APIShort and the original platforms. Playback is enabled only where the content owner permits embedding or streaming.</p>
+</main>
+<footer><a class="brand" href="./"><span class="mark">OD</span>Only Drama</a><span>Only Drama · Asian stories worth discovering.</span><a href="./privacy.html">Privacy</a></footer>
+<script defer src="js/short-drama.js"></script>
+</body></html>
