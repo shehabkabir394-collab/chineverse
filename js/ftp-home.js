@@ -1,17 +1,36 @@
 (()=> {
- const BRIDGE="https://philosophy-tuning-sega-specifically.trycloudflare.com";
- const ROOT="/FILE/Dubbed TV Series & Shows/";
- const $=s=>document.querySelector(s), esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
- let current=ROOT,busy=false;
+ const BRIDGE="https://philosophy-tuning-sega-specifically.trycloudflare.com",ROOT="/FILE/Dubbed TV Series & Shows/";
+ const $=s=>document.querySelector(s),esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
  const listOf=d=>Array.isArray(d)?d:(d.items||d.entries||d.files||d.results||d.children||[]);
  const nm=x=>x.name||x.filename||x.title||x.label||"";
- const pth=x=>x.path||x.full_path||x.href||"";
+ const pth=x=>x.path||x.full_path||x.href||ROOT.replace(/\/$/,"")+"/"+nm(x);
  const dir=x=>x.is_dir===true||x.is_directory===true||x.directory===true||x.type==="directory"||x.type==="dir"||x.kind==="directory"||x.is_dir==="true";
- const vid=x=>/\.(mkv|mp4|m4v|webm|avi|mov)$/i.test(nm(x));
- const root=$("#ftpHomeGrid");
- function crumb(){const parts=current.split("/").filter(Boolean);let out='<button data-path="'+esc(ROOT)+'">All Dramas</button>';let p="";for(const s of parts){p+="/"+s;out+='<span>›</span><button data-path="'+esc(p+'/')+'">'+esc(s)+'</button>';}$("#ftpHomeBreadcrumb").innerHTML=out;$("#ftpHomeBreadcrumb").querySelectorAll("button").forEach(b=>b.onclick=()=>open(b.dataset.path));}
- function card(x){const n=nm(x),p=pth(x)||current.replace(/\/$/,"")+"/"+n;const folder=dir(x);return '<article class="movie-card ftp-folder-card"><button class="poster ftp-folder-poster" data-path="'+esc(folder?(p.endsWith("/")?p:p+"/"):"")+'" '+(!folder?'disabled':'')+'><span class="ftp-poster-symbol">'+(folder?"▣":"▶")+'</span><span class="quality">'+(folder?"DRAMA":"VIDEO")+'</span><span class="type-pill">ONLY DRAMA</span></button><div class="movie-info"><h3>'+esc(n)+'</h3><p>'+(folder?"Drama / Season folder":"Video file")+'</p>'+(folder?'<button class="btn primary ftp-folder-open" data-path="'+esc(p.endsWith("/")?p:p+"/")+'">Open Drama</button>':'')+'</div></article>';}
- async function open(path){if(busy)return;busy=true;current=path;$("#ftpHomeStatus").innerHTML='<span class="muted">Loading…</span>';root.innerHTML="";$("#ftpHomeEpisodes").classList.add("hidden");crumb();try{const r=await fetch(BRIDGE+"/api/list?path="+encodeURIComponent(path),{cache:"no-store"});if(!r.ok)throw Error("HTTP "+r.status);const d=await r.json();const items=listOf(d);const dirs=items.filter(dir).sort((a,b)=>nm(a).localeCompare(nm(b)));const videos=items.filter(vid).sort((a,b)=>nm(a).localeCompare(nm(b)));root.innerHTML=dirs.map(card).join("");$("#ftpHomeEpisodes").innerHTML=videos.length?'<div class="ftp-episode-heading"><p class="eyebrow">SEASON EPISODES</p><h2>Episodes</h2></div><div class="ftp-episode-list">'+videos.map(x=>{const p=pth(x)||current.replace(/\/$/,"")+"/"+nm(x);return '<article class="ftp-episode-row"><div><b>'+esc(nm(x))+'</b><small>Video episode</small></div><button class="btn primary ftp-home-play" data-path="'+esc(p)+'" data-name="'+esc(nm(x))+'">▶ Play</button></article>';}).join("")+'</div>':"";$("#ftpHomeEpisodes").classList.toggle("hidden",!videos.length);root.querySelectorAll(".ftp-folder-open,.ftp-folder-poster").forEach(b=>{if(b.dataset.path)b.onclick=()=>open(b.dataset.path);});$("#ftpHomeEpisodes").querySelectorAll(".ftp-home-play").forEach(b=>b.onclick=()=>play(b.dataset.path,b.dataset.name));$("#ftpHomeStatus").innerHTML='<span class="muted">'+dirs.length+' drama/season folder(s) · '+videos.length+' episode(s)</span>';if(!dirs.length&&!videos.length)$("#ftpHomeStatus").innerHTML='<span class="muted">এই ফোল্ডারে কোনো Drama বা Episode পাওয়া যায়নি।</span>';}catch(e){$("#ftpHomeStatus").innerHTML='<span class="muted">লাইব্রেরি লোড হয়নি: '+esc(e.message)+'. Laptop Bridge ও Tunnel চালু আছে কি না দেখো।</span>';}finally{busy=false;}}
- function play(path,name){const box=$("#ftpHomePlayerSection"),v=$("#ftpHomePlayer");box.classList.remove("hidden");$("#ftpHomeNowPlaying").textContent=name;$("#ftpHomePlayerNote").textContent="ভিডিও লোড হচ্ছে… অডিও codec ব্রাউজারে সমর্থিত না হলে শব্দ নাও আসতে পারে।";v.pause();v.src=BRIDGE+"/stream?path="+encodeURIComponent(path);v.load();box.scrollIntoView({behavior:"smooth",block:"start"});v.play().catch(()=>{$("#ftpHomePlayerNote").textContent="ভিডিও লোড হয়েছে। MKV বা অডিও codec ব্রাউজার সমর্থন না করলে MP4/AAC কপি প্রয়োজন হতে পারে।"});}
- $("#ftpHomeRefresh").onclick=()=>open(current);open(ROOT);
+ const grid=$("#ftpHomeGrid"),status=$("#ftpHomeStatus");
+ const clean=s=>String(s).replace(/\[[^\]]*\]/g," ").replace(/\([^)]*\)/g," ").replace(/\b(19|20)\d{2}\b/g," ").replace(/\b(dual audio|hindi dubbed|dubbed|season|complete|1080p|720p|480p|2160p|4k|web-dl|bluray|webrip|x264|x265|hevc)\b/gi," ").replace(/[._-]+/g," ").replace(/\s+/g," ").trim();
+ function card(x,m){
+  const name=nm(x),p=pth(x),meta=m||{},poster=meta.poster||"",title=meta.title||clean(name)||name;
+  const href="ftp-series.html?path="+encodeURIComponent(p)+"&title="+encodeURIComponent(title)+(meta.id?"&tmdb="+encodeURIComponent(meta.id):"");
+  return '<article class="movie-card"><a class="poster" href="'+href+'" aria-label="View '+esc(title)+' details">'+(poster?'<img loading="lazy" src="'+esc(poster)+'" alt="'+esc(title)+' poster">':'<div class="poster-placeholder"><b>OD</b><small>FTP DRAMA</small></div>')+'<span class="quality">FTP</span><span class="type-pill">DRAMA</span><span class="overlay">▶<small>View details</small></span></a><div class="movie-info"><h3><a href="'+href+'">'+esc(title)+'</a></h3><p>'+esc(meta.year||"FTP Library")+' · '+esc((meta.genres||[]).slice(0,1).join("")||"Drama")+'</p>'+(meta.rating!=null?'<p class="card-rating">★ '+esc(meta.rating)+'</p>':'')+'</div></article>';
+ }
+ async function enrich(folder){
+  const title=clean(nm(folder));if(title.length<2)return {match:null};
+  const key="od-ftp-tv-"+title.toLowerCase();
+  try{const cached=localStorage.getItem(key);if(cached)return JSON.parse(cached)}catch{}
+  try{const r=await fetch("/api/tmdb-tv-search?q="+encodeURIComponent(title));const d=r.ok?await r.json():{match:null};try{localStorage.setItem(key,JSON.stringify(d))}catch{}return d}catch{return {match:null}}
+ }
+ async function load(){
+  status.innerHTML='<span class="muted">FTP drama catalog loading…</span>';grid.innerHTML="";
+  try{
+   const r=await fetch(BRIDGE+"/api/list?path="+encodeURIComponent(ROOT),{cache:"no-store"});if(!r.ok)throw Error("FTP HTTP "+r.status);
+   const folders=listOf(await r.json()).filter(dir).sort((a,b)=>nm(a).localeCompare(nm(b)));
+   if(!folders.length){status.textContent="No drama folders found in FTP.";return}
+   const results=new Array(folders.length);let cursor=0;
+   async function worker(){while(cursor<folders.length){const i=cursor++;results[i]=await enrich(folders[i]);}}
+   await Promise.all(Array.from({length:Math.min(4,folders.length)},worker));
+   grid.innerHTML=folders.map((f,i)=>card(f,results[i]?.match||null)).join("");
+   status.innerHTML='<span class="muted">'+folders.length+' FTP dramas · posters and details matched from TMDB where available</span>';
+  }catch(e){status.innerHTML='<span class="muted">FTP catalog load failed: '+esc(e.message)+'. Laptop Bridge ও Tunnel চালু আছে কি না দেখো।</span>'}
+ }
+ $("#ftpHomeRefresh").onclick=()=>{try{Object.keys(localStorage).filter(k=>k.startsWith("od-ftp-tv-")).forEach(k=>localStorage.removeItem(k))}catch{}load()};
+ load();
 })();
