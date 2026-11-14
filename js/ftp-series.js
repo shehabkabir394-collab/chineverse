@@ -1,5 +1,5 @@
 (()=> {
- const BRIDGE="https://search-would-screenshots-sphere.trycloudflare.com";
+ const BRIDGE="https://coordinate-winston-acer-controller.trycloudflare.com";
  const $=s=>document.querySelector(s),esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
  const params=new URLSearchParams(location.search),path=params.get("path")||"",title=params.get("title")||"Drama",tmdb=params.get("tmdb")||"";
  const listOf=d=>Array.isArray(d)?d:(d.items||d.entries||d.files||d.results||d.children||[]);

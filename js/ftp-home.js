@@ -1,5 +1,5 @@
 (()=> {
- const BRIDGE="https://search-would-screenshots-sphere.trycloudflare.com",ROOT="/FILE/Dubbed TV Series & Shows/";
+ const BRIDGE="https://coordinate-winston-acer-controller.trycloudflare.com",ROOT="/FILE/Dubbed TV Series & Shows/";
  const $=s=>document.querySelector(s),esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
  const listOf=d=>Array.isArray(d)?d:(d.items||d.entries||d.files||d.results||d.children||[]);
  const nm=x=>x.name||x.filename||x.title||x.label||"";
