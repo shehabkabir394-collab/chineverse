@@ -47,16 +47,15 @@
     $("#year").textContent=new Date().getFullYear();status.textContent="Loading Only Drama…";
     const db=window.cineverseSupabase;
     if(!db){status.textContent="Supabase connection is not configured.";render();return;}
-    const [localResult,assetResult]=await Promise.all([
-      db.from("movies").select("id,title,release_year,genre,language,quality,description,poster_url,backdrop_url,trailer_url,watch_url,video_url,download_url,download_links,published,created_at,media_type,rating,cast_members,runtime_minutes,content_status,seasons,episodes,tags,tmdb_id").eq("published",true).eq("media_type","series").order("created_at",{ascending:false}),
-      db.from("series_episode_media_assets").select("series_id").eq("is_active",true)
-    ]);
-    if(assetResult.error){localMovies=[];movies=[];fillFilters();render();status.textContent="Could not load R2 episode records: "+assetResult.error.message;return;}
-    if(localResult.error){localMovies=[];movies=[];fillFilters();render();status.textContent="Could not load Only Drama collection: "+localResult.error.message;return;}
-    const r2SeriesIds=new Set((assetResult.data||[]).map(x=>x.series_id).filter(Boolean));
-    localMovies=(localResult.data||[]).filter(m=>r2SeriesIds.has(m.id));
+    const {data:localResult,error:localError}=await db.from("movies")
+      .select("id,title,release_year,genre,language,quality,description,poster_url,backdrop_url,trailer_url,watch_url,video_url,download_url,download_links,published,created_at,media_type,rating,cast_members,runtime_minutes,content_status,seasons,episodes,tags,tmdb_id")
+      .eq("published",true).eq("media_type","series").order("created_at",{ascending:false});
+    if(localError){localMovies=[];movies=[];fillFilters();render();status.textContent="Could not load Only Drama collection: "+localError.message;return;}
+    // Show every published drama in Recently Updated, whether or not its episodes are hosted in R2.
+    // Titles with poster_url use the same poster card design; video availability is handled on the detail page.
+    localMovies=localResult||[];
     movies=[...localMovies];fillFilters();render();
-    if(!localMovies.length)status.textContent="No published dramas with active Cloudflare R2 episode videos were found.";
+    if(!localMovies.length)status.textContent="No published dramas were found. Add or publish dramas from Admin Studio.";
   }
   async function loadMore(){if(busy)return;busy=true;render();page++;busy=false;render();}
   function remoteSearch(){page=1;searchMode=false;movies=[...localMovies];render();}
