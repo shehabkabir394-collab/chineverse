@@ -24,10 +24,19 @@
    const r=await fetch(BRIDGE+"/api/list?path="+encodeURIComponent(ROOT),{cache:"no-store"});if(!r.ok)throw Error("FTP HTTP "+r.status);
    const folders=listOf(await r.json()).filter(dir).sort((a,b)=>nm(a).localeCompare(nm(b)));
    if(!folders.length){status.textContent="No drama folders found in FTP.";return}
-   const results=new Array(folders.length);let cursor=0;
-   async function worker(){while(cursor<folders.length){const i=cursor++;results[i]=await enrich(folders[i]);}}
+   // Show every folder immediately with a branded poster; TMDB enrichment runs in background.
+   grid.innerHTML=folders.map(f=>card(f,null)).join("");
+   status.innerHTML='<span class="muted">'+folders.length+' dramas found · loading posters…</span>';
+   let cursor=0,done=0;
+   async function worker(){
+    while(cursor<folders.length){
+     const i=cursor++,result=await enrich(folders[i]);
+     if(result?.match&&grid.children[i])grid.children[i].outerHTML=card(folders[i],result.match);
+     done++;
+     status.innerHTML='<span class="muted">'+folders.length+' FTP dramas · checking posters '+done+'/'+folders.length+'</span>';
+    }
+   }
    await Promise.all(Array.from({length:Math.min(4,folders.length)},worker));
-   grid.innerHTML=folders.map((f,i)=>card(f,results[i]?.match||null)).join("");
    status.innerHTML='<span class="muted">'+folders.length+' FTP dramas · posters and details matched from TMDB where available</span>';
   }catch(e){status.innerHTML='<span class="muted">FTP catalog load failed: '+esc(e.message)+'. Laptop Bridge ও Tunnel চালু আছে কি না দেখো।</span>'}
  }
