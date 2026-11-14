@@ -4,7 +4,6 @@
   const PAGE_SIZE=24;
   const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   const safeUrl=s=>/^https:\/\//i.test(s||"")?s:"";
-  const hasPlayableLink=(m,assetIds)=>[m.video_url,m.watch_url,m.download_url].some(safeUrl)||(Array.isArray(m.download_links)&&m.download_links.some(x=>safeUrl(x?.url)))||assetIds.has(m.id);
   const typeLabel=m=>"DRAMA";
   const countryAliases={Korean:["korean","korea","south korea","k-drama","korean drama","한국"],Chinese:["chinese","china","c-drama","chinese drama","中国"],Japanese:["japanese","japan","j-drama","japanese drama","日本"],Thai:["thai","thailand","thai drama","lakorn"]};
   function dramaCountry(m){const text=[m.language,m.tags].filter(Boolean).join(" ").toLowerCase();for(const [country,aliases] of Object.entries(countryAliases)){if(aliases.some(alias=>text.includes(alias)))return country;}return "";}
@@ -44,42 +43,29 @@
     $("#genre").innerHTML='<option value="">All genres</option>'+genres.map(x=>`<option>${esc(x)}</option>`).join("");
     $("#language").innerHTML='<option value="">All languages</option>'+languages.map(x=>`<option>${esc(x)}</option>`).join("");
   }
-  let discoverPage=1,discoverPages=1,discoverMovies=[];
-  const dedupe=list=>{const seen=new Set();return list.filter(m=>{const k=m.tmdb_id?"tmdb:"+m.tmdb_id:(m.title||"").toLowerCase()+"|"+(m.release_year||"");if(seen.has(k))return false;seen.add(k);return true})};
-  async function getJson(url){const r=await fetch(url);const d=await r.json();if(!r.ok)throw Error(d.error||"Catalog request failed");return d}
   async function load(){
     $("#year").textContent=new Date().getFullYear();status.textContent="Loading Only Drama…";
-    const localResult=window.cineverseSupabase
-      ? await window.cineverseSupabase.from("movies").select("id,title,release_year,genre,language,quality,description,poster_url,backdrop_url,trailer_url,watch_url,video_url,download_url,download_links,published,created_at,media_type,rating,cast_members,runtime_minutes,content_status,seasons,episodes,tags,tmdb_id").eq("published",true).order("created_at",{ascending:false})
-      : {data:[],error:null};
-    // Only list titles that have an active Cloudflare R2 upload.
-    const {data:r2Rows,error:r2Error}=window.cineverseSupabase
-      ? await window.cineverseSupabase.from("movie_media_assets").select("movie_id").eq("is_active",true)
-      : {data:[],error:null};
-    const r2Ids=new Set((r2Rows||[]).map(x=>x.movie_id).filter(Boolean));
-    localMovies=(localResult?.data||[]).filter(m=>m.media_type==="series"&&r2Ids.has(m.id));
-    movies=[...localMovies];discoverMovies=[];discoverPage=1;discoverPages=1;
-    fillFilters();render();
-    if(r2Error)status.textContent="Could not load Cloudflare R2 video records. Check movie_media_assets public read policy.";
-    else if(localResult?.error)status.textContent="Could not load Only Drama collection.";
-    else if(!localMovies.length)status.textContent="No published dramas with an active Cloudflare R2 video were found.";
+    const db=window.cineverseSupabase;
+    if(!db){status.textContent="Supabase connection is not configured.";render();return;}
+    const [localResult,assetResult]=await Promise.all([
+      db.from("movies").select("id,title,release_year,genre,language,quality,description,poster_url,backdrop_url,trailer_url,watch_url,video_url,download_url,download_links,published,created_at,media_type,rating,cast_members,runtime_minutes,content_status,seasons,episodes,tags,tmdb_id").eq("published",true).eq("media_type","series").order("created_at",{ascending:false}),
+      db.from("series_episode_media_assets").select("series_id").eq("is_active",true)
+    ]);
+    if(assetResult.error){localMovies=[];movies=[];fillFilters();render();status.textContent="Could not load R2 episode records: "+assetResult.error.message;return;}
+    if(localResult.error){localMovies=[];movies=[];fillFilters();render();status.textContent="Could not load Only Drama collection: "+localResult.error.message;return;}
+    const r2SeriesIds=new Set((assetResult.data||[]).map(x=>x.series_id).filter(Boolean));
+    localMovies=(localResult.data||[]).filter(m=>r2SeriesIds.has(m.id));
+    movies=[...localMovies];fillFilters();render();
+    if(!localMovies.length)status.textContent="No published dramas with active Cloudflare R2 episode videos were found.";
   }
-  async function loadMore(){
-    if(busy)return;
-    busy=true;render();
-    page++;
-    busy=false;render();
-  }
-  async function remoteSearch(){
-    page=1;searchMode=false;movies=[...localMovies];render();
-  }
+  async function loadMore(){if(busy)return;busy=true;render();page++;busy=false;render();}
+  function remoteSearch(){page=1;searchMode=false;movies=[...localMovies];render();}
   $("#search").oninput=()=>{clearTimeout(searchTimer);searchTimer=setTimeout(remoteSearch,450);};
   ["#genre","#language","#quality","#sort"].forEach(s=>$(s).onchange=()=>{page=1;render();});
   if($("#discoverCategory"))$("#discoverCategory").onchange=()=>{page=1;searchMode=false;$("#search").value="";load();};
   $("#chips").onclick=e=>{const b=e.target.closest("[data-filter]");if(!b)return;category=b.dataset.filter;page=1;$("#chips").querySelectorAll("[data-filter]").forEach(x=>x.classList.toggle("selected",x===b));render();};
   document.querySelectorAll("nav [data-filter]").forEach(a=>a.onclick=()=>{category=a.dataset.filter;page=1;$("#chips").querySelectorAll("[data-filter]").forEach(x=>x.classList.toggle("selected",x.dataset.filter===category));render();});
-
   $("#loadMore").onclick=loadMore;
-  $("#lang").onclick=()=>{lang=lang==="en"?"bn":"en";document.documentElement.lang=lang;$(".hero-copy>p:not(.eyebrow)").textContent=lang==="bn"?"মুভি, ওয়েব সিরিজ ও অ্যানিমে খুঁজুন। Genre, রেটিং ও কোয়ালিটি ফিল্টার ব্যবহার করুন।":"Discover movies, series and anime. Explore genres, ratings and quality options.";$ (".hero-copy .primary").textContent=lang==="bn"?"▶ ক্যাটালগ দেখুন":"▶ Explore Catalog";$("#lang").textContent=lang==="bn"?"English":"বাংলা";};
+  $("#lang").onclick=()=>{lang=lang==="en"?"bn":"en";document.documentElement.lang=lang;$(".hero-copy>p:not(.eyebrow)").textContent=lang==="bn"?"মুভি, ওয়েব সিরিজ ও অ্যানিমে খুঁজুন। Genre, রেটিং ও কোয়ালিটি ফিল্টার ব্যবহার করুন।":"Discover Korean, Chinese, Japanese and Thai dramas. Explore genres, ratings and quality options.";$(".hero-copy .primary").textContent=lang==="bn"?"▶ ক্যাটালগ দেখুন":"▶ Browse Dramas";$("#lang").textContent=lang==="bn"?"English":"বাংলা";};
   $("#close").onclick=()=>$("#dialog").close();$("#dialog").onclick=e=>{if(e.target===$("#dialog"))$("#dialog").close();};load();
 })();
