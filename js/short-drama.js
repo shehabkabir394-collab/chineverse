@@ -17,30 +17,39 @@ function render(items){lastItems=items.map(normalize).filter(x=>x.title);grid.in
 async function load(){if(loading)return;loading=true;status.textContent="Loading "+active[0]+"…";grid.innerHTML="";try{const data=await api(route());const items=findArray(data);if(!items.length){status.textContent="No drama list found in this response. Check this platform's API format.";grid.innerHTML='<pre class="short-error">'+esc(JSON.stringify(data,null,2).slice(0,4500))+'</pre>'}else{render(items);status.textContent=active[0]+" · "+items.length+" results"+(searchMode?" · Search":" · Popular / Browse")}}catch(e){status.innerHTML='<span class="short-error">'+esc(e.message)+'</span>'}finally{loading=false}}
 async function showDetail(i){
  const m=lastItems[i];if(!m)return;
- const body=$("#shortDialogBody");
- dialog.showModal();
- body.innerHTML='<div class="short-detail"><span class="short-badge">'+esc(active[0])+'</span><h2>'+esc(m.title)+'</h2><p>'+esc(m.desc||"")+'</p><p>Drama ID: '+esc(m.id||"Not detected")+'</p><p>Loading episode information…</p></div>';
- if(active[1]!=="melolo"){
-  body.innerHTML='<div class="short-detail"><span class="short-badge">'+esc(active[0])+'</span><h2>'+esc(m.title)+'</h2><p>'+esc(m.desc||"")+'</p><p>Drama ID: '+esc(m.id||"Not detected")+'</p><p>এই প্ল্যাটফর্মের episode-detail endpoint এখনো যাচাই করা হয়নি।</p></div>';
+ const body=$("#shortDialogBody");dialog.showModal();
+ const lang=encodeURIComponent($("#apiLang").value||"id");
+ const base='<div class="short-detail"><span class="short-badge">'+esc(active[0])+'</span><h2>'+esc(m.title)+'</h2><p>'+esc(m.desc||"")+'</p><p>Drama ID: '+esc(m.id||"Not detected")+'</p>';
+ body.innerHTML=base+'<p>Loading drama details…</p></div>';
+ if(active[1]==="shortmax"||["blinkdrama","vibeshort","storyreel","dramarush"].includes(active[1])){
+  if(!m.id){body.innerHTML=base+'<p>Drama ID পাওয়া যায়নি।</p></div>';return}
+  try{
+   const [detail,episodeData]=await Promise.all([
+    api("api/v1/detail/"+encodeURIComponent(m.id)+"?lang="+lang),
+    api("api/v1/alleps/"+encodeURIComponent(m.id)+"?lang="+lang)
+   ]);
+   const d=detail?.data||detail?.result||detail;
+   const eps=findArray(episodeData);
+   const title=pick(d,["title","name","bookName","book_name","dramaName"])||m.title;
+   const desc=pick(d,["description","intro","summary","desc"])||m.desc;
+   body.innerHTML='<div class="short-detail"><span class="short-badge">'+esc(active[0])+' · '+eps.length+' EPISODES</span><h2>'+esc(title)+'</h2><p>'+esc(desc)+'</p><div class="short-player-shell"><div class="short-player-screen"><span>▶</span><strong>ভিডিও প্লেয়ার</strong><small>অনুমোদিত playback source যুক্ত হলে এখানে চলবে</small></div><p class="short-playback-note">ShortMax APIShort documentation-এ আলাদা Watch/Play endpoint নেই। তাই এই তালিকা থেকে ভিডিও চালু করা যাচ্ছে না। অনুমোদিত video source প্রয়োজন।</p></div><h3>Episodes</h3><div class="short-episodes">'+(eps.length?eps.map((ep,n)=>{const no=pick(ep,["episode","episodeNo","ep","index","number","chapter"])||n+1;const name=pick(ep,["title","name","episodeName"])||("Episode "+no);return '<button type="button" class="short-episode" data-ep="'+esc(no)+'"><span>'+esc(name)+'</span><small>'+esc(pick(ep,["duration","time"])||"")+'</small></button>'}).join(""):'<p>Episode data পাওয়া যায়নি।</p>')+'</div></div>';
+   body.querySelectorAll(".short-episode").forEach(btn=>btn.addEventListener("click",()=>{body.querySelectorAll(".short-episode").forEach(x=>x.classList.toggle("active",x===btn));const note=body.querySelector(".short-playback-note");if(note)note.textContent=btn.querySelector("span").textContent+" নির্বাচন করা হয়েছে। ShortMax-এর জন্য APIShort-এ সরাসরি Watch/Play endpoint নেই; অনুমোদিত playback source প্রয়োজন।"}));
+  }catch(e){body.innerHTML=base+'<p class="short-error">Detail/Episode লোড হয়নি: '+esc(e.message)+'</p></div>'}
   return;
  }
- if(!m.id){body.querySelector(".short-detail").insertAdjacentHTML("beforeend","<p>Drama ID পাওয়া যায়নি।</p>");return}
- try{
-  const payload=await api("api/detail/"+encodeURIComponent(m.id)+"?lang="+encodeURIComponent($("#apiLang").value||"id"));
-  const d=payload?.data||payload?.result||payload;
-  const videos=Array.isArray(d?.videos)?d.videos:(Array.isArray(d?.data?.videos)?d.data.videos:[]);
-  const title=d?.title||d?.bookName||m.title;
-  const total=d?.episodes||d?.totalEpisodes||videos.length;
-  body.innerHTML='<div class="short-detail"><span class="short-badge">MELOLO · '+esc(total||videos.length)+' EPISODES</span><h2>'+esc(title)+'</h2><p>'+esc(d?.description||d?.intro||m.desc||"")+'</p><div class="short-player-shell"><div class="short-player-screen"><span>▶</span><strong>ভিডিও প্লেয়ার</strong><small>অনুমোদিত playback source যুক্ত হলে এখানে চলবে</small></div><p class="short-playback-note">Episode তালিকা দেখা যাবে। Melolo-এর ভিডিও সরাসরি এমবেড করার অনুমতি নিশ্চিত না হওয়ায় এখানে API-এর signed video URL চালু করা হয়নি।</p></div><h3>Episodes</h3><div class="short-episodes">'+(videos.length?videos.map((ep,n)=>'<button type="button" class="short-episode" data-ep="'+esc(ep.episode||n+1)+'"><span>Episode '+esc(ep.episode||n+1)+'</span><small>'+(ep.duration?esc(Math.floor(Number(ep.duration)/60))+' min':'')+'</small></button>').join(""):'<p>কোনো Episode পাওয়া যায়নি।</p>')+'</div></div>';
-  body.querySelectorAll(".short-episode").forEach(btn=>btn.addEventListener("click",()=>{
-   const selected=btn.dataset.ep;
-   body.querySelectorAll(".short-episode").forEach(x=>x.classList.toggle("active",x===btn));
-   const note=body.querySelector(".short-playback-note");
-   if(note)note.textContent="Episode "+selected+" নির্বাচন করা হয়েছে। ভিডিও চালাতে কনটেন্ট মালিকের অনুমোদিত embed/playback source প্রয়োজন।";
-  }));
- }catch(e){
-  body.innerHTML='<div class="short-detail"><h2>'+esc(m.title)+'</h2><p class="short-error">Episode তথ্য লোড হয়নি: '+esc(e.message)+'</p></div>';
+ if(active[1]==="melolo"){
+  if(!m.id){body.innerHTML=base+'<p>Drama ID পাওয়া যায়নি।</p></div>';return}
+  try{
+   const payload=await api("api/detail/"+encodeURIComponent(m.id)+"?lang="+lang);
+   const d=payload?.data||payload?.result||payload;
+   const videos=Array.isArray(d?.videos)?d.videos:(Array.isArray(d?.data?.videos)?d.data.videos:[]);
+   const total=d?.episodes||d?.totalEpisodes||videos.length;
+   body.innerHTML='<div class="short-detail"><span class="short-badge">MELOLO · '+esc(total||videos.length)+' EPISODES</span><h2>'+esc(d?.title||d?.bookName||m.title)+'</h2><p>'+esc(d?.description||d?.intro||m.desc||"")+'</p><div class="short-player-shell"><div class="short-player-screen"><span>▶</span><strong>ভিডিও প্লেয়ার</strong><small>অনুমোদিত playback source যুক্ত হলে এখানে চলবে</small></div><p class="short-playback-note">কনটেন্ট মালিকের অনুমোদিত embed/playback source নিশ্চিত না হওয়ায় সরাসরি ভিডিও চালু করা হয়নি।</p></div><h3>Episodes</h3><div class="short-episodes">'+(videos.length?videos.map((ep,n)=>'<button type="button" class="short-episode" data-ep="'+esc(ep.episode||n+1)+'"><span>Episode '+esc(ep.episode||n+1)+'</span><small>'+(ep.duration?esc(Math.floor(Number(ep.duration)/60))+' min':'')+'</small></button>').join(""):'<p>কোনো Episode পাওয়া যায়নি।</p>')+'</div></div>';
+   body.querySelectorAll(".short-episode").forEach(btn=>btn.addEventListener("click",()=>{body.querySelectorAll(".short-episode").forEach(x=>x.classList.toggle("active",x===btn));const note=body.querySelector(".short-playback-note");if(note)note.textContent="Episode "+btn.dataset.ep+" নির্বাচন করা হয়েছে। অনুমোদিত playback source প্রয়োজন।"}));
+  }catch(e){body.innerHTML=base+'<p class="short-error">Episode তথ্য লোড হয়নি: '+esc(e.message)+'</p></div>'}
+  return;
  }
+ body.innerHTML=base+'<p>এই প্ল্যাটফর্মের episode-detail endpoint এখনো যুক্ত হয়নি।</p></div>';
 }
 $("#dialogClose").onclick=()=>dialog.close();
 $platform.onchange=()=>{active=platforms.find(p=>p[1]===$platform.value)||platforms[0];searchMode=false;$("#query").value="";load()};
