@@ -43,7 +43,7 @@
  function play(p,name){
   const v=$("#ftpEpisodePlayer"),section=$("#ftpEpisodePlayerSection");
   section.hidden=false;
-  $("#ftpEpisodeNow").textContent=name;const source={quality:"1080p",url:BRIDGE+"/stream?path="+encodeURIComponent(p),mime:"video/x-matroska"};
+  $("#ftpEpisodeNow").textContent=name;const source={quality:"1080p",url:BRIDGE+"/play?path="+encodeURIComponent(p),mime:"video/x-matroska"};
   $("#ftpEpisodeNote").textContent="ভিডিও চালু হচ্ছে। ব্রাউজারে MKV বা E-AC-3 অডিও সমর্থিত না হলে শব্দ নাও আসতে পারে।";
   section.scrollIntoView({behavior:"smooth",block:"start"});
   if(window.CineVersePlayer){if(!playerApi)playerApi=window.CineVersePlayer.mount({video:v,sources:[source],storageKey:"od-ftp-"+encodeURIComponent(path)+"-"+encodeURIComponent(p)});else playerApi.setSources([source]);}
