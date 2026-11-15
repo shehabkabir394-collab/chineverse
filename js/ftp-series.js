@@ -43,11 +43,16 @@
  function play(p,name){
   const v=$("#ftpEpisodePlayer"),section=$("#ftpEpisodePlayerSection");
   section.hidden=false;
-  $("#ftpEpisodeNow").textContent=name;const source={quality:"1080p",url:BRIDGE+"/hls/index.m3u8?path="+encodeURIComponent(p),mime:"application/vnd.apple.mpegurl"};
-  $("#ftpEpisodeNote").textContent="ভিডিও চালু হচ্ছে। ব্রাউজারে MKV বা E-AC-3 অডিও সমর্থিত না হলে শব্দ নাও আসতে পারে।";
+  $("#ftpEpisodeNow").textContent=name;
+  const sources=[
+   {quality:"720p",url:BRIDGE+"/hls/index.m3u8?quality=720p&path="+encodeURIComponent(p),mime:"application/vnd.apple.mpegurl"},
+   {quality:"1080p",url:BRIDGE+"/hls/index.m3u8?quality=1080p&path="+encodeURIComponent(p),mime:"application/vnd.apple.mpegurl"}
+  ];
+  $("#ftpEpisodeNote").textContent="720p ডিফল্ট। Quality থেকে চাইলে 1080p নির্বাচন করুন। Hindi audio পাওয়া গেলে সেটিই চালু হবে।";
   section.scrollIntoView({behavior:"smooth",block:"start"});
-  if(window.CineVersePlayer){if(!playerApi)playerApi=window.CineVersePlayer.mount({video:v,sources:[source],storageKey:"od-ftp-"+encodeURIComponent(path)+"-"+encodeURIComponent(p)});else playerApi.setSources([source]);}
-  else{v.src=source.url;v.load();}v.play().catch(()=>{$("#ftpEpisodeNote").textContent="Play চাপুন। শব্দ না এলে AAC অডিও সংস্করণ প্রয়োজন হতে পারে।"});
+  if(window.CineVersePlayer){if(!playerApi)playerApi=window.CineVersePlayer.mount({video:v,sources,storageKey:"od-ftp-"+encodeURIComponent(path)+"-"+encodeURIComponent(p)});else playerApi.setSources(sources);}
+  else{v.src=sources[0].url;v.load();}
+
  }
  load();
 })();
