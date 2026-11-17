@@ -27,6 +27,29 @@
     });
     return values.filter(Boolean).map(norm);
   }
+  function hindiBadge(item) {
+    const language = String(item.language || "").toUpperCase();
+    const title = String(item.title || "").toUpperCase();
+
+    if (language.includes("HINDI DUB") || title.includes("HINDI DUB")) {
+      return "HINDI DUBBED";
+    }
+    if (language.includes("HINDI") || /\[HINDI\]|\(HINDI\)/.test(title)) {
+      return "HINDI";
+    }
+    return "";
+  }
+
+  function sortItems(items) {
+    return [...items].sort((a, b) => {
+      const ah = hindiBadge(a) ? 1 : 0;
+      const bh = hindiBadge(b) ? 1 : 0;
+      if (ah !== bh) return bh - ah;
+      return (Number(b.uploadedAtMs) || 0) -
+             (Number(a.uploadedAtMs) || 0);
+    });
+  }
+
   function matching(item){
     const values=categoryValues(item);
     const cat=!selectedCategory || values.some(v=>v===norm(selectedCategory)||v.includes(norm(selectedCategory))||
@@ -37,16 +60,17 @@
   }
   function card(item){
     const title=item.title||"Untitled",poster=safeImage(item.poster||item.previewImage),path=itemPath(item);
-    return '<article class="movie-card movie-api-card"><button class="movie-api-poster" type="button" data-movie-path="'+esc(path)+'" '+(path?"":"disabled")+' aria-label="Open '+esc(title)+'">'+(poster?'<img loading="lazy" src="'+esc(poster)+'" alt="'+esc(title)+' poster">':'<span class="movie-api-placeholder">MOVIESTREAM BD</span>')+'<span class="quality">'+esc(item.quality||item.typeBadge||"HD")+'</span><span class="overlay">▶<small>View details &amp; watch</small></span></button><div class="movie-info"><h3>'+esc(title)+'</h3><p>'+esc(item.country||item.language||item.typeBadge||"MovieStream BD")+'</p><p class="card-rating">'+(item.rating!=null?"★ "+esc(item.rating):"")+'</p></div></article>';
+    const hindiLabel=hindiBadge(item);
+    return '<article class="movie-card movie-api-card"><button class="movie-api-poster" type="button" data-movie-path="'+esc(path)+'" '+(path?"":"disabled")+' aria-label="Open '+esc(title)+'">'+(poster?'<img loading="lazy" src="'+esc(poster)+'" alt="'+esc(title)+' poster">':'<span class="movie-api-placeholder">MOVIESTREAM BD</span>')+'<span class="quality">'+esc(item.quality||item.typeBadge||"HD")+'</span>'+(hindiLabel?'<span class="movie-api-language-badge">'+esc(hindiLabel)+'</span>':'')+'<span class="overlay">▶<small>View details &amp; watch</small></span></button><div class="movie-info"><h3>'+esc(title)+'</h3><p>'+esc(item.country||item.language||item.typeBadge||"MovieStream BD")+'</p><p class="card-rating">'+(item.rating!=null?"★ "+esc(item.rating):"")+'</p></div></article>';
   }
   function sectionHtml(title,badge,items){return items.length?'<section class="movie-api-row"><div class="section-head"><div><p class="eyebrow">'+esc(badge)+'</p><h2>'+esc(title)+'</h2></div></div><div class="grid">'+items.map(card).join("")+'</div></section>':"";}
   function render(){
     if(!home)return;
     const sections=Array.isArray(home.sections)?home.sections:[],trending=Array.isArray(home.trending)?home.trending:[],coming=Array.isArray(home.comingSoon)?home.comingSoon:[];
     let out="";
-    if(trending.length)out+=sectionHtml("Trending Now","POPULAR",trending.filter(matching));
-    sections.forEach(s=>out+=sectionHtml(text(s.title)||"Discover",text(s.badge)||"COLLECTION",(Array.isArray(s.items)?s.items:[]).filter(matching)));
-    if(coming.length&&!searchText&&!selectedCategory)out+=sectionHtml("Coming Soon","UPCOMING",coming);
+    if(trending.length)out+=sectionHtml("Trending Now","POPULAR",sortItems(trending.filter(matching)));
+    sections.forEach(s=>out+=sectionHtml(text(s.title)||"Discover",text(s.badge)||"COLLECTION",sortItems((Array.isArray(s.items)?s.items:[]).filter(matching))));
+    if(coming.length&&!searchText&&!selectedCategory)out+=sectionHtml("Coming Soon","UPCOMING",sortItems(coming));
     root.innerHTML=out||'<p class="muted">No titles match your search or category.</p>';
     status.textContent=trending.length+" trending · "+sections.length+" collections · "+coming.length+" upcoming";
   }

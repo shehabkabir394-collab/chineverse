@@ -105,3 +105,24 @@
 .movie-api-episode .btn {
   flex-shrink: 0;
 }
+
+
+/* Hindi language badge on poster cards */
+.movie-api-poster { position: relative; }
+.movie-api-language-badge {
+  position: absolute;
+  top: 39px;
+  left: 10px;
+  z-index: 3;
+  padding: 4px 7px;
+  border: 1px solid #ffd36a88;
+  border-radius: 6px;
+  background: #8b4b12e8;
+  color: #fff4d6;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .5px;
+  line-height: 1.3;
+  pointer-events: none;
+  backdrop-filter: blur(8px);
+}
