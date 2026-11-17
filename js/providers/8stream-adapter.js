@@ -10,7 +10,7 @@
 
   const CONFIG = Object.freeze({
     provider: "8stream",
-    enabled: false,
+    enabled: true,
     rightsVerified: false,
     apiBaseUrl: ""
   });
@@ -48,7 +48,7 @@
       .map(entry => entry.item);
   }
 
-  async function getMediaInfo() {
+  function isAvailable() {\n    return CONFIG.enabled && CONFIG.rightsVerified && /^https:\\/\\//i.test(CONFIG.apiBaseUrl);\n  }\n\n  async function getMediaInfo() {
     return {
       success: false,
       provider: CONFIG.provider,
@@ -77,7 +77,7 @@
 
   window.OnlyDramaProviders = window.OnlyDramaProviders || {};
   window.OnlyDramaProviders.eightStream = Object.freeze({
-    config: CONFIG,
+    config: CONFIG,\n    isAvailable,
     languagePriority: LANGUAGE_PRIORITY,
     normalizeLanguage,
     languageRank,
