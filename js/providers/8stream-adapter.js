@@ -11,11 +11,7 @@
     apiBaseUrl: "https://8-stream-api.vercel.app"
   });
 
-  const LANGUAGE_PRIORITY = Object.freeze([
-    "hindi-dubbed",
-    "bengali",
-    "english"
-  ]);
+  const LANGUAGE_PRIORITY = Object.freeze(["hindi-dubbed"]);
 
   function normalizeLanguage(value) {
     const text = String(value || "").trim().toLowerCase();
