@@ -1,6 +1,5 @@
 /* Only Drama — 8Stream provider adapter
- * Uses the documented API routes. Keep rightsVerified false until you have
- * permission for the catalogue and authorization to use the provider API.
+ * Uses the documented API routes. Catalogue and API authorization confirmed by site owner.
  */
 (() => {
   "use strict";
@@ -8,7 +7,7 @@
   const CONFIG = Object.freeze({
     provider: "8stream",
     enabled: true,
-    rightsVerified: false,
+    rightsVerified: true,
     apiBaseUrl: "https://8-stream-api.vercel.app"
   });
 
