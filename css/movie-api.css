@@ -1,0 +1,107 @@
+.movie-api-section {
+  border-top: 1px solid #ffffff12;
+  background: linear-gradient(180deg, #111321, #090a10);
+}
+.movie-api-section .section-head { margin-bottom: 14px; }
+.movie-api-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 18px 0;
+}
+.movie-api-tools input,
+.movie-api-tools select {
+  min-width: 180px;
+  padding: 11px 13px;
+  border: 1px solid #303448;
+  border-radius: 10px;
+  background: #0b0d15;
+  color: var(--text);
+}
+.movie-api-row { margin: 30px 0 48px; }
+.movie-api-row .grid { margin-top: 14px; }
+.movie-api-poster {
+  position: relative;
+  display: grid;
+  width: 100%;
+  padding: 0;
+  aspect-ratio: 2/2.8;
+  overflow: hidden;
+  border: 0;
+  background: #171a28;
+  color: white;
+  cursor: pointer;
+}
+.movie-api-poster img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.movie-api-poster:disabled { cursor: default; }
+.movie-api-placeholder {
+  display: grid;
+  place-items: center;
+  color: #a99aff;
+  font-weight: 800;
+}
+.movie-api-card .movie-info { min-height: 85px; }
+.movie-api-detail {
+  display: grid;
+  grid-template-columns: minmax(120px, 210px) 1fr;
+  gap: 22px;
+  margin: 20px 0;
+}
+.movie-api-detail img {
+  width: 100%;
+  border-radius: 12px;
+  object-fit: cover;
+}
+.movie-api-detail h2 { margin-top: 0; }
+.movie-api-episodes { display: grid; gap: 8px; }
+.movie-api-episode {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid #ffffff18;
+  border-radius: 9px;
+  background: #ffffff06;
+}
+.movie-api-notice { margin-top: 18px; }
+@media(max-width:600px) {
+  .movie-api-tools { display: grid; }
+  .movie-api-tools input,
+  .movie-api-tools select { width: 100%; }
+  .movie-api-detail { grid-template-columns: 105px 1fr; gap: 13px; }
+}
+
+
+/* Movie API integrated CineVerse player */
+.movie-api-player {
+  margin-top: 22px;
+  padding: 14px;
+  border: 1px solid #ffffff18;
+  border-radius: 12px;
+  background: #080b14;
+}
+.movie-api-player[hidden] {
+  display: none !important;
+}
+.movie-api-player .movie-player {
+  display: block;
+  width: 100%;
+  max-height: 70vh;
+  aspect-ratio: 16 / 9;
+  background: #000;
+  border-radius: 10px;
+}
+.movie-api-episode {
+  align-items: center;
+}
+.movie-api-episode small {
+  display: block;
+  margin-top: 4px;
+}
+.movie-api-episode .btn {
+  flex-shrink: 0;
+}
