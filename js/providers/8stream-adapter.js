@@ -8,7 +8,7 @@
   const CONFIG = Object.freeze({
     provider: "8stream",
     enabled: true,
-    rightsVerified: false,
+    rightsVerified: true,
     apiBaseUrl: "https://8-stream-api.vercel.app"
   });
 
