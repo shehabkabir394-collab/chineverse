@@ -1,0 +1,16 @@
+/* MovieStream BD homepage: Movie API is the only public catalog */
+#ftpDramas,#catalog,#movieCatalog,#about{display:none!important}
+.ms-hero{min-height:430px}
+.ms-hero .hero-copy{max-width:720px}
+.ms-hero .hero-art .cv{font-size:58px}
+.ms-hero .hero-art .cv span{font-size:18px}
+.topbar .brand b,footer .brand b{color:var(--cyan)}
+.admin-link{padding:8px 13px;border:1px solid var(--line);border-radius:9px}
+.movie-api-section{min-height:55vh;padding-top:48px}
+.movie-api-section>.section-head h2{font-size:clamp(30px,4vw,46px)}
+.movie-api-poster{border-radius:13px}
+.movie-api-poster .overlay{opacity:1;text-align:center;font-weight:700}
+.movie-api-poster .overlay small{display:block;font-size:11px}
+@media(max-width:760px){.ms-hero{min-height:0}.ms-hero .hero-art{min-height:200px}.movie-api-section{padding-top:35px}}
+.ms-watch-main{max-width:1180px;margin:auto;padding:30px 22px 70px}.ms-back{display:inline-block;margin:0 0 18px;color:var(--cyan);font-size:13px}.ms-title-detail{display:grid;grid-template-columns:190px 1fr;gap:26px;padding:22px 0 30px}.ms-title-poster{width:100%;max-height:285px;object-fit:cover;border-radius:15px;border:1px solid #ffffff20}.ms-title-copy h1{font:700 clamp(28px,4vw,44px)/1.15 'Space Grotesk',sans-serif;margin:6px 0 12px}.ms-title-copy p{max-width:800px}.ms-watch-player{padding:18px;border:1px solid #ffffff1c;border-radius:18px;background:linear-gradient(145deg,#141d30,#090e19);box-shadow:0 18px 50px #0005}.ms-watch-player .video-heading{display:flex;justify-content:space-between;align-items:center;gap:15px}.ms-watch-player .movie-player{display:block;width:100%;max-height:72vh;aspect-ratio:16/9;background:#000;border-radius:12px}.ms-episode-section{padding:32px 0}.ms-episode-button{width:100%;text-align:left;color:var(--text);cursor:pointer}.ms-episode-button.active{border-color:var(--cyan);background:#70e6df18}.ms-episode-button>span:first-child{flex:1}.ms-episode-quality{color:var(--muted);font-size:12px}.ms-episode-action{white-space:nowrap;color:var(--cyan);font-weight:700;font-size:12px}.ms-watch-page footer{margin-top:25px}
+@media(max-width:650px){.ms-watch-main{padding:22px 14px 50px}.ms-title-detail{grid-template-columns:105px 1fr;gap:14px}.ms-title-poster{max-height:165px}.ms-title-copy h1{font-size:24px}.ms-title-copy p{font-size:12px}.ms-watch-player{padding:10px}.ms-watch-player .video-heading{align-items:flex-start}.ms-episode-button{gap:8px;padding:10px}.ms-episode-quality{display:none}.ms-episode-action{font-size:11px}}
