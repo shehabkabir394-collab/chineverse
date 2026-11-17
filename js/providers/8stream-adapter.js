@@ -48,7 +48,11 @@
       .map(entry => entry.item);
   }
 
-  function isAvailable() {\n    return CONFIG.enabled && CONFIG.rightsVerified && /^https:\\/\\//i.test(CONFIG.apiBaseUrl);\n  }\n\n  async function getMediaInfo() {
+  function isAvailable() {
+    return CONFIG.enabled && CONFIG.rightsVerified && /^https:\/\//i.test(CONFIG.apiBaseUrl);
+  }
+
+  async function getMediaInfo() {
     return {
       success: false,
       provider: CONFIG.provider,
@@ -77,7 +81,8 @@
 
   window.OnlyDramaProviders = window.OnlyDramaProviders || {};
   window.OnlyDramaProviders.eightStream = Object.freeze({
-    config: CONFIG,\n    isAvailable,
+    config: CONFIG,
+    isAvailable,
     languagePriority: LANGUAGE_PRIORITY,
     normalizeLanguage,
     languageRank,
