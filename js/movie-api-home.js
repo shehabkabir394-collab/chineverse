@@ -4,6 +4,7 @@
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   const safeImage = s => /^https:\/\//i.test(s || "") ? s : "";
   const root=$("#movieApiSections"),status=$("#movieApiStatus"),category=$("#movieApiCategory"),search=$("#movieApiSearch");
+  const year=$("#year"); if(year) year.textContent=String(new Date().getFullYear());
   if(!root||!status||!category||!search)return;
   let home=null,selectedCategory="",searchText="";
   function itemPath(item){
