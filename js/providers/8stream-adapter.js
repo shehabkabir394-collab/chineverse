@@ -1,9 +1,8 @@
-/* Only Drama — 8Stream provider adapter
- * Uses the documented API routes. Catalogue and API authorization confirmed by site owner.
+/* Only Drama — documented 8Stream API adapter.
+ * API supplies metadata for a known IMDb ID; it does not expose a catalogue endpoint.
  */
 (() => {
   "use strict";
-
   const CONFIG = Object.freeze({
     provider: "8stream",
     enabled: true,
@@ -11,15 +10,19 @@
     apiBaseUrl: "https://8-stream-api.vercel.app"
   });
 
-  const LANGUAGE_PRIORITY = Object.freeze(["hindi-dubbed"]);
+  // The API sample labels the Hindi audio track simply "Hindi".
+  const LANGUAGE_PRIORITY = Object.freeze(["hindi", "hindi-dubbed"]);
 
   function normalizeLanguage(value) {
     const text = String(value || "").trim().toLowerCase();
     if (!text) return "unknown";
-    if (/hindi|हिन्दी|हिंदी/.test(text) && /dub|dubbed|ডাব/.test(text)) return "hindi-dubbed";
-    if (/^hi$|hindi|हिन्दी|हिंदी/.test(text)) return "hindi";
+    if (/hindi|हिन्दी|हिंदी/.test(text)) {
+      return /dub|dubbed|ডাব/.test(text) ? "hindi-dubbed" : "hindi";
+    }
     if (/bengali|bangla|বাংলা|বাঙ্গলা/.test(text)) return "bengali";
     if (/^en$|english/.test(text)) return "english";
+    if (/tamil|தமிழ்/.test(text)) return "tamil";
+    if (/telugu|తెలుగు/.test(text)) return "telugu";
     return text.replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "unknown";
   }
 
@@ -41,19 +44,13 @@
     return CONFIG.enabled && CONFIG.rightsVerified && /^https:\/\//i.test(CONFIG.apiBaseUrl);
   }
 
-  function unavailable() {
-    return {
-      success: false,
-      provider: CONFIG.provider,
-      disabled: true,
-      message: "Provider disabled: verify catalogue rights and API authorization before enabling."
-    };
-  }
-
   async function requestJson(url, init) {
     let response;
     try {
-      response = await fetch(url, { ...init, headers: { Accept: "application/json", ...(init && init.headers) } });
+      response = await fetch(url, {
+        ...init,
+        headers: { Accept: "application/json", ...(init && init.headers) }
+      });
     } catch (error) {
       return { success: false, provider: CONFIG.provider, error: "network_error", message: error.message };
     }
@@ -65,14 +62,12 @@
     }
     if (!response.ok || body.success !== true) {
       return {
-        success: false,
-        provider: CONFIG.provider,
-        error: "provider_error",
+        success: false, provider: CONFIG.provider, error: "provider_error",
         status: response.status,
         message: typeof body.message === "string" ? body.message : "Provider request failed."
       };
     }
-    return { success: true, provider: CONFIG.provider, data: body.data };
+    return { success: true, provider: CONFIG.provider, data: body.data || {} };
   }
 
   function apiUrl(path, params) {
@@ -83,23 +78,27 @@
     return url.toString();
   }
 
-  async function getMediaInfo(id) {
-    if (!isAvailable()) return unavailable();
-    if (!id) return { success: false, provider: CONFIG.provider, error: "missing_id" };
-    const result = await requestJson(apiUrl("/api/v1/mediaInfo", { id }));
+  async function getMediaInfo(imdbId) {
+    if (!isAvailable()) return { success: false, provider: CONFIG.provider, error: "provider_unavailable" };
+    if (!/^tt\d+$/i.test(String(imdbId || ""))) {
+      return { success: false, provider: CONFIG.provider, error: "invalid_imdb_id", message: "A valid IMDb ID such as tt1877830 is required." };
+    }
+    const result = await requestJson(apiUrl("/api/v1/mediaInfo", { id: imdbId }));
     if (!result.success) return result;
-    const playlist = result.data && Array.isArray(result.data.playlist) ? result.data.playlist : [];
-    return { ...result, data: { ...result.data, playlist: rankLanguageCandidates(playlist) } };
+    const playlist = rankLanguageCandidates(result.data.playlist);
+    return { ...result, data: { ...result.data, playlist } };
   }
 
-  async function getSeasonList(id) {
-    if (!isAvailable()) return unavailable();
-    if (!id) return { success: false, provider: CONFIG.provider, error: "missing_id" };
-    return requestJson(apiUrl("/api/v1/getSeasonList", { id }));
+  async function getSeasonList(imdbId) {
+    if (!isAvailable()) return { success: false, provider: CONFIG.provider, error: "provider_unavailable" };
+    if (!/^tt\d+$/i.test(String(imdbId || ""))) {
+      return { success: false, provider: CONFIG.provider, error: "invalid_imdb_id", message: "A valid IMDb ID is required." };
+    }
+    return requestJson(apiUrl("/api/v1/getSeasonList", { id: imdbId }));
   }
 
   async function getStream(file, key) {
-    if (!isAvailable()) return unavailable();
+    if (!isAvailable()) return { success: false, provider: CONFIG.provider, error: "provider_unavailable" };
     if (typeof file !== "string" || !file || typeof key !== "string" || !key) {
       return { success: false, provider: CONFIG.provider, error: "missing_stream_parameters" };
     }
@@ -116,12 +115,15 @@
     return { ...result, data: { ...result.data, link } };
   }
 
-  async function getPreferredStream(id) {
-    const media = await getMediaInfo(id);
+  async function getPreferredStream(imdbId) {
+    const media = await getMediaInfo(imdbId);
     if (!media.success) return media;
-    const playlist = media.data.playlist;
-    const selected = playlist.find(item => LANGUAGE_PRIORITY.includes(normalizeLanguage(item.title)));
-    if (!selected) return { success: false, provider: CONFIG.provider, error: "no_preferred_language" };
+    const selected = media.data.playlist.find(item =>
+      LANGUAGE_PRIORITY.includes(normalizeLanguage(item && item.title))
+    );
+    if (!selected) {
+      return { success: false, provider: CONFIG.provider, error: "no_preferred_language", data: { playlist: media.data.playlist } };
+    }
     const stream = await getStream(selected.file, media.data.key);
     if (!stream.success) return stream;
     return { ...stream, data: { ...stream.data, selectedLanguage: selected.title, selectedTrackId: selected.id } };
@@ -129,15 +131,8 @@
 
   window.OnlyDramaProviders = window.OnlyDramaProviders || {};
   window.OnlyDramaProviders.eightStream = Object.freeze({
-    config: CONFIG,
-    isAvailable,
-    languagePriority: LANGUAGE_PRIORITY,
-    normalizeLanguage,
-    languageRank,
-    rankLanguageCandidates,
-    getMediaInfo,
-    getSeasonList,
-    getStream,
-    getPreferredStream
+    config: CONFIG, isAvailable, languagePriority: LANGUAGE_PRIORITY,
+    normalizeLanguage, languageRank, rankLanguageCandidates,
+    getMediaInfo, getSeasonList, getStream, getPreferredStream
   });
 })();
