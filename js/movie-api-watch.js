@@ -25,7 +25,8 @@
    if(!response.ok||!data.detail)throw new Error(data.error||"Details unavailable.");
    const d=data.detail;episodes=Array.isArray(d.episodes)?d.episodes:[];
    const poster=safeImage(d.poster),dubs=Array.isArray(d.dubs)?d.dubs:[];
-   const isDrama=episodes.length>1||episodes.some(e=>/episode|season|ep\s*\d/i.test(String(e.kind||e.label||"")));
+   const typeHint=[d.type,d.mediaType,d.typeBadge,d.category,d.categoryPath].join(" ").toLowerCase();
+   const isDrama=/series|tv|drama|show|serial/.test(typeHint)||episodes.length>1||episodes.some(e=>/episode|season|ep\s*\d|s\d+\s*e\d+/i.test(String(e.kind||e.label||"")));
    const listTitle=isDrama?"Episodes":"Available versions";
    const episodeRows=episodes.map((ep,i)=>'<button class="movie-api-episode ms-episode-button" type="button" data-watch-episode="'+i+'"><span><b>'+esc(ep.label||((isDrama?"Episode ":"Version ")+(ep.number||i+1)))+'</b><small class="muted">'+esc(ep.kind||"")+'</small></span><span class="ms-episode-quality">'+getSources(ep).map(s=>s.quality).join(" · ")+'</span><span class="ms-episode-action">▶ '+(i===0?"Playing first":"Play")+'</span></button>').join("")||'<p class="muted">No episodes or video versions were returned.</p>';
    document.title=(d.title||"Watch")+" — MovieStream BD";
