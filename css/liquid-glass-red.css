@@ -1,0 +1,135 @@
+/* CineVerse global Liquid Glass / dark crimson theme.
+   Visual-only layer: preserves existing markup, APIs, forms and playback logic. */
+:root{
+  color-scheme:dark;
+  --bg:#08090d;--panel:rgba(25,19,25,.68);--panel2:rgba(37,24,31,.72);
+  --line:rgba(255,255,255,.13);--text:#f7f2f4;--muted:#b7aab1;
+  --purple:#ff3150;--cyan:#ff687d;--accent:#e50924;--radius:18px;
+  --glass:rgba(255,255,255,.065);--glass-strong:rgba(255,255,255,.10);
+  --red-glow:rgba(229,9,36,.24);
+}
+html{background:var(--bg);scroll-padding-top:90px}
+body{
+  color:var(--text)!important;
+  background:
+    radial-gradient(ellipse at 12% -8%,rgba(229,9,36,.20),transparent 38%),
+    radial-gradient(ellipse at 95% 24%,rgba(143,20,47,.13),transparent 32%),
+    linear-gradient(160deg,#09090d,#100b10 55%,#08090d)!important;
+  background-attachment:fixed!important;
+}
+a{color:inherit}
+.topbar{
+  background:rgba(13,10,14,.70)!important;
+  border:1px solid rgba(255,255,255,.12)!important;
+  border-top:0!important;border-radius:0 0 20px 20px;
+  box-shadow:0 12px 36px rgba(0,0,0,.32),inset 0 1px rgba(255,255,255,.08);
+  -webkit-backdrop-filter:blur(24px) saturate(145%);
+  backdrop-filter:blur(24px) saturate(145%);
+}
+.brand b,.topbar nav a:hover,footer a:hover{color:#ff536b!important}
+.mark{
+  background:linear-gradient(145deg,#ff5269,#a80020)!important;
+  box-shadow:0 0 25px rgba(229,9,36,.38),inset 0 1px rgba(255,255,255,.28)!important;
+}
+.topbar nav a{transition:color .2s ease}
+.hero,.ms-hero{
+  background:linear-gradient(130deg,rgba(70,12,28,.52),rgba(19,14,20,.72) 55%,rgba(42,12,22,.58))!important;
+  border:1px solid var(--line)!important;border-radius:26px;
+  margin:24px clamp(12px,3vw,42px);overflow:hidden;
+  box-shadow:0 22px 70px rgba(0,0,0,.28),inset 0 1px rgba(255,255,255,.10);
+  -webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);
+}
+.hero:before{background:rgba(229,9,36,.20)!important;filter:blur(85px)}
+.hero h1 em,.center h1 em,h2 em,.eyebrow{color:#ff6178!important}
+.hero h1 em,.center h1 em,h2 em{
+  background:linear-gradient(90deg,#ff9aa9,#ff304f)!important;
+  -webkit-background-clip:text!important;background-clip:text!important;
+}
+.hero-art .cv{
+  border:1px solid rgba(255,255,255,.22)!important;
+  background:linear-gradient(145deg,rgba(255,255,255,.15),rgba(229,9,36,.16) 58%,rgba(12,10,14,.72))!important;
+  box-shadow:inset 0 1px rgba(255,255,255,.25),0 25px 70px rgba(0,0,0,.48)!important;
+  -webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);
+}
+.hero-art .orbit{border-color:rgba(255,83,107,.48)!important;box-shadow:0 0 0 30px rgba(229,9,36,.06),0 0 65px rgba(229,9,36,.18)!important}
+.btn,.admin-link,.chips button,.short-episodes button,.short-episode{
+  border:1px solid rgba(255,255,255,.15)!important;
+  border-radius:13px!important;
+  -webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);
+  transition:transform .18s,border-color .18s,box-shadow .18s,background .18s;
+}
+.btn:hover,.chips button:hover{transform:translateY(-2px);border-color:rgba(255,82,105,.65)!important}
+.btn.primary{
+  color:#fff!important;
+  background:linear-gradient(135deg,#f31b3c,#a90020)!important;
+  box-shadow:0 8px 26px rgba(229,9,36,.25),inset 0 1px rgba(255,255,255,.22)!important;
+}
+.btn.ghost,.admin-link,.chips button{
+  color:#f8edf0!important;background:rgba(255,255,255,.065)!important;
+  border-color:rgba(255,255,255,.14)!important;
+}
+.btn.ghost:hover,.chips button.selected,.chips button:hover{
+  background:rgba(229,9,36,.20)!important;border-color:rgba(255,75,99,.65)!important;
+}
+.catalog,.movie-api-section{background:transparent!important}
+.section-head h2{color:#fff}
+.movie-card,.short-card,.panel,.features>div,.ftp-browser,.ftp-home-episodes,
+.movie-api-player,.ms-watch-player,.short-player-shell,.short-controls,
+.movie-api-detail,.notice,.bulk-panel,.video-section{
+  background:linear-gradient(145deg,rgba(255,255,255,.085),rgba(255,255,255,.025))!important;
+  border:1px solid rgba(255,255,255,.13)!important;
+  border-radius:18px!important;
+  box-shadow:0 14px 36px rgba(0,0,0,.24),inset 0 1px rgba(255,255,255,.10)!important;
+  -webkit-backdrop-filter:blur(20px) saturate(135%);
+  backdrop-filter:blur(20px) saturate(135%);
+}
+.movie-card:hover,.short-card:hover{
+  border-color:rgba(255,77,101,.58)!important;
+  box-shadow:0 18px 42px rgba(0,0,0,.36),0 0 22px rgba(229,9,36,.10)!important;
+}
+.movie-api-poster{border-radius:14px!important}
+.movie-api-poster .overlay{background:linear-gradient(0deg,rgba(10,7,10,.82),transparent)!important}
+.movie-api-language-badge,.quality,.type-pill,.short-badge{
+  border:1px solid rgba(255,255,255,.20)!important;
+  background:rgba(153,0,27,.78)!important;color:#fff!important;
+  -webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);
+}
+input,select,textarea,.movie-api-tools input,.movie-api-tools select,
+.short-controls input,.short-controls select{
+  color:#fff!important;background:rgba(255,255,255,.065)!important;
+  border:1px solid rgba(255,255,255,.16)!important;border-radius:12px!important;
+  box-shadow:inset 0 1px rgba(255,255,255,.06);
+  -webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);
+}
+input:focus,select:focus,textarea:focus{outline:2px solid rgba(255,65,91,.55);outline-offset:1px}
+.movie-api-episode,.ftp-item,.ftp-episode-row,.short-episode{
+  background:rgba(255,255,255,.055)!important;border-color:rgba(255,255,255,.12)!important;
+  border-radius:12px!important;
+}
+.movie-api-episode .btn,.ftp-item .btn{margin:0}
+footer{
+  background:rgba(12,9,13,.72)!important;border-top:1px solid rgba(255,255,255,.12)!important;
+  -webkit-backdrop-filter:blur(22px);backdrop-filter:blur(22px);
+}
+dialog{color:var(--text);background:rgba(20,14,19,.94);border:1px solid var(--line);border-radius:20px;box-shadow:0 24px 70px #000a;backdrop-filter:blur(22px)}
+dialog::backdrop{background:rgba(0,0,0,.68);backdrop-filter:blur(5px)}
+video,.movie-player{background:#000;border:1px solid rgba(255,255,255,.12);border-radius:14px}
+.admin .center,.detail,.ms-watch-main,.short-wrap{color:var(--text)}
+.muted,.short-note,.short-status{color:var(--muted)!important}
+@media(max-width:760px){
+  .topbar{gap:12px;min-height:62px;padding:10px 13px;border-radius:0 0 15px 15px}
+  .topbar nav{gap:13px;overflow-x:auto;white-space:nowrap;margin:0 auto}
+  .topbar nav a{font-size:11px}
+  .brand{font-size:17px}
+  .hero,.ms-hero{margin:12px 10px;border-radius:19px}
+  .hero h1{letter-spacing:-1.5px}
+  .catalog{padding:36px 13px}
+  .grid{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:12px!important}
+  .movie-api-section{padding:30px 13px}
+  .section-head,.toolbar{align-items:flex-start;flex-wrap:wrap}
+  .movie-api-tools{display:grid;grid-template-columns:1fr}
+  .movie-api-tools input,.movie-api-tools select{width:100%;min-width:0}
+  .panel,.video-section,.bulk-panel{padding:14px}
+  footer{gap:12px;padding:22px 14px}
+}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important;animation:none!important}}
