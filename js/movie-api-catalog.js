@@ -39,11 +39,7 @@
   (Array.isArray(d.sections)?d.sections:[]).forEach(s=>(Array.isArray(s.items)?s.items:[]).forEach(x=>add(x,text(s.title))));
   (Array.isArray(d.trending)?d.trending:[]).forEach(x=>add(x,"Trending Now"));
   (Array.isArray(d.comingSoon)?d.comingSoon:[]).forEach(x=>add(x,"Coming Soon"));
-  return [...map.values()].sort((a,b)=>{
-   const ah=badge(a).startsWith("HINDI")?1:0,bh=badge(b).startsWith("HINDI")?1:0;
-   if(ah!==bh)return bh-ah;
-   return (Number(b.uploadedAtMs)||0)-(Number(a.uploadedAtMs)||0)||text(a.title).localeCompare(text(b.title));
-  });
+  return [...map.values()].sort((a,b)=>text(a.title).localeCompare(text(b.title),undefined,{sensitivity:"base",numeric:true}));
  }
  function matches(item){
   if(selected){
