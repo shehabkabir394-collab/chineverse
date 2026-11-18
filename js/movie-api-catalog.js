@@ -17,44 +17,72 @@
   ["categories","genres"].forEach(k=>(Array.isArray(item?.[k])?item[k]:[]).forEach(v=>out.push(typeof v==="string"?v:v?.path,v?.label,v?.name,v?.title)));
   return out.filter(Boolean).map(norm);
  };
- const badge=item=>{
-  const l=String(item.language||"").toUpperCase(),t=String(item.title||"").toUpperCase();
-  return l.includes("HINDI DUB")||t.includes("HINDI DUB")?"HINDI DUBBED":l.includes("HINDI")||/\[HINDI\]|\(HINDI\)/.test(t)?"HINDI":"";
+ const isHindiDubbed=item=>{
+  const language=norm(item?.language),sections=(item?._sections||[]).map(norm);
+  return language==="hindi dubbed"||sections.some(s=>s==="south indian & hindi dubbed"||s==="anime in hindi"||s.includes("hindi dubbed"));
  };
+ const badge=item=>isHindiDubbed(item)?"HINDI DUBBED":"";
  const pathOf=item=>{
   if(typeof item.path==="string"&&item.path.startsWith("/mb/"))return item.path;
   try{const u=new URL(item.detailsEndpoint);const p=u.searchParams.get("path");return p?.startsWith("/mb/")?p:"";}catch{return "";}
  };
  function flatten(d){
   const map=new Map();
-  const add=(item,section)=>{
+  const add=(item,section,source)=>{
    if(!item||typeof item!=="object")return;
    const key=pathOf(item)||norm(item.title);
    if(!key)return;
-   if(!map.has(key))map.set(key,{...item,_sections:[]});
+   if(!map.has(key))map.set(key,{...item,_sections:[],_sources:[]});
    const saved=map.get(key);
    if(section&&!saved._sections.includes(section))saved._sections.push(section);
+   if(source&&!saved._sources.includes(source))saved._sources.push(source);
    if(!saved.poster&&item.poster)saved.poster=item.poster;
   };
-  (Array.isArray(d.sections)?d.sections:[]).forEach(s=>(Array.isArray(s.items)?s.items:[]).forEach(x=>add(x,text(s.title))));
-  (Array.isArray(d.trending)?d.trending:[]).forEach(x=>add(x,"Trending Now"));
-  (Array.isArray(d.comingSoon)?d.comingSoon:[]).forEach(x=>add(x,"Coming Soon"));
-  return [...map.values()].sort((a,b)=>text(a.title).localeCompare(text(b.title),undefined,{sensitivity:"base",numeric:true}));
+  (Array.isArray(d.sections)?d.sections:[]).forEach(s=>(Array.isArray(s.items)?s.items:[]).forEach(x=>add(x,text(s.title),"section")));
+  (Array.isArray(d.trending)?d.trending:[]).forEach(x=>add(x,"Trending Now","trending"));
+  (Array.isArray(d.comingSoon)?d.comingSoon:[]).forEach(x=>add(x,"Coming Soon","comingSoon"));
+  return [...map.values()].sort((a,b)=>Number(isHindiDubbed(b))-Number(isHindiDubbed(a))||(Number(b.uploadedAtMs)||0)-(Number(a.uploadedAtMs)||0));
+ }
+ function categoryMatches(item){
+  if(!selected)return true;
+  const c=(Array.isArray(data.categories)?data.categories:[]).find(x=>[x.path,x.slug,x.label,x.name,x.title].some(v=>norm(v)===norm(selected)));
+  const path=text(c?.path||selected),label=norm(c?.label||c?.name||c?.title||selected);
+  const sections=(item._sections||[]).map(norm),language=norm(item.language),type=norm(item.typeBadge);
+  const genres=norm(item.sportGenre||item.genre||"").split(/[,/|]/).map(norm);
+  if(path==="/"||label==="home")return true;
+  if(path==="/mostwatch/7d")return (item._sources||[]).includes("trending");
+  if(path==="/upcoming")return (item._sources||[]).includes("comingSoon")||sections.includes("coming soon");
+  if(path==="/type/movies")return type==="movie";
+  if(path==="/type/series")return type==="series"||type==="drama";
+  if(path==="/anime"||path==="/genre/animation")return type==="anime"||genres.includes("animation");
+  if(path==="/language/hindi-dubbed")return isHindiDubbed(item);
+  if(path==="/language/hindi")return language==="hindi"||language==="hindi original"||language==="hindi dubbed";
+  if(path==="/language/bangla-dubbed")return language==="bangla dubbed"||sections.some(s=>s.includes("bangla dubbed"));
+  if(path.startsWith("/language/")){
+   const wanted=norm(path.split("/").pop()).replace("gujrati","gujarati");
+   return language===wanted||language.startsWith(wanted+" ")||sections.some(s=>s===label);
+  }
+  if(path.startsWith("/genre/")){
+   const wanted=norm(path.split("/").pop());
+   return genres.includes(wanted);
+  }
+  if(path==="/bollywood")return sections.includes("bollywood movie");
+  if(path==="/southIndian")return sections.some(s=>s.includes("south indian"));
+  if(path==="/collections")return sections.some(s=>s.includes("collection"));
+  if(path.startsWith("/collection/")||path.startsWith("/category/")||path==="/drama"||path==="/ongoing"||path==="/adult18plus"||path==="/western-tv"){
+   return sections.includes(label)||sections.some(s=>s===label||s.includes(label)||label.includes(s));
+  }
+  return sections.includes(label)||sections.some(s=>s===label);
  }
  function matches(item){
-  if(selected){
-   const c=(Array.isArray(data.categories)?data.categories:[]).find(x=>[x.path,x.slug,x.label,x.name,x.title].some(v=>norm(v)===norm(selected)));
-   const label=norm(c?.label||c?.name||c?.title||selected);
-   const values=[...vals(item),...(item._sections||[]).map(norm)];
-   if(!values.some(v=>v===norm(selected)||v.includes(norm(selected))||v.includes(label)||label.includes(v)))return false;
-  }
+  if(!categoryMatches(item))return false;
   if(letter&&letter!=="#"){
    if(!text(item.title).toUpperCase().startsWith(letter))return false;
   }else if(letter==="#"){
    if(/^[A-Z]/i.test(text(item.title)))return false;
   }
   const q=norm(search?.value||"");
-  if(q&&!norm([item.title,item.description,item.language,item.country,item.genre,...vals(item),...(item._sections||[])].join(" ")).includes(q))return false;
+  if(q&&!norm([item.title,item.description,item.language,item.country,item.sportGenre,item.genre,...vals(item),...(item._sections||[])].join(" ")).includes(q))return false;
   return true;
  }
  function card(item){
