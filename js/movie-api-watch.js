@@ -52,9 +52,9 @@
   if(sections.some(s=>s.includes("south indian")||s.includes("south movie")))return ["south","South Indian Movies"];
   if(sections.some(s=>s.includes("bollywood")))return ["bollywood","Bollywood"];
   if(sections.some(s=>s.includes("hollywood")))return ["hollywood","Hollywood"];
+  if(["united states","usa","us","united kingdom","uk","britain","american","british"].includes(country))return ["hollywood","Hollywood"];
   if(type==="anime"||sections.some(s=>s.includes("anime")))return ["anime","Anime"];
   if(type==="series"||type==="drama"||sections.some(s=>s.includes("drama")||s.includes("series")))return ["drama","Drama"];
-  if(["united states","usa","us","united kingdom","uk","britain","american","british"].includes(country))return ["hollywood","Hollywood"];
   if(type==="movie")return ["movie","Movies"];
   return ["","More titles"];
  }
