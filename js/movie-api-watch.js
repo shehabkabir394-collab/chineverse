@@ -44,7 +44,7 @@
   if(audioSelect)audioSelect.addEventListener("change",()=>{const chosen=sourcesForLanguage(currentSources,audioSelect.value);playerApi?.setSources(chosen);});
   $("#movieWatchUnmute").hidden=false;
  }
- const clean=s=>String(s||"").toLowerCase().replace(/[_-]+/g," ").replace(/\\s+/g," ").trim();
+ const clean=s=>String(s||"").toLowerCase().replace(/[_-]+/g," ").replace(/\s+/g," ").trim();
  function suggestedGroup(item){
   const sections=(item?._sections||[]).map(clean),type=clean(item?.typeBadge||item?.type),country=clean(item?.country);
   if(sections.some(s=>s.includes("k drama")||s.includes("k-drama")))return ["kdrama","K-Drama"];
@@ -76,7 +76,7 @@
   let list=[...map.values()].filter(x=>x.path!==path);
   if(group==="section")list=list.filter(x=>x._sections.includes(label));
   else if(group)list=list.filter(x=>suggestedGroup(x)[0]===group);
-  if(!list.length&&current?. _sections?.length)list=[...map.values()].filter(x=>x.path!==path&&x._sections.some(s=>current._sections.includes(s)));
+  if(!list.length&&current?._sections?.length)list=[...map.values()].filter(x=>x.path!==path&&x._sections.some(s=>current._sections.includes(s)));
   const hindi=x=>/hindi dubbed/i.test(String(x.language||""))||(/hindi/i.test(String(x.language||""))&&(x._sections||[]).some(s=>/south indian.*hindi dubbed|anime in hindi/i.test(s)));
   list.sort((a,b)=>Number(hindi(b))-Number(hindi(a))||(Number(b.uploadedAtMs)||0)-(Number(a.uploadedAtMs)||0));
   list=list.slice(0,12);if(!list.length)return;
