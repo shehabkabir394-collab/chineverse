@@ -8,7 +8,7 @@
  const selected=params.get("category")||"", letter=(params.get("letter")||"").toUpperCase(), page=Math.max(1,Number(params.get("page"))||1);
  const root=$("#catalogGrid"),status=$("#catalogStatus"),pager=$("#catalogPager"),nav=$("#catalogCategories"),az=$("#catalogAZ"),search=$("#catalogSearch"),heading=$("#catalogHeading");
  const pageSize=24;
- let data=null,all=[];
+ let data=null,all=[],apiCatalogMode=false,apiMeta=null;
  const vals=item=>{
   const out=[];
   ["categoryPath","category","categoryName","categoryLabel","categorySlug","type","typeBadge","genre","language","country"].forEach(k=>{
@@ -93,7 +93,7 @@
   return sections.includes(label)||sections.some(s=>s===label);
  }
  function matches(item){
-  if(!categoryMatches(item))return false;
+  if(!apiCatalogMode&&!categoryMatches(item))return false;
   if(letter&&letter!=="#"){
    if(!text(item.title).toUpperCase().startsWith(letter))return false;
   }else if(letter==="#"){
@@ -111,12 +111,29 @@
  function link(extra){const p=new URLSearchParams();if(selected)p.set("category",selected);if(letter)p.set("letter",letter);if(search?.value.trim())p.set("q",search.value.trim());Object.entries(extra||{}).forEach(([k,v])=>{if(v)p.set(k,String(v));else p.delete(k)});return "catalog.html?"+p.toString();}
  function render(){
   if(!data)return;
-  const filtered=all.filter(matches),pages=Math.max(1,Math.ceil(filtered.length/pageSize)),safePage=Math.min(page,pages),start=(safePage-1)*pageSize,items=filtered.slice(start,start+pageSize);
+  const filtered=all.filter(matches);
+  const pages=apiCatalogMode?Math.max(1,Number(apiMeta?.maxPage)||1):Math.max(1,Math.ceil(filtered.length/pageSize));
+  const safePage=Math.min(page,pages);
+  const start=apiCatalogMode?0:(safePage-1)*pageSize;
+  const items=apiCatalogMode?filtered:filtered.slice(start,start+pageSize);
   root.innerHTML=items.map(card).join("")||'<p class="muted">এই Category-তে কোনো title পাওয়া যায়নি। অন্য Category নির্বাচন করো।</p>';
   const c=(data.categories||[]).find(x=>[x.path,x.slug,x.label,x.name,x.title].some(v=>norm(v)===norm(selected)));
   heading.textContent=selected?(customLabels[selected]||c?.label||c?.name||c?.title||selected):"All Movies & Dramas A–Z";
-  status.textContent=filtered.length+" titles · Page "+safePage+" of "+pages+" · Showing "+(filtered.length?start+1:0)+"–"+Math.min(start+pageSize,filtered.length);
-  pager.innerHTML=Array.from({length:pages},(_,i)=>'<a class="btn '+(i+1===safePage?"primary":"ghost")+'" href="'+esc(link({page:i+1}))+'">'+(i+1)+'</a>').join("");
+  status.textContent=apiCatalogMode
+   ? "Page "+safePage+" of "+pages+" · Showing "+filtered.length+" titles"
+   : filtered.length+" titles · Page "+safePage+" of "+pages+" · Showing "+(filtered.length?start+1:0)+"–"+Math.min(start+pageSize,filtered.length);
+
+  const pageNumbers=[...new Set([1,safePage-1,safePage,safePage+1,pages].filter(n=>n>=1&&n<=pages))].sort((a,b)=>a-b);
+  let html="";
+  if(safePage>1)html+='<a class="btn ghost" href="'+esc(link({page:safePage-1}))+'">‹ Previous</a>';
+  let previous=0;
+  pageNumbers.forEach(n=>{
+   if(previous&&n-previous>1)html+='<span class="catalog-page-gap">…</span>';
+   html+='<a class="btn '+(n===safePage?"primary":"ghost")+'" href="'+esc(link({page:n}))+'">'+n+'</a>';
+   previous=n;
+  });
+  if(safePage<pages)html+='<a class="btn ghost" href="'+esc(link({page:safePage+1}))+'">Next ›</a>';
+  pager.innerHTML=html;
  }
  function renderNav(){
   const cats=Array.isArray(data.categories)?data.categories:[];
@@ -132,12 +149,51 @@
   az.innerHTML=letters.map(l=>'<a class="catalog-letter '+(letter===l?"active":"")+'" href="'+esc(link({letter:l,page:1}))+'">'+l+'</a>').join("");
  }
  async function load(){
-  status.textContent="Loading complete Movie API catalog…";
+  status.textContent="Loading Movie API catalog…";
   try{
    const r=await fetch("/api/movie-api/home");
-   const d=await r.json();if(!r.ok||d.ok!==true)throw new Error(d.error||"Movie API unavailable");
-   data=d;all=flatten(d);if(search&&params.get("q"))search.value=params.get("q");
-   renderNav();render();
+   const d=await r.json();
+   if(!r.ok||d.ok!==true)throw new Error(d.error||"Movie API unavailable");
+   data=d;
+   const q=params.get("q")||"";
+   if(search)search.value=q;
+   apiCatalogMode=false;
+   apiMeta=null;
+
+   if(q){
+    status.textContent="Searching movies and dramas…";
+    const sr=await fetch("/api/movie-api/search?q="+encodeURIComponent(q)+"&page="+page);
+    const sd=await sr.json();
+    if(!sr.ok||sd.ok!==true)throw new Error(sd.error||"Movie Search API unavailable");
+    all=(Array.isArray(sd.items)?sd.items:[]).map(item=>({...item,_sections:[],_sources:["search"]}));
+   }else{
+    const customPaths={
+     "cv:movie":"/type/movies",
+     "cv:anime":"/anime",
+     "cv:drama":"/drama",
+     "cv:kdrama":"/language/korean",
+     "cv:cdrama":"/language/chinese",
+     "cv:south":"/southIndian",
+     "cv:bollywood":"/bollywood",
+     "cv:hollywood":"/language/english"
+    };
+    const category=(data.categories||[]).find(x=>[x.path,x.slug,x.label,x.name,x.title].some(v=>norm(v)===norm(selected)));
+    const apiPath=customPaths[selected]||text(category?.path)||(selected.startsWith("/")?selected:"");
+
+    if(apiPath&&apiPath!=="/"){
+     status.textContent="Loading "+(category?.label||customLabels[selected]||"Category")+" · Page "+page+"…";
+     const cr=await fetch("/api/movie-api/catalog?path="+encodeURIComponent(apiPath)+"&page="+page);
+     const cd=await cr.json();
+     if(!cr.ok||cd.ok!==true)throw new Error(cd.error||"Movie Catalog API unavailable");
+     all=(Array.isArray(cd.items)?cd.items:[]).map(item=>({...item,_sections:[],_sources:["catalog"]}));
+     apiCatalogMode=true;
+     apiMeta=cd;
+    }else{
+     all=flatten(d);
+    }
+   }
+   renderNav();
+   render();
   }catch(e){status.textContent="Catalog load failed: "+(e.message||"Unknown error");}
  }
  root.addEventListener("click",e=>{const b=e.target.closest("[data-path]");if(b?.dataset.path)location.href="watch.html?path="+encodeURIComponent(b.dataset.path);});
