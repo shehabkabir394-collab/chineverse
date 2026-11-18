@@ -1,0 +1,106 @@
+/* MovieStream BD - streaming homepage */
+#movieApiCatalog{max-width:1600px;margin:auto;padding:30px clamp(14px,3vw,48px) 65px}
+.ms-featured-hero{
+ position:relative;display:flex;align-items:center;justify-content:space-between;
+ min-height:390px;padding:clamp(24px,5vw,68px);gap:30px;
+ background:linear-gradient(90deg,rgba(8,7,12,.98) 0%,rgba(15,8,14,.91) 48%,rgba(12,8,13,.35) 100%),var(--hero-image) center/cover!important;
+ border:1px solid rgba(255,255,255,.14)!important;border-radius:22px;
+ overflow:hidden;box-shadow:0 22px 65px #0008;
+}
+.ms-featured-copy{position:relative;z-index:2;max-width:650px}
+.ms-featured-copy h1{font-size:clamp(30px,5vw,58px);line-height:1.05;margin:15px 0}
+.ms-featured-meta{color:#f4cbd1;font-size:13px;font-weight:700}
+.ms-featured-description{max-width:570px;color:#d2c7cb;line-height:1.7}
+.ms-featured-tag{display:inline-block;padding:5px 10px;border-radius:6px;background:#b9002c;color:white;font-size:11px;font-weight:800}
+.ms-featured-more{display:inline-block;margin-left:18px;font-size:13px;color:#f5c5ce}
+.ms-featured-poster{position:relative;z-index:1;flex:0 0 190px}
+.ms-featured-poster img{display:block;width:100%;max-height:285px;object-fit:cover;border-radius:13px;box-shadow:0 18px 50px #000b;border:1px solid #ffffff30}
+.movie-api-section>.section-head{margin-bottom:18px}
+.catalog-category-nav{display:flex;gap:9px;overflow-x:auto;padding:8px 0 14px;scrollbar-width:thin}
+.catalog-category-nav .catalog-chip{white-space:nowrap;flex:0 0 auto}
+.movie-api-tools{display:flex;gap:12px;margin:15px 0 22px}
+.movie-api-tools input{flex:1;min-width:0}
+.movie-api-row{margin:32px 0 42px}
+.movie-api-row .section-head{display:flex;align-items:end;justify-content:space-between;gap:14px;margin-bottom:15px}
+.movie-api-row .section-head h2{font-size:clamp(20px,2.5vw,28px);margin:3px 0}
+.movie-api-shelf{display:grid;grid-auto-flow:column;grid-auto-columns:clamp(135px,15vw,190px);gap:15px;overflow-x:auto;overscroll-behavior-inline:contain;padding:3px 2px 16px;scrollbar-width:thin;scroll-snap-type:x mandatory}
+.movie-api-shelf .movie-api-card{min-width:0;scroll-snap-align:start}
+.movie-api-shelf .movie-api-poster{aspect-ratio:2/2.85;border-radius:11px!important}
+.movie-api-shelf .movie-info{padding:9px 2px 3px;min-height:62px}
+.movie-api-shelf .movie-info h3{font-size:13px;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.movie-api-shelf .movie-info p{font-size:11px}
+.movie-api-shelf .quality{top:8px;right:8px;font-size:9px}
+.movie-api-shelf .movie-api-language-badge{top:36px;left:8px;font-size:8px}
+.movie-api-shelf::-webkit-scrollbar,.catalog-category-nav::-webkit-scrollbar{height:5px}
+.movie-api-shelf::-webkit-scrollbar-thumb,.catalog-category-nav::-webkit-scrollbar-thumb{background:#8d243a;border-radius:8px}
+.catalog-more-link{text-align:center;margin:40px 0}
+@media(min-width:1200px){.movie-api-shelf{grid-auto-columns:clamp(150px,13vw,205px)}}
+@media(max-width:760px){
+ .ms-featured-hero{min-height:300px;padding:24px 18px;gap:12px;background-position:58% center!important}
+ .ms-featured-copy{max-width:75%}
+ .ms-featured-copy h1{font-size:clamp(25px,7vw,39px)}
+ .ms-featured-description{font-size:12px;line-height:1.5}
+ .ms-featured-poster{flex-basis:105px}
+ .ms-featured-poster img{max-height:175px}
+ .ms-featured-more{display:block;margin:13px 0 0}
+ .movie-api-shelf{grid-auto-columns:clamp(125px,38vw,155px);gap:11px}
+ .movie-api-row{margin:26px 0 34px}
+ .movie-api-row .section-head{align-items:center}
+ .movie-api-row .section-head .btn{font-size:10px;padding:7px 9px}
+ #movieApiCatalog{padding:22px 13px 45px}
+}
+@media(max-width:390px){
+ .ms-featured-poster{display:none}
+ .ms-featured-copy{max-width:100%}
+}
+
+/* Header search + 18 red liquid-glass category buttons */
+.topbar .actions{margin-left:auto;display:flex;align-items:center;gap:12px}
+.topbar .actions #movieApiSearch{
+ width:clamp(190px,22vw,310px);min-width:0;padding:10px 15px;
+ color:#fff;background:linear-gradient(135deg,rgba(255,35,65,.19),rgba(100,10,30,.22));
+ border:1px solid rgba(255,125,145,.42);border-radius:13px;
+ box-shadow:inset 0 1px 0 rgba(255,255,255,.19),0 5px 22px rgba(190,0,40,.12);
+ backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
+ outline:none;transition:.2s
+}
+.topbar .actions #movieApiSearch::placeholder{color:#e8b9c2}
+.topbar .actions #movieApiSearch:focus{border-color:#ff718a;box-shadow:0 0 0 3px #ff31552b,0 0 24px #ff174d35}
+#movieApiCatalog>.movie-api-tools{justify-content:flex-end;margin:8px 0 18px}
+#movieApiCatalog>.movie-api-tools .btn{margin-left:auto}
+.catalog-category-nav{
+ display:grid!important;grid-template-columns:repeat(6,minmax(0,1fr));
+ gap:8px!important;overflow:visible!important;padding:12px 0 18px!important
+}
+.catalog-category-nav .catalog-chip{
+ position:relative;isolation:isolate;display:flex!important;align-items:center;justify-content:center;
+ gap:7px;min-width:0;min-height:42px;padding:9px 7px!important;
+ white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+ color:#fff!important;font-size:clamp(10px,.95vw,13px)!important;font-weight:900;
+ letter-spacing:.25px;text-decoration:none;
+ border:1px solid rgba(255,115,140,.43)!important;border-radius:11px!important;
+ background:linear-gradient(135deg,rgba(255,35,65,.40),rgba(160,0,35,.28) 55%,rgba(255,90,115,.18))!important;
+ box-shadow:inset 0 1px 0 rgba(255,255,255,.22),inset 0 -9px 18px rgba(70,0,15,.13),0 5px 15px rgba(160,0,35,.13);
+ backdrop-filter:blur(17px) saturate(145%);-webkit-backdrop-filter:blur(17px) saturate(145%);
+ transition:transform .2s,border-color .2s,box-shadow .2s,background .2s
+}
+.catalog-category-nav .catalog-chip:before{
+ content:"";position:absolute;z-index:-1;inset:0 0 52%;
+ background:linear-gradient(180deg,rgba(255,255,255,.16),transparent);
+ border-radius:inherit;pointer-events:none
+}
+.catalog-category-nav .catalog-chip:hover{
+ transform:translateY(-2px);border-color:rgba(255,160,175,.9)!important;
+ box-shadow:inset 0 1px 0 rgba(255,255,255,.3),0 0 18px rgba(255,35,75,.32),0 8px 20px rgba(0,0,0,.2)
+}
+.catalog-category-nav .category-emoji{font-size:15px;line-height:1}
+@media(max-width:760px){
+ .topbar .actions{width:auto;margin-left:auto}
+ .topbar .actions #movieApiSearch{width:min(44vw,220px);font-size:12px;padding:9px 10px}
+ .catalog-category-nav{grid-template-columns:repeat(3,minmax(0,1fr));gap:7px!important}
+ .catalog-category-nav .catalog-chip{min-height:39px;font-size:10px!important;gap:5px}
+}
+@media(max-width:390px){
+ .topbar .actions #movieApiSearch{width:145px}
+ .catalog-category-nav .catalog-chip{font-size:9px!important}
+}
