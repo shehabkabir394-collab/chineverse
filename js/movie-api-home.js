@@ -27,6 +27,6 @@
  root.addEventListener("click",e=>{const b=e.target.closest("[data-path]");if(b?.dataset.path)location.href="watch.html?path="+encodeURIComponent(b.dataset.path);});
  search.addEventListener("keydown",e=>{if(e.key==="Enter")location.href="catalog.html?q="+encodeURIComponent(search.value.trim());});
  $("#movieApiRefresh")?.addEventListener("click",load);
- async function load(){status.textContent="Loading complete Movie API catalog…";root.innerHTML="";try{const r=await fetch("/api/movie-api/home",{cache:"no-store"}),d=await r.json();if(!r.ok||d.ok!==true)throw new Error(d.error||"Catalog unavailable");home=d;render();}catch(e){status.textContent="Catalog could not load: "+(e.message||"Unknown error");}}
+ async function load(){status.textContent="Loading complete Movie API catalog…";root.innerHTML="";try{const r=await fetch("/api/movie-api/home"),d=await r.json();if(!r.ok||d.ok!==true)throw new Error(d.error||"Catalog unavailable");home=d;render();}catch(e){status.textContent="Catalog could not load: "+(e.message||"Unknown error");}}
  load();
 })();

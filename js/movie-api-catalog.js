@@ -134,7 +134,7 @@
  async function load(){
   status.textContent="Loading complete Movie API catalog…";
   try{
-   const r=await fetch("/api/movie-api/home",{cache:"no-store"});
+   const r=await fetch("/api/movie-api/home");
    const d=await r.json();if(!r.ok||d.ok!==true)throw new Error(d.error||"Movie API unavailable");
    data=d;all=flatten(d);if(search&&params.get("q"))search.value=params.get("q");
    renderNav();render();

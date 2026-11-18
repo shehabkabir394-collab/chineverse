@@ -60,7 +60,7 @@
  }
  async function loadSuggested(detail){
   const box=$("#movieWatchSuggested"),grid=$("#movieWatchSuggestedGrid"),title=$("#movieWatchSuggestedTitle");
-  const response=await fetch("/api/movie-api/home",{cache:"no-store"});if(!response.ok)throw new Error("Catalog API unavailable");
+  const response=await fetch("/api/movie-api/home");if(!response.ok)throw new Error("Catalog API unavailable");
   const api=await response.json();if(!api.ok)return;
   const map=new Map();
   const add=(x,section)=>{if(!x||typeof x!=="object")return;const p=String(x.path||"");if(!p.startsWith("/mb/"))return;const k=p;if(!map.has(k))map.set(k,{...x,_sections:[]});if(section&&!map.get(k)._sections.includes(section))map.get(k)._sections.push(section);};
