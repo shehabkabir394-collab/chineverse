@@ -19,7 +19,8 @@
  };
  const isHindiDubbed=item=>{
   const language=norm(item?.language),sections=(item?._sections||[]).map(norm);
-  return language==="hindi dubbed"||sections.some(s=>s==="south indian & hindi dubbed"||s==="anime in hindi"||s.includes("hindi dubbed"));
+  const confirmedHindi=language==="hindi dubbed"||language==="hindi";
+  return language==="hindi dubbed"||(confirmedHindi&&sections.some(s=>s==="south indian & hindi dubbed"||s==="anime in hindi"||s.includes("hindi dubbed")));
  };
  const badge=item=>isHindiDubbed(item)?"HINDI DUBBED":"";
  const pathOf=item=>{
