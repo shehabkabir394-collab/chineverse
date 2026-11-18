@@ -8,7 +8,8 @@
  const isHindiDubbed=item=>{
   const language=String(item?.language||"").trim().toUpperCase();
   const sections=(item?._sections||[]).map(x=>String(x).trim().toLowerCase());
-  return language==="HINDI DUBBED"||sections.some(s=>s==="south indian & hindi dubbed"||s==="anime in hindi"||s.includes("hindi dubbed"));
+  const confirmedHindi=language==="HINDI"||language==="HINDI DUBBED";
+  return language==="HINDI DUBBED"||(confirmedHindi&&sections.some(s=>s==="south indian & hindi dubbed"||s==="anime in hindi"||s.includes("hindi dubbed")));
  };
  const badge=item=>isHindiDubbed(item)?"HINDI DUBBED":"";
  const pathOf=item=>{if(typeof item.path==="string"&&item.path.startsWith("/mb/"))return item.path;try{const p=new URL(item.detailsEndpoint).searchParams.get("path");return p?.startsWith("/mb/")?p:"";}catch{return "";}};
