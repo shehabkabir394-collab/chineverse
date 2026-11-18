@@ -19,7 +19,7 @@
   const seen=new Set(),cats=[];categories.forEach(c=>{const value=text(c.path)||text(c.slug)||text(c.label)||text(c.name)||text(c.title),label=text(c.label)||text(c.name)||text(c.title)||text(c.slug)||value,key=value.toLowerCase();if(value&&label&&!seen.has(key)){seen.add(key);cats.push({value,label});}});
   nav.innerHTML='<a class="catalog-chip active" href="catalog.html">ALL A–Z</a>'+cats.map(c=>'<a class="catalog-chip" href="catalog.html?category='+encodeURIComponent(c.value)+'">'+esc(c.label)+'</a>').join("");
   let out="";if(trending.length)out+=section("Trending Now","POPULAR",sort(trending).slice(0,12));
-  sections.slice(0,5).forEach(s=>out+=section(text(s.title)||"Discover",text(s.badge)||"COLLECTION",sort(Array.isArray(s.items)?s.items:[]).slice(0,12)));
+  sections.slice(0,5).forEach(s=>{const sectionTitle=text(s.title)||"Discover";const tagged=(Array.isArray(s.items)?s.items:[]).map(item=>({...item,_sections:[sectionTitle]}));out+=section(sectionTitle,text(s.badge)||"COLLECTION",sort(tagged).slice(0,12));});
   root.innerHTML=out||'<p class="muted">No titles available.</p>';
   status.textContent=trending.length+" trending · "+sections.length+" collections · "+categories.length+" categories available. Browse all titles A–Z.";
  }
