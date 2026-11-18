@@ -46,8 +46,23 @@
   (Array.isArray(d.banners)?d.banners:[]).forEach(x=>add(x,"Featured","banner"));
   return [...map.values()].sort((a,b)=>Number(isHindiDubbed(b))-Number(isHindiDubbed(a))||(Number(b.uploadedAtMs)||0)-(Number(a.uploadedAtMs)||0));
  }
+ const customLabels={"cv:movie":"Movie","cv:anime":"Anime","cv:drama":"Drama","cv:kdrama":"K-Drama","cv:cdrama":"C-Drama","cv:south":"South Movies","cv:bollywood":"Bollywood","cv:hollywood":"Hollywood"};
+ function groupOf(item){
+  const sections=(item._sections||[]).map(norm),type=norm(item.typeBadge||item.type),country=norm(item.country);
+  if(sections.some(s=>s.includes("k drama")||s.includes("k-drama")))return "kdrama";
+  if(sections.some(s=>s.includes("c drama")||s.includes("c-drama")))return "cdrama";
+  if(sections.some(s=>s.includes("south indian")||s.includes("south movie")))return "south";
+  if(sections.some(s=>s.includes("bollywood")))return "bollywood";
+  if(sections.some(s=>s.includes("hollywood")))return "hollywood";
+  if(type==="anime"||sections.some(s=>s.includes("anime")))return "anime";
+  if(type==="series"||type==="drama"||sections.some(s=>s.includes("drama")||s.includes("series")))return "drama";
+  if(["united states","usa","us","united kingdom","uk","britain","american","british"].includes(country))return "hollywood";
+  if(type==="movie")return "movie";
+  return "";
+ }
  function categoryMatches(item){
   if(!selected)return true;
+  if(selected.startsWith("cv:"))return groupOf(item)===selected.slice(3);
   const c=(Array.isArray(data.categories)?data.categories:[]).find(x=>[x.path,x.slug,x.label,x.name,x.title].some(v=>norm(v)===norm(selected)));
   const path=text(c?.path||selected),label=norm(c?.label||c?.name||c?.title||selected);
   const sections=(item._sections||[]).map(norm),language=norm(item.language),type=norm(item.typeBadge);
@@ -99,7 +114,7 @@
   const filtered=all.filter(matches),pages=Math.max(1,Math.ceil(filtered.length/pageSize)),safePage=Math.min(page,pages),start=(safePage-1)*pageSize,items=filtered.slice(start,start+pageSize);
   root.innerHTML=items.map(card).join("")||'<p class="muted">এই Category-তে কোনো title পাওয়া যায়নি। অন্য Category নির্বাচন করো।</p>';
   const c=(data.categories||[]).find(x=>[x.path,x.slug,x.label,x.name,x.title].some(v=>norm(v)===norm(selected)));
-  heading.textContent=selected?(c?.label||c?.name||c?.title||selected):"All Movies & Dramas A–Z";
+  heading.textContent=selected?(customLabels[selected]||c?.label||c?.name||c?.title||selected):"All Movies & Dramas A–Z";
   status.textContent=filtered.length+" titles · Page "+safePage+" of "+pages+" · Showing "+(filtered.length?start+1:0)+"–"+Math.min(start+pageSize,filtered.length);
   pager.innerHTML=Array.from({length:pages},(_,i)=>'<a class="btn '+(i+1===safePage?"primary":"ghost")+'" href="'+esc(link({page:i+1}))+'">'+(i+1)+'</a>').join("");
  }
@@ -111,7 +126,8 @@
    const label=text(c.label)||text(c.name)||text(c.title)||text(c.slug)||value,key=norm(value);
    if(value&&label&&!seen.has(key)){seen.add(key);items.push({value,label});}
   });
-  nav.innerHTML='<a class="catalog-chip '+(!selected?"active":"")+'" href="catalog.html">ALL A–Z</a>'+items.map(c=>'<a class="catalog-chip '+(norm(c.value)===norm(selected)?"active":"")+'" href="catalog.html?category='+encodeURIComponent(c.value)+'">'+esc(c.label)+'</a>').join("");
+  const custom=Object.entries(customLabels).map(([value,label])=>'<a class="catalog-chip '+(selected===value?"active":"")+'" href="catalog.html?category='+encodeURIComponent(value)+'">'+esc(label)+'</a>').join("");
+  nav.innerHTML='<a class="catalog-chip '+(!selected?"active":"")+'" href="catalog.html">ALL A–Z</a>'+custom+items.map(c=>'<a class="catalog-chip '+(norm(c.value)===norm(selected)?"active":"")+'" href="catalog.html?category='+encodeURIComponent(c.value)+'">'+esc(c.label)+'</a>').join("");
   const letters="ABCDEFGHIJKLMNOPQRSTUVWXYZ#".split("");
   az.innerHTML=letters.map(l=>'<a class="catalog-letter '+(letter===l?"active":"")+'" href="'+esc(link({letter:l,page:1}))+'">'+l+'</a>').join("");
  }
