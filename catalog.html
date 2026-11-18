@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#09090d"><meta name="description" content="Browse all CineVerse movies and dramas by category, language and A–Z.">
+<title>All Movies & Dramas — CineVerse</title>
+<link rel="stylesheet" href="css/style.css"><link rel="stylesheet" href="css/movie-api.css"><link rel="stylesheet" href="css/moviestream-bd.css"><link rel="stylesheet" href="css/liquid-glass-red.css">
+<script defer src="js/movie-api-catalog.js"></script>
+</head><body>
+<header class="topbar"><a class="brand" href="./"><span class="mark">C</span>CineVerse <b>4K</b></a><nav><a href="./">HOME</a><a href="catalog.html">ALL MOVIES</a></nav><div class="actions"><a class="admin-link" href="admin.html">Admin</a></div></header>
+<main class="catalog-page">
+<section class="catalog catalog-api-page">
+<div class="section-head"><div><p class="eyebrow">CINEVERSE · COMPLETE API CATALOG</p><h1 id="catalogHeading">All Movies &amp; Dramas A–Z</h1><p class="muted">Select a category above or browse alphabetically. 24 titles per page.</p></div><button id="catalogRefresh" class="btn ghost" type="button">↻ Refresh</button></div>
+<div class="catalog-nav-title">CATEGORIES</div><nav id="catalogCategories" class="catalog-category-nav" aria-label="Movie categories"><a class="catalog-chip active" href="catalog.html">ALL A–Z</a></nav>
+<div class="catalog-nav-title">BROWSE A–Z</div><nav id="catalogAZ" class="catalog-az-nav" aria-label="Browse titles alphabetically"></nav>
+<div class="movie-api-tools"><input id="catalogSearch" type="search" placeholder="Search all movies and dramas…" aria-label="Search titles"><button id="catalogSearchButton" class="btn primary" type="button">Search</button></div>
+<div id="catalogStatus" class="catalog-meta muted" aria-live="polite">Loading catalog…</div>
+<div id="catalogGrid" class="grid"></div><nav id="catalogPager" class="catalog-pagination" aria-label="Catalog pages"></nav>
+</section></main>
+<footer><a class="brand" href="./"><span class="mark">C</span>CineVerse <b>4K</b></a><span>Movies and dramas worth discovering.</span><a href="privacy.html">Privacy</a></footer>
+</body></html>
