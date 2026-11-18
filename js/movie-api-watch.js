@@ -44,6 +44,46 @@
   if(audioSelect)audioSelect.addEventListener("change",()=>{const chosen=sourcesForLanguage(currentSources,audioSelect.value);playerApi?.setSources(chosen);});
   $("#movieWatchUnmute").hidden=false;
  }
+ const clean=s=>String(s||"").toLowerCase().replace(/[_-]+/g," ").replace(/\\s+/g," ").trim();
+ function suggestedGroup(item){
+  const sections=(item?._sections||[]).map(clean),type=clean(item?.typeBadge||item?.type),country=clean(item?.country);
+  if(sections.some(s=>s.includes("k drama")||s.includes("k-drama")))return ["kdrama","K-Drama"];
+  if(sections.some(s=>s.includes("c drama")||s.includes("c-drama")))return ["cdrama","C-Drama"];
+  if(sections.some(s=>s.includes("south indian")||s.includes("south movie")))return ["south","South Indian Movies"];
+  if(sections.some(s=>s.includes("bollywood")))return ["bollywood","Bollywood"];
+  if(sections.some(s=>s.includes("hollywood")))return ["hollywood","Hollywood"];
+  if(type==="anime"||sections.some(s=>s.includes("anime")))return ["anime","Anime"];
+  if(type==="series"||type==="drama"||sections.some(s=>s.includes("drama")||s.includes("series")))return ["drama","Drama"];
+  if(["united states","usa","us","united kingdom","uk","britain","american","british"].includes(country))return ["hollywood","Hollywood"];
+  if(type==="movie")return ["movie","Movies"];
+  return ["","More titles"];
+ }
+ async function loadSuggested(detail){
+  const box=$("#movieWatchSuggested"),grid=$("#movieWatchSuggestedGrid"),title=$("#movieWatchSuggestedTitle");
+  const response=await fetch("/api/movie-api/home",{cache:"no-store"});if(!response.ok)throw new Error("Catalog API unavailable");
+  const api=await response.json();if(!api.ok)return;
+  const map=new Map();
+  const add=(x,section)=>{if(!x||typeof x!=="object")return;const p=String(x.path||"");if(!p.startsWith("/mb/"))return;const k=p;if(!map.has(k))map.set(k,{...x,_sections:[]});if(section&&!map.get(k)._sections.includes(section))map.get(k)._sections.push(section);};
+  ["sections","allOfficialSections"].forEach(key=>(api[key]||[]).forEach(s=>(s.items||[]).forEach(x=>add(x,s.title))));
+  ["trending","comingSoon","banners"].forEach(key=>(api[key]||[]).forEach(x=>add(x,key)));
+  const current=[...map.values()].find(x=>x.path===path);
+  const synthetic={...detail,_sections:current?current._sections:[]};
+  let [group,label]=suggestedGroup(synthetic);
+  if(!group&&current){
+   const best=current._sections.find(s=>!/(trending|coming soon|featured)/i.test(s));
+   if(best){group="section";label=best;}
+  }
+  let list=[...map.values()].filter(x=>x.path!==path);
+  if(group==="section")list=list.filter(x=>x._sections.includes(label));
+  else if(group)list=list.filter(x=>suggestedGroup(x)[0]===group);
+  if(!list.length&&current?. _sections?.length)list=[...map.values()].filter(x=>x.path!==path&&x._sections.some(s=>current._sections.includes(s)));
+  const hindi=x=>/hindi dubbed/i.test(String(x.language||""))||(/hindi/i.test(String(x.language||""))&&(x._sections||[]).some(s=>/south indian.*hindi dubbed|anime in hindi/i.test(s)));
+  list.sort((a,b)=>Number(hindi(b))-Number(hindi(a))||(Number(b.uploadedAtMs)||0)-(Number(a.uploadedAtMs)||0));
+  list=list.slice(0,12);if(!list.length)return;
+  title.textContent="More "+label;
+  grid.innerHTML=list.map(x=>'<a class="ms-suggested-card" href="watch.html?path='+encodeURIComponent(x.path)+'"><img loading="lazy" src="'+esc(safeImage(x.poster||x.previewImage))+'" alt="'+esc(x.title||"")+'"><span><b>'+esc(x.title||"Untitled")+'</b><small>'+esc(x.language||x.typeBadge||"")+'</small></span></a>').join("");
+  box.hidden=false;
+ }
  async function load(){
   if(!/^\/mb\/[a-zA-Z0-9_./-]{1,300}$/.test(path)){status.textContent="Invalid title link.";return;}
   try{
@@ -57,8 +97,9 @@
    const dubLabels=currentDubs.map(x=>getLang(x)).filter(Boolean);
    const hindiDub=dubLabels.some(isHindi)||episodes.some(e=>isHindi(getLang(e))||getSources(e).some(s=>isHindi(s.audioLanguage)));
    document.title=(d.title||"Watch")+" — MovieStream BD";
-   root.innerHTML='<section class="ms-title-detail">'+(poster?'<img class="ms-title-poster" src="'+esc(poster)+'" alt="'+esc(d.title||"Poster")+'">':'')+'<div class="ms-title-copy"><p class="eyebrow">MOVIESTREAM BD · '+(isDrama?"DRAMA SERIES":"MOVIE")+'</p><h1>'+esc(d.title||"Untitled")+'</h1><p class="muted">'+esc(d.releaseDate||"")+' · '+esc(d.quality||d.resolution||"")+' · '+esc(d.language||"")+'</p><p>'+esc(d.storyline||"")+'</p><p><b>Genre:</b> '+esc(d.genre||"Not specified")+'</p><p><b>Audio Languages:</b> '+esc(dubLabels.join(", ")||d.language||"Not listed")+'</p><p><b>Hindi Audio:</b> '+(hindiDub?"Available":"Not confirmed by source metadata")+'</p></div></section><section class="ms-watch-player"><div class="video-heading"><div><p class="eyebrow">NOW PLAYING</p><h2 id="movieWatchNow">Loading first '+(isDrama?"episode":"version")+'…</h2></div><button class="btn ghost" id="movieWatchUnmute" type="button" hidden>🔊 Turn Sound On</button></div><div id="movieWatchAudioBox" class="ms-audio-box"></div><p id="movieWatchMessage" class="muted" aria-live="polite">Preparing video…</p><video id="movieWatchVideo" class="movie-player" controls playsinline preload="auto" '+(poster?'poster="'+esc(poster)+'"':'')+'></video></section><section class="ms-episode-section"><div class="section-head"><div><p class="eyebrow">'+(isDrama?"SEASON & EPISODE GUIDE":"PLAYBACK OPTIONS")+'</p><h2>'+listTitle+' <em>('+episodes.length+')</em></h2></div></div><div class="movie-api-episodes">'+episodeRows+'</div></section>';
+   root.innerHTML='<section class="ms-title-detail">'+(poster?'<img class="ms-title-poster" src="'+esc(poster)+'" alt="'+esc(d.title||"Poster")+'">':'')+'<div class="ms-title-copy"><p class="eyebrow">MOVIESTREAM BD · '+(isDrama?"DRAMA SERIES":"MOVIE")+'</p><h1>'+esc(d.title||"Untitled")+'</h1><p class="muted">'+esc(d.releaseDate||"")+' · '+esc(d.quality||d.resolution||"")+' · '+esc(d.language||"")+'</p><p>'+esc(d.storyline||"")+'</p><p><b>Genre:</b> '+esc(d.genre||"Not specified")+'</p><p><b>Audio Languages:</b> '+esc(dubLabels.join(", ")||d.language||"Not listed")+'</p><p><b>Hindi Audio:</b> '+(hindiDub?"Available":"Not confirmed by source metadata")+'</p></div></section><section class="ms-watch-player"><div class="video-heading"><div><p class="eyebrow">NOW PLAYING</p><h2 id="movieWatchNow">Loading first '+(isDrama?"episode":"version")+'…</h2></div><button class="btn ghost" id="movieWatchUnmute" type="button" hidden>🔊 Turn Sound On</button></div><div id="movieWatchAudioBox" class="ms-audio-box"></div><p id="movieWatchMessage" class="muted" aria-live="polite">Preparing video…</p><video id="movieWatchVideo" class="movie-player" controls playsinline preload="auto" '+(poster?'poster="'+esc(poster)+'"':'')+'></video></section><section id="movieWatchSuggested" class="ms-suggested-section" hidden><div class="section-head"><div><p class="eyebrow">KEEP WATCHING</p><h2 id="movieWatchSuggestedTitle">Suggested for you</h2></div></div><div id="movieWatchSuggestedGrid" class="ms-suggested-grid"></div></section><section class="ms-episode-section"><div class="section-head"><div><p class="eyebrow">'+(isDrama?"SEASON & EPISODE GUIDE":"PLAYBACK OPTIONS")+'</p><h2>'+listTitle+' <em>('+episodes.length+')</em></h2></div></div><div class="movie-api-episodes">'+episodeRows+'</div></section>';
    status.textContent="Details loaded successfully.";
+   loadSuggested(d).catch(e=>console.warn("Suggested titles unavailable",e));
    root.addEventListener("click",e=>{const b=e.target.closest("[data-watch-episode]");if(b)start(Number(b.dataset.watchEpisode));});
    $("#movieWatchUnmute").addEventListener("click",()=>{const v=$("#movieWatchVideo");v.muted=false;v.volume=1;$("#movieWatchUnmute").textContent="Sound On";});
    if(episodes.length){
