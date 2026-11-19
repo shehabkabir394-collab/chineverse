@@ -253,7 +253,7 @@
   const hindiAnime=allLatest(allTitles.filter(item=>isAnime(item)&&!isNigerian(item)&&isHindiDubbed(item)));
   let out="";
   const within24h=allLatest(allTitles.filter(item=>uploadTime(item)>Date.now()-24*60*60*1000&&uploadTime(item)<=Date.now()+60*60*1000));
-  const topTen=prioritySort(trending).slice(0,10);
+  const topTen=prioritySort(Array.isArray(home._topTen)&&home._topTen.length?home._topTen:trending).slice(0,10);
   const collections=Array.isArray(home.collections)?home.collections:[];
   const upcoming=Array.isArray(home.upcoming)?home.upcoming:(Array.isArray(home.upcomingReleases)?home.upcomingReleases:[]);
   const tagged=pattern=>allLatest(allTitles.filter(item=>pattern.test(sectionTags(item)+" "+String([item.category,item.genre,item.genres,item.type,item.typeBadge,item.language,item.country,item.originCountry].join(" ")).toLowerCase())));
@@ -351,13 +351,17 @@
    const dramaJob=fetchPages("/drama",4).then(items=>items.map(item=>({...item,_dramaCatalog:true,_sections:[...(item._sections||[]),"Drama Catalog"]}))).catch(()=>[]);
    const koreanJob=fetchPages("/language/korean",4).then(items=>items.map(item=>({...item,_koreanCatalog:true,_sections:[...(item._sections||[]),"Korean Catalog"]}))).catch(()=>[]);
    const animeJob=fetchPages("/anime",4).then(items=>items.map(item=>({...item,_animeCatalog:true,_sections:[...(item._sections||[]),"Anime Catalog"]}))).catch(()=>[]);
-   const [latestResults,hindiResults,dramaResults,koreanResults,animeResults]=await Promise.all([
-    Promise.all(latestJobs),hindiJob,dramaJob,koreanJob,animeJob
+   const topTenJob=fetchPages("/mostwatch/7d",1).catch(()=>[]);
+   const upcomingJob=fetchPages("/upcoming",2).catch(()=>[]);
+   const [latestResults,hindiResults,dramaResults,koreanResults,animeResults,topTenResults,upcomingResults]=await Promise.all([
+    Promise.all(latestJobs),hindiJob,dramaJob,koreanJob,animeJob,topTenJob,upcomingJob
    ]);
    const keyOf=item=>pathOf(item)||String(item.id||item.title||"").trim().toLowerCase();
    const hindiKeys=new Set(hindiResults.map(keyOf).filter(Boolean));
    const markHindiIntersection=items=>items.map(item=>({...item,_hindiCatalog:hindiKeys.has(keyOf(item))}));
    home._extraLatest=latestResults.flat();
+   home._topTen=topTenResults;
+   if(upcomingResults.length)home.upcoming=upcomingResults;
    home._extraHindi=hindiResults;
    home._extraClassified=[...markHindiIntersection(dramaResults),...markHindiIntersection(koreanResults),...markHindiIntersection(animeResults)];
    const sourceSections=Array.isArray(home.sections)?home.sections:[];
