@@ -4,6 +4,14 @@ const $=s=>document.querySelector(s),params=new URLSearchParams(location.search)
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const safeName=s=>String(s||"MovieStreamBD").replace(/[\\/:*?"<>|]+/g," ").replace(/\s+/g," ").trim().slice(0,100)||"MovieStreamBD";
 let episodes=[],selected=requested,detail=null,downloadable=[],busy=false;
+const seasonKey=item=>String(item?.seasonName||item?.seasonTitle||item?.seasonNumber||item?.season||"1");
+function episodeCoords(item,index){
+ const same=episodes.slice(0,index).filter(x=>seasonKey(x)===seasonKey(item)).length;
+ const rawSeason=item?.se??item?.seasonIndex, rawEpisode=item?.ep??item?.episodeIndex;
+ const se=rawSeason!=null?Number(rawSeason):item?.seasonNumber!=null?Math.max(0,Number(item.seasonNumber)-1):0;
+ const ep=rawEpisode!=null?Number(rawEpisode):item?.episodeNumber!=null?Math.max(0,Number(item.episodeNumber)-1):item?.number!=null?Math.max(0,Number(item.number)-1):same;
+ return {se:Math.max(0,Math.floor(se)||0),ep:Math.max(0,Math.floor(ep)||0)};
+}
 function getSources(ep){
  const raw=[...(Array.isArray(ep?.sources)?ep.sources:[])];
  raw.push(...(Array.isArray(ep?.downloadButtons)?ep.downloadButtons.map(b=>({url:b.downloadUrl||b.url,quality:b.quality||b.label,type:b.type||"mp4",audioLanguage:b.audioLanguage||b.language})):[]));
@@ -29,9 +37,9 @@ function updateSources(){
  $("#downloadZip").hidden=episodes.length<2||!detail?.subjectId&&!detail?.subject_id&&!detail?.id&&!detail?.subject?.subjectId;
 }
 async function loadStreamSources(index){
- const ep=episodes[index],subjectId=detail?.subjectId||detail?.subject_id||detail?.id||detail?.subject?.subjectId;
+ const ep=episodes[index],subjectId=detail?.subjectId||detail?.subject_id||detail?.subject?.subjectId||detail?.subject?.id||detail?.id;
  if(!subjectId)return;
- try{const r=await fetch("/api/movie-api/stream?subjectId="+encodeURIComponent(subjectId)+"&se="+encodeURIComponent(ep?.se??ep?.seasonNumber??0)+"&ep="+encodeURIComponent(ep?.ep??ep?.episodeNumber??index),{cache:"no-store"});const data=await r.json();if(!r.ok||data?.ok===false)throw new Error(data?.error||"Stream sources unavailable");
+ try{const r=await fetch("/api/movie-api/stream?subjectId="+encodeURIComponent(subjectId)+"&se="+encodeURIComponent(episodeCoords(ep,index).se)+"&ep="+encodeURIComponent(episodeCoords(ep,index).ep),{cache:"no-store"});const data=await r.json();if(!r.ok||data?.ok===false)throw new Error(data?.error||"Stream sources unavailable");
  ep.downloadButtons=Array.isArray(data.downloadButtons)?data.downloadButtons:[];
  ep.sources=[...(ep.sources||[]),...(Array.isArray(data.sources)?data.sources.map(s=>({...s,url:s.downloadUrl||s.url})):[])];
  }catch(e){console.warn("Download source lookup:",e.message);}
@@ -45,7 +53,7 @@ $("#downloadQuality").addEventListener("change",()=>{
 $("#downloadEpisode").addEventListener("change",async()=>{selected=Number($("#downloadEpisode").value)||0;$("#downloadSubtitle").textContent=episodes[selected]?.label||("Episode "+(selected+1));await loadStreamSources(selected);updateSources();});
 $("#downloadZip").addEventListener("click",async()=>{
  if(busy)return;
- const subjectId=detail?.subjectId||detail?.subject_id||detail?.id||detail?.subject?.subjectId,quality=selectedQuality();
+ const subjectId=detail?.subjectId||detail?.subject_id||detail?.subject?.subjectId||detail?.subject?.id||detail?.id,quality="best";
  if(!subjectId||!quality)return;
  if(!window.JSZip){$("#downloadStatus").textContent="ZIP library load হয়নি। Page refresh করে আবার চেষ্টা করুন।";return;}
  busy=true;const btn=$("#downloadZip"),progress=$("#zipProgress"),bar=$("#zipProgressBar"),label=$("#zipProgressText");
@@ -53,7 +61,7 @@ $("#downloadZip").addEventListener("click",async()=>{
  const zip=new JSZip(),folder=zip.folder(safeName(detail.title||"Drama")),failed=[];
  try{
   for(let i=0;i<episodes.length;i++){
-   const item=episodes[i],se=Math.max(0,Number(item.se??0)),ep=Math.max(0,Number(item.ep??i));
+   const item=episodes[i],coords=episodeCoords(item,i),se=coords.se,ep=coords.ep;
    label.textContent="Episode "+(i+1)+" / "+episodes.length+" ডাউনলোড হচ্ছে…";
    const url="/api/movie-api/download-file?subjectId="+encodeURIComponent(subjectId)+"&se="+encodeURIComponent(se)+"&ep="+encodeURIComponent(ep)+"&quality="+encodeURIComponent(quality);
    try{const response=await fetch(url);if(!response.ok)throw new Error("HTTP "+response.status);const blob=await response.blob();if(!blob.size)throw new Error("Empty file");
@@ -66,7 +74,7 @@ $("#downloadZip").addEventListener("click",async()=>{
   if(failed.length)folder.file("DOWNLOAD-REPORT.txt","যেসব Episode ডাউনলোড হয়নি:\n"+failed.join("\n"));
   label.textContent="ZIP ফাইল তৈরি হচ্ছে…";
   const blob=await zip.generateAsync({type:"blob",compression:"STORE"},meta=>{bar.style.width=(75+Math.round(meta.percent*.25))+"%";});
-  const a=document.createElement("a"),objectUrl=URL.createObjectURL(blob);a.href=objectUrl;a.download=safeName(detail.title||"Drama")+"-"+quality+"p-Full-Drama.zip";document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(objectUrl),60000);
+  const a=document.createElement("a"),objectUrl=URL.createObjectURL(blob);a.href=objectUrl;a.download=safeName(detail.title||"Drama")+"-Full-Drama.zip";document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(objectUrl),60000);
   label.textContent="সম্পন্ন! "+(episodes.length-failed.length)+" / "+episodes.length+" Episode ZIP-এ যুক্ত হয়েছে"+(failed.length?" · "+failed.length+"টি বাদ গেছে":"");
   $("#downloadStatus").textContent=failed.length?"কিছু Episode source পাওয়া যায়নি। ZIP-এর DOWNLOAD-REPORT.txt দেখুন।":"Full Drama ZIP download শুরু হয়েছে।";
  }catch(err){label.textContent=err.message||"ZIP তৈরি করা যায়নি।";$("#downloadStatus").textContent="ZIP download ব্যর্থ হয়েছে। অন্য quality দিয়ে চেষ্টা করুন।";}
