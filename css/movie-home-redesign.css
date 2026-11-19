@@ -231,3 +231,38 @@
 }
 
 /* Latest uploads: two separate, non-duplicating shelves in newest-first order. */
+
+
+/* Premium touch-drag interaction for the featured poster carousel */
+.ms-hero-slider{touch-action:pan-y;user-select:none;-webkit-user-select:none;}
+.ms-hero-slider .ms-featured-copy,
+.ms-hero-slider .ms-featured-poster,
+.ms-hero-slider .ms-hero-backdrop{
+ transition:opacity .48s cubic-bezier(.22,.61,.36,1),transform .58s cubic-bezier(.22,.61,.36,1);
+}
+.ms-hero-slider.is-swiping .ms-featured-copy,
+.ms-hero-slider.is-swiping .ms-featured-poster,
+.ms-hero-slider.is-swiping .ms-hero-backdrop{
+ transition:none!important;
+ transform:translate3d(var(--swipe-x,0px),0,0)!important;
+}
+.ms-hero-slider .ms-hero-arrow{
+ display:grid;place-items:center;cursor:pointer;
+ transition:transform .2s ease,background .2s ease,border-color .2s ease;
+}
+.ms-hero-slider .ms-hero-arrow:active{transform:scale(.9);background:#ff174d55;border-color:#fff;}
+.ms-hero-slider .ms-hero-dot{cursor:pointer;}
+.ms-hero-slider .ms-hero-dot:focus-visible,
+.ms-hero-slider .ms-hero-arrow:focus-visible{outline:2px solid #ffca28;outline-offset:4px;}
+.ms-hero-slider .ms-hero-counter{padding:7px 11px;border:1px solid #ffffff30;border-radius:20px;background:#080b12a8;backdrop-filter:blur(12px);}
+@media(max-width:760px){
+ .ms-hero-slider{overflow:hidden;touch-action:pan-y pinch-zoom;}
+ .ms-hero-slider .ms-featured-poster img{pointer-events:none;-webkit-user-drag:none;}
+ .ms-hero-slider .ms-hero-controls{gap:9px;}
+ .ms-hero-slider .ms-hero-dots{max-width:42vw;overflow:hidden;}
+}
+@media(prefers-reduced-motion:reduce){
+ .ms-hero-slider.is-swiping .ms-featured-copy,
+ .ms-hero-slider.is-swiping .ms-featured-poster,
+ .ms-hero-slider.is-swiping .ms-hero-backdrop{transform:none!important;}
+}
