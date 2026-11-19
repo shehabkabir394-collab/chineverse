@@ -8,7 +8,7 @@
  if(!root||!status||!search||!nav)return;
  let home=null,hindiCatalog=[];
  const isHindiDubbed=item=>{
-  const norm=value=>String(value??"").trim().toLowerCase().replace(/[_-]+/g," ").replace(/\\s+/g," ");
+  const norm=value=>String(value??"").trim().toLowerCase().replace(/[_-]+/g," ").replace(/\s+/g," ");
   const exactHindi=value=>/^(hindi|hindi dubbed|hindi dub|hindi audio|हिंदी|हिन्दी)$/.test(norm(value));
   const audioFields=[
    item?.audioLanguage,item?.audioLanguages,item?.dubLanguage,item?.dubLanguages,
@@ -38,7 +38,7 @@
   const fields=[item?.uploadedAtMs,item?.uploadTimestamp,item?.uploadedAt,item?.uploadTime,item?.dateAdded,item?.addedAt];
   for(const value of fields){
    if(value==null||value==="")continue;
-   if(typeof value==="number"||(typeof value==="string"&&/^\\d{9,16}$/.test(value.trim()))){
+   if(typeof value==="number"||(typeof value==="string"&&/^\d{9,16}$/.test(value.trim()))){
     const n=Number(value);
     if(Number.isFinite(n)&&n>0)return n<1000000000000?n*1000:n;
    }
