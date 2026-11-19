@@ -21,3 +21,9 @@
 .ms-audio-choice{display:inline-flex;align-items:center;gap:9px;color:var(--text);font-size:13px;font-weight:700}
 .ms-audio-choice select{min-width:130px;padding:9px 12px;border:1px solid #ffffff25;border-radius:9px;background:#101a2b;color:var(--text)}
 .ms-audio-box>.muted{font-size:12px}
+
+/* MovieStreamBD custom brand logo */
+.topbar .brand,.topbar .brand:hover,footer .brand{display:inline-flex;align-items:center;text-decoration:none;flex:0 0 auto}
+.ms-brand-logo{display:block;width:clamp(178px,19vw,238px);height:auto;max-height:52px;object-fit:contain}
+footer .ms-brand-logo{width:205px;max-height:46px}
+@media(max-width:760px){.ms-brand-logo{width:clamp(142px,42vw,190px);max-height:43px}}
