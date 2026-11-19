@@ -36,6 +36,7 @@
   message.textContent="Loading available stream sources…";
   let sources=getSources(ep);
   const detail=watchDetail||{};
+  currentSubtitles=getSubtitles(ep,detail);
   const season=Number(ep.seasonNumber??ep.season??0)||0;
   const episodeNumber=Number(ep.number??ep.episodeNumber??(index+1))||index+1;
   try{
