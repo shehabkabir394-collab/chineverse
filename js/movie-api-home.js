@@ -8,25 +8,28 @@
  if(!root||!status||!search||!nav)return;
  let home=null,hindiCatalog=[];
  const isHindiDubbed=item=>{
+  if(item?._hindiCatalog===true)return true;
   const norm=value=>String(value??"").trim().toLowerCase().replace(/[_-]+/g," ").replace(/\\s+/g," ");
   const exactHindi=value=>/^(hindi|hindi dubbed|hindi dub|hindi audio|हिंदी|हिन्दी|hi|hin)$/.test(norm(value));
-  const audioFields=[item?.audioLanguage,item?.audioLanguages,item?.dubLanguage,item?.dubLanguages,item?.dubbedLanguages,item?.availableAudio,item?.availableLanguages,item?.languages,item?.audio,item?.audioTrack,item?.audioTracks,item?.dubbing,item?.audioInfo,item?.audioOptions];
-  const hasHindi=value=>{
-   if(Array.isArray(value))return value.some(hasHindi);
+  const containsHindi=value=>{
+   if(Array.isArray(value))return value.some(containsHindi);
    if(value&&typeof value==="object"){
     const code=norm(value.code||value.languageCode||value.lang);
     return /^(hi|hin)$/.test(code)||[value.language,value.name,value.label,value.title].some(exactHindi);
    }
-   return exactHindi(value);
+   return exactHindi(value)||/(^|[,;|/])\\s*(hindi|hi|hin|हिंदी|हिन्दी)\\s*($|[,;|/])/.test(norm(value));
   };
-  return exactHindi(item?.language)||audioFields.some(hasHindi);
+  const audioFields=[item?.audioLanguage,item?.audioLanguages,item?.dubLanguage,item?.dubLanguages,item?.dubbedLanguages,item?.availableAudio,item?.availableLanguages,item?.languages,item?.audio,item?.audioTrack,item?.audioTracks,item?.dubbing,item?.audioInfo,item?.audioOptions];
+  return exactHindi(item?.language)||audioFields.some(containsHindi);
  };
  const pathOf=item=>{
   if(typeof item.path==="string"&&item.path.startsWith("/mb/"))return item.path;
   try{const p=new URL(item.detailsEndpoint).searchParams.get("path");return p?.startsWith("/mb/")?p:"";}catch{return "";}
  };
  const posterOf=item=>{
-  for(const value of [item?.poster,item?.previewImage])if(typeof value==="string"&&/^https?:\/\//i.test(value))return value;
+  for(const value of [item?.poster,item?.previewImage,item?.posterUrl,item?.poster_url,item?.image,item?.imageUrl,item?.cover,item?.coverImage,item?.thumbnail,item?.thumb]){
+   if(typeof value==="string"&&/^https?:\/\//i.test(value))return value;
+  }
   return "";
  };
  const uploadTime=item=>{
@@ -174,7 +177,9 @@
   const pool=[
    ...sections.flatMap(s=>(Array.isArray(s.items)?s.items:[]).map(item=>({...item,_sections:[...(item._sections||[]),text(s.title)]}))),
    ...(Array.isArray(home.allOfficialSections)?home.allOfficialSections.flatMap(s=>(Array.isArray(s.items)?s.items:[]).map(item=>({...item,_sections:[...(item._sections||[]),text(s.title)]}))):[]),
-   ...trending
+   ...trending,
+   ...(Array.isArray(home._extraLatest)?home._extraLatest:[]),
+   ...(Array.isArray(home._extraHindi)?home._extraHindi:[])
   ];
   const unique=new Map();
   pool.forEach(item=>{const key=pathOf(item)||String(item.id||item.title||"");if(key&&!unique.has(key))unique.set(key,item);});
@@ -182,8 +187,8 @@
   const sectionTags=item=>(item._sections||[]).join(" ").toLowerCase();
   const isKDrama=item=>{
    const tags=sectionTags(item),type=String(item.typeBadge||item.type||"").toLowerCase();
-   const korean=/korea|south korea|republic of korea/i.test(String(item.country||""))||/^korean$/i.test(String(item.language||""));
-   return /k[- ]?drama|korean drama/.test(tags)||(korean&&(/^(drama|series|tv show|tv series)$/i.test(type)||/drama|series/.test(tags)));
+   const korean=/korea|south korea|republic of korea/i.test(String([item.country,item.originCountry,item.productionCountry,item.originalCountry].join(" ")))||/^(korean|ko)$/i.test(String(item.originalLanguage||item.language||""));
+   return /k[- ]?drama|korean drama/.test(tags)||(korean&&(/^(drama|series|tv show|tv series|show)$/i.test(type)||/drama|series/.test(tags)||Array.isArray(item.episodes)));
   };
   const isAnime=item=>{
    const tags=sectionTags(item);
@@ -199,16 +204,18 @@
   const isDrama=item=>{
    const tags=sectionTags(item);
    const type=String(item.typeBadge||item.type||"").toLowerCase();
-   return /^(drama|series|tv show|tv series|show)$/i.test(type)||/drama|series|tv show|k drama|korean drama/.test(tags);
+   return /^(drama|series|tv show|tv series|show|web series)$/i.test(type)||/drama|series|tv show|k drama|korean drama|tv show/.test(tags)||Array.isArray(item.episodes);
   };
   const allLatest=items=>[...new Map(items.map(item=>[pathOf(item)||String(item.id||item.title||""),item])).values()].sort(newestFirst);
-  const recentCutoff=Date.now()-90*24*60*60*1000;
-  const inLatestFeed=item=>/(latest|recent|new release|new upload|newly added|recently added)/i.test(sectionTags(item));
-  const isRecentUpload=item=>uploadTime(item)>=recentCutoff||inLatestFeed(item);
-  const newReleases=allLatest(allTitles.filter(item=>(isMovie(item)||isDrama(item))&&!isAnime(item)&&isRecentUpload(item)));
+  const recentCutoff=Date.now()-180*24*60*60*1000;
+  const inLatestFeed=item=>item?._latestFeed===true||/(latest|recent|new release|new upload|newly added|recently added)/i.test(sectionTags(item));
+  const isRecentUpload=item=>item?._latestFeed===true||(uploadTime(item)>0&&uploadTime(item)>=recentCutoff);
+  const latestSource=allTitles.filter(item=>item?._latestFeed===true);
+  const newReleasePool=latestSource.length?latestSource:allTitles.filter(item=>isRecentUpload(item)||inLatestFeed(item));
+  const newReleases=allLatest(newReleasePool.filter(item=>(isMovie(item)||isDrama(item)||item?._latestFeed===true)&&!isAnime(item)));
   const hindiMovies=allLatest(allTitles.filter(item=>isMovie(item)&&!isAnime(item)&&isHindiDubbed(item)));
   const hindiKdramas=allLatest(allTitles.filter(item=>isKDrama(item)&&isHindiDubbed(item)));
-  const hindiDramas=allLatest(allTitles.filter(item=>isDrama(item)&&!isAnime(item)&&isHindiDubbed(item)));
+  const hindiDramas=allLatest(allTitles.filter(item=>isDrama(item)&&!isKDrama(item)&&!isAnime(item)&&isHindiDubbed(item)));
   const hindiAnime=allLatest(allTitles.filter(item=>isAnime(item)&&isHindiDubbed(item)));
   let out="";
   out+=section("New Release Movies & Dramas","🆕 VERIFIED RECENT UPLOADS · NEWEST FIRST",newReleases.slice(0,14),"/type/movies");
@@ -261,17 +268,41 @@
    const d=await r.json();
    if(!r.ok||d.ok!==true)throw new Error(d.error||"Catalog unavailable");
    home=d;
-   // Build dubbed shelves from the cached homepage payload.
-   // Avoid three extra upstream catalog requests on every homepage visit.
+   const catalogPage=async(path,page=1)=>{
+    const response=await fetch("/api/movie-api/catalog?path="+encodeURIComponent(path)+"&page="+page);
+    const payload=await response.json();
+    if(!response.ok||payload.ok!==true)throw new Error(payload.error||"Category feed unavailable");
+    return payload;
+   };
+   const sectionList=[...(Array.isArray(home.sections)?home.sections:[]),...(Array.isArray(home.allOfficialSections)?home.allOfficialSections:[])];
+   const latestSections=sectionList.filter(section=>/(latest|recent|new release|new upload|newly added|recently added)/i.test(String(section.title||"")));
+   const latestPaths=[...new Set(latestSections.map(section=>String(section.categoryPath||section.path||"").trim()).filter(path=>path.startsWith("/")))];
+   const latestJobs=latestPaths.slice(0,3).map(async path=>{
+    const first=await catalogPage(path,1);
+    const max=Math.min(8,Math.max(1,Number(first.maxPage)||1));
+    const pages=[first];
+    for(let page=2;page<=max;page++)pages.push(await catalogPage(path,page));
+    return pages.flatMap(payload=>(Array.isArray(payload.items)?payload.items:[]).map(item=>({...item,_latestFeed:true,_sections:["Latest Uploads"]})));
+   });
+   const hindiJob=(async()=>{
+    const first=await catalogPage("/language/hindi-dubbed",1);
+    const max=Math.min(10,Math.max(1,Number(first.maxPage)||1));
+    const pages=[first];
+    for(let page=2;page<=max;page++)pages.push(await catalogPage("/language/hindi-dubbed",page));
+    return pages.flatMap(payload=>(Array.isArray(payload.items)?payload.items:[]).map(item=>({...item,_hindiCatalog:true,_sections:[...(item._sections||[]),"Hindi Dubbed Catalog"]})));
+   })();
+   const [latestResults,hindiResults]=await Promise.all([
+    Promise.all(latestJobs).catch(()=>[]),
+    hindiJob.catch(()=>[])
+   ]);
+   home._extraLatest=latestResults.flat();
+   home._extraHindi=hindiResults;
    const sourceSections=Array.isArray(home.sections)?home.sections:[];
    const pool=[
-    ...sourceSections.flatMap(section=>(Array.isArray(section.items)?section.items:[]).map(item=>({
-     ...item,_sections:[...(item._sections||[]),text(section.title)]
-    }))),
-    ...(Array.isArray(home.allOfficialSections)?home.allOfficialSections.flatMap(section=>(Array.isArray(section.items)?section.items:[]).map(item=>({
-     ...item,_sections:[...(item._sections||[]),text(section.title)]
-    }))):[]),
-    ...(Array.isArray(home.trending)?home.trending:[]).map(item=>({...item,_sections:[...(item._sections||[]),"Trending Now"]}))
+    ...sourceSections.flatMap(section=>(Array.isArray(section.items)?section.items:[]).map(item=>({...item,_sections:[...(item._sections||[]),text(section.title)]}))),
+    ...(Array.isArray(home.allOfficialSections)?home.allOfficialSections.flatMap(section=>(Array.isArray(section.items)?section.items:[]).map(item=>({...item,_sections:[...(item._sections||[]),text(section.title)]}))):[]),
+    ...(Array.isArray(home.trending)?home.trending:[]).map(item=>({...item,_sections:[...(item._sections||[]),"Trending Now"]})),
+    ...home._extraHindi
    ];
    const keys=new Set();
    hindiCatalog=pool.filter(item=>{
