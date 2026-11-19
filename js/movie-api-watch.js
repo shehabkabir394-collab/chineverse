@@ -3,7 +3,7 @@
  const $=s=>document.querySelector(s),esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
  const safeImage=s=>/^https:\/\//i.test(s||"")?s:"";
  const params=new URLSearchParams(location.search),path=params.get("path")||"",root=$("#movieWatchRoot"),status=$("#movieWatchStatus");
- let episodes=[],playerApi=null,selected=-1,currentSources=[],currentDubs=[];
+ let episodes=[],playerApi=null,selected=-1,currentSources=[],currentDubs=[],watchDetail=null,streamRequest=0;
  const getLang=o=>String(o?.audioLanguage||o?.dubLanguage||o?.language||o?.lang||o?.audio||o?.label||o?.name||"").trim();
  const isHindi=s=>/^(hi|hin|hindi)([-_ ]|$)/i.test(String(s||"").trim())||/hindi|हिन्दी|हिंदी/i.test(String(s||""));
  function getSources(ep){
@@ -23,11 +23,29 @@
   const preferred=langs.find(isHindi)||langs[0];
   return '<label class="ms-audio-choice">Audio Track <select id="movieWatchAudio">'+langs.map(l=>'<option value="'+esc(l)+'" '+(l===preferred?"selected":"")+'>'+esc(l)+'</option>').join("")+'</select></label>';
  }
- function start(index){
+ async function start(index){
   const ep=episodes[index];if(!ep)return;
-  const sources=getSources(ep),video=$("#movieWatchVideo"),message=$("#movieWatchMessage");
+  const video=$("#movieWatchVideo"),message=$("#movieWatchMessage");
+  selected=index;const requestId=++streamRequest;
+  message.textContent="Loading available stream sources…";
+  let sources=getSources(ep);
+  const detail=watchDetail||{};
+  const season=Number(ep.seasonNumber??ep.season??0)||0;
+  const episodeNumber=Number(ep.number??ep.episodeNumber??(index+1))||index+1;
+  try{
+   const query=new URLSearchParams({title:String(detail.title||""),se:String(season),ep:String(episodeNumber)});
+   if(!detail.title&&(detail.subjectId||detail.id))query.set("subjectId",String(detail.subjectId||detail.id));
+   const response=await fetch("/api/movie-api/stream?"+query.toString(),{cache:"no-store"});
+   const payload=await response.json();
+   if(requestId!==streamRequest)return;
+   const streamRoot=payload.stream||payload.data||payload.result||payload;
+   const streamItems=Array.isArray(streamRoot.sources)?streamRoot.sources:Array.isArray(streamRoot.streams)?streamRoot.streams:Array.isArray(streamRoot.urls)?streamRoot.urls:[];
+   const normalized=streamItems.map(s=>({url:s.url||s.playUrl||s.src||s.file,quality:s.quality||s.resolution||s.label||"720p",provider:s.provider||s.name||"Movie API",type:s.type||s.format||"",audioLanguage:getLang(s)})).filter(s=>{try{const u=new URL(s.url);return u.protocol==="https:"&&u.hostname==="hd-w0l1.onrender.com";}catch{return false;}});
+   if(normalized.length)sources=normalized.map(s=>({url:s.url,quality:/^\\d+$/.test(String(s.quality))?String(s.quality)+"p":String(s.quality),provider:s.provider,mime:/m3u8|hls/i.test(s.type)?"application/vnd.apple.mpegurl":"video/mp4",audioLanguage:s.audioLanguage}));
+  }catch(err){console.warn("Stream endpoint unavailable; using detail sources",err);}
+  if(requestId!==streamRequest)return;
   if(!sources.length){message.textContent="No playable source is available for this episode or version.";return;}
-  selected=index;currentSources=sources;
+  currentSources=sources;
   const downloadLink=$("#movieWatchDownload");if(downloadLink)downloadLink.href="download.html?path="+encodeURIComponent(path)+"&episode="+index;
   $("#movieWatchNow").textContent=ep.label||("Episode "+(ep.number||index+1));
   root.querySelectorAll("[data-watch-episode]").forEach((b,i)=>b.classList.toggle("active",i===index));
@@ -101,7 +119,7 @@
   try{
    const response=await fetch("/api/movie-api/details?path="+encodeURIComponent(path),{cache:"no-store"}),data=await response.json();
    if(!response.ok||!data.detail)throw new Error(data.error||"Details unavailable.");
-   const d=data.detail;episodes=Array.isArray(d.episodes)?d.episodes:[];currentDubs=Array.isArray(d.dubs)?d.dubs:[];
+   const d=data.detail;watchDetail=d;episodes=Array.isArray(d.episodes)?d.episodes:[];currentDubs=Array.isArray(d.dubs)?d.dubs:[];
    const poster=safeImage(d.poster),typeHint=[d.type,d.mediaType,d.typeBadge,d.category,d.categoryPath].join(" ").toLowerCase();
    const isDrama=/series|tv|drama|show|serial|web\s*series/.test(typeHint)||episodes.some(e=>/episode|season|ep\s*\d|s\d+\s*e\d+/i.test(String(e.kind||e.label||"")));
    const listTitle=isDrama?"Episodes":"Available Versions";
@@ -115,15 +133,15 @@
    status.textContent="Details loaded successfully.";
    const extras=document.createElement("section");extras.className="cv-watch-community";extras.innerHTML='<section id="cvComments"><h2>Comments</h2><p class="muted">Loading comments…</p></section><section id="cvCast"><h2>Cast &amp; Crew</h2><p class="muted">Loading cast…</p></section>';root.appendChild(extras);
    const safeText=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-   const subjectId=d.subjectId||d.id||d.subject_id;
+   const subjectId=d.subjectId||d.subject_id||d.commentSubjectId||d.comment_subject_id||d.contentId||d.id||d._id;
    if(subjectId!=null){
     fetch("/api/movie-api/comments?subjectId="+encodeURIComponent(subjectId)+"&page=1").then(r=>r.json()).then(payload=>{
      const rows=Array.isArray(payload.comments)?payload.comments:Array.isArray(payload.items)?payload.items:Array.isArray(payload.list)?payload.list:[];
      $("#cvComments").innerHTML='<h2>Comments</h2>'+(rows.length?rows.slice(0,20).map(x=>'<article class="cv-comment"><b>'+safeText(x.userName||x.username||x.user||"Viewer")+'</b><p>'+safeText(x.content||x.comment||x.text||"")+'</p><small>'+safeText(x.createdAt||x.time||"")+'</small></article>').join(""):'<p class="muted">No comments available.</p>');
     }).catch(()=>{$("#cvComments").innerHTML='<h2>Comments</h2><p class="muted">Comments are unavailable right now.</p>';});
    }else $("#cvComments").innerHTML='<h2>Comments</h2><p class="muted">Comments are not available for this title.</p>';
-   const staffList=[...(Array.isArray(d.staff)?d.staff:[]),...(Array.isArray(d.cast)?d.cast:[]),...(Array.isArray(d.actors)?d.actors:[])];
-   const uniqueStaff=[...new Map(staffList.filter(x=>x&&typeof x==="object"&&(x.staffId||x.id)).map(x=>[String(x.staffId||x.id),x])).values()].slice(0,10);
+   const staffList=[...(Array.isArray(d.staff)?d.staff:[]),...(Array.isArray(d.cast)?d.cast:[]),...(Array.isArray(d.actors)?d.actors:[]),...(Array.isArray(d.crew)?d.crew:[])];
+   const uniqueStaff=[...new Map(staffList.filter(x=>x&&typeof x==="object"&&(x.staffId||x.staff_id||x.personId||x.actorId||x.id)).map(x=>[String(x.staffId||x.id),x])).values()].slice(0,10);
    if(uniqueStaff.length){
     $("#cvCast").innerHTML='<h2>Cast &amp; Crew</h2><div class="cv-cast-grid">'+uniqueStaff.map(x=>'<button type="button" class="cv-cast-person" data-staff-id="'+safeText(x.staffId||x.id)+'"><b>'+safeText(x.name||x.title||"Cast member")+'</b><small>'+safeText(x.role||x.character||x.job||"")+'</small></button>').join("")+'</div>';
     $("#cvCast").addEventListener("click",async e=>{const b=e.target.closest("[data-staff-id]");if(!b)return;try{const r=await fetch("/api/movie-api/staff?staffId="+encodeURIComponent(b.dataset.staffId)+"&page=1");const payload=await r.json();const detail=payload.staff||payload.person||payload.data||{};b.insertAdjacentHTML("afterend",'<p class="cv-staff-detail">'+safeText(detail.biography||detail.description||detail.name||"No additional biography available.")+'</p>');b.disabled=true;}catch{}});
