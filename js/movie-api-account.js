@@ -12,7 +12,7 @@ async function loadPlatform(name){
  const box=$("#cvPlatformResults");if(!box)return;
  box.innerHTML='<p class="muted">Loading '+esc(name)+'…</p>';
  try{const r=await fetch('/api/movie-api/platform?name='+encodeURIComponent(name)+'&page=1',{cache:"no-store"}),d=await r.json();if(!r.ok||d.ok===false)throw Error(d.error||"Platform unavailable");
- const items=arr(d.items||d.results||d.data||d).filter(isHindiDubbed);box.innerHTML=items.length?'<div class="cv-platform-grid">'+items.slice(0,24).map(card).join("")+'</div>':'<p class="muted">এই Platform-এ এখন কোনো title পাওয়া যায়নি।</p>';
+ const items=arr(d.items||d.results||d.data||d).filter(x=>x&&typeof x==="object");box.innerHTML=items.length?'<div class="cv-platform-grid">'+items.slice(0,24).map(card).join("")+'</div>':'<p class="muted">এই Platform-এ এখন কোনো title পাওয়া যায়নি।</p>';
  }catch(e){box.innerHTML='<p class="muted">'+esc(e.message||"Platform unavailable")+'</p>';}
 }
 async function initPlatforms(){
