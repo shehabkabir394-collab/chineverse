@@ -154,3 +154,32 @@ video,.movie-player{background:#000;border:1px solid rgba(255,255,255,.12);borde
  }
  .btn:hover,.chips button:hover,.movie-card:hover,.short-card:hover{transform:none!important}
 }
+
+/* 90Hz-friendly mobile interaction: keep main thread and compositor work minimal */
+@media(max-width:760px){
+ html{scroll-behavior:auto!important;overscroll-behavior-y:contain}
+ body{background-attachment:scroll!important}
+ *,*::before,*::after{scroll-behavior:auto!important;animation:none!important;transition:none!important}
+ .topbar,.hero,.ms-hero,.hero-art .cv,.btn,.admin-link,.chips button,
+ .short-episodes button,.short-episode,.movie-card,.short-card,.panel,
+ .features>div,.ftp-browser,.ftp-home-episodes,.movie-api-player,
+ .ms-watch-player,.short-player-shell,.short-controls,.movie-api-detail,
+ .notice,.bulk-panel,.video-section,.movie-api-language-badge,.quality,
+ .type-pill,.short-badge,input,select,textarea,footer{
+  -webkit-backdrop-filter:none!important;backdrop-filter:none!important
+ }
+ .hero,.ms-hero{box-shadow:none!important}
+ .hero:before{filter:none!important}
+ .movie-api-row,.movie-card,.short-card{content-visibility:auto;contain-intrinsic-size:320px}
+ .movie-api-shelf,.grid,.catalog-category-nav{
+  -webkit-overflow-scrolling:touch;overscroll-behavior-x:contain
+ }
+ .movie-api-poster img,.movie-card img,.short-card img{
+  content-visibility:auto;contain-intrinsic-size:160px 240px
+ }
+ .btn:hover,.chips button:hover,.movie-card:hover,.short-card:hover{transform:none!important}
+}
+@media(prefers-reduced-motion:reduce){
+ html,body{scroll-behavior:auto!important}
+ *,*::before,*::after{animation:none!important;transition:none!important}
+}
