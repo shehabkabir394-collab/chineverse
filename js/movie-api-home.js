@@ -36,7 +36,7 @@
   const fields=[item?.uploadedAtMs,item?.uploadTimestamp,item?.uploadedAt,item?.uploadTime,item?.uploadDate,item?.upload_date,item?.uploaded_on,item?.dateAdded,item?.addedAt];
   for(const value of fields){
    if(value==null||value==="")continue;
-   if(typeof value==="number"||(typeof value==="string"&&/^\\d{9,16}$/.test(value.trim()))){
+   if(typeof value==="number"||(typeof value==="string"&&/^\d{9,16}$/.test(value.trim()))){
     const n=Number(value);if(Number.isFinite(n)&&n>0)return n<1000000000000?n*1000:n;
    }
    const parsed=Date.parse(String(value));if(Number.isFinite(parsed))return parsed;
