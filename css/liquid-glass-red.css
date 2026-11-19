@@ -133,3 +133,24 @@ video,.movie-player{background:#000;border:1px solid rgba(255,255,255,.12);borde
   footer{gap:12px;padding:22px 14px}
 }
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important;animation:none!important}}
+
+/* Low-end Android GPU optimization: retain the look, remove expensive live blur */
+@media(max-width:760px){
+ body{background-attachment:scroll!important}
+ .topbar,.hero,.ms-hero,.hero-art .cv,.btn,.admin-link,.chips button,
+ .short-episodes button,.short-episode,.movie-card,.short-card,.panel,
+ .features>div,.ftp-browser,.ftp-home-episodes,.movie-api-player,
+ .ms-watch-player,.short-player-shell,.short-controls,.movie-api-detail,
+ .notice,.bulk-panel,.video-section,.movie-api-language-badge,.quality,
+ .type-pill,.short-badge,input,select,textarea,.movie-api-tools input,
+ .movie-api-tools select,.short-controls input,.short-controls select,footer{
+  -webkit-backdrop-filter:none!important;backdrop-filter:none!important
+ }
+ .hero:before{filter:none!important;opacity:.55}
+ .movie-card,.short-card,.panel,.features>div,.ftp-browser,.ftp-home-episodes,
+ .movie-api-player,.ms-watch-player,.short-player-shell,.short-controls,
+ .movie-api-detail,.notice,.bulk-panel,.video-section{
+  box-shadow:0 4px 12px rgba(0,0,0,.18),inset 0 1px rgba(255,255,255,.07)!important
+ }
+ .btn:hover,.chips button:hover,.movie-card:hover,.short-card:hover{transform:none!important}
+}
