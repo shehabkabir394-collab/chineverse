@@ -105,7 +105,7 @@
   let list=[...map.values()].filter(x=>x.path!==path&&isHindiDubbed(x));
   if(group==="section")list=list.filter(x=>x._sections.includes(label));
   else if(group)list=list.filter(x=>suggestedGroup(x)[0]===group);
-  if(!list.length&&current?._sections?.length)list=[...map.values()].filter(x=>x.path!==path&&x._sections.some(s=>current._sections.includes(s)));
+  if(!list.length&&current?._sections?.length)list=[...map.values()].filter(x=>x.path!==path&&isHindiDubbed(x)&&x._sections.some(s=>current._sections.includes(s)));
   const hindi=x=>/hindi dubbed/i.test(String(x.language||""))||(/hindi/i.test(String(x.language||""))&&(x._sections||[]).some(s=>/south indian.*hindi dubbed|anime in hindi/i.test(s)));
   list.sort((a,b)=>Number(hindi(b))-Number(hindi(a))||(Number(b.uploadedAtMs)||0)-(Number(a.uploadedAtMs)||0));
   list=list.slice(0,12);if(!list.length)return;
