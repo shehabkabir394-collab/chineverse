@@ -24,7 +24,7 @@
   const textValue=[item?.title,item?.type,item?.typeBadge,item?.category,item?.categoryName,item?.categoryLabel,item?.categoryPath,item?.genre,item?.genres,item?.country,item?.language,...(Array.isArray(item?._sections)?item._sections:[])].flat().map(v=>typeof v==="object"?[v?.name,v?.label,v?.title,v?.path].filter(Boolean).join(" "):String(v||"")).join(" ").toLowerCase();
   return /k[- ]?drama|korean drama|south korea|korea drama/.test(textValue);
  };
- const categoryPriority=(a,b)=>latestFirst(a,b)||popularity(b)-popularity(a)||Number(isHindiDubbed(b))-Number(isHindiDubbed(a))||Number(isKDramaItem(b))-Number(isKDramaItem(a));
+ const categoryPriority=(a,b)=>Number(isHindiDubbed(b))-Number(isHindiDubbed(a))||latestFirst(a,b)||popularity(b)-popularity(a)||Number(isKDramaItem(b))-Number(isKDramaItem(a));
  const vals=item=>{
   const out=[];
   ["categoryPath","category","categoryName","categoryLabel","categorySlug","type","typeBadge","genre","language","country"].forEach(k=>{
@@ -144,7 +144,7 @@
  function link(extra){const p=new URLSearchParams();if(selected)p.set("category",selected);if(letter)p.set("letter",letter);if(search?.value.trim())p.set("q",search.value.trim());Object.entries(extra||{}).forEach(([k,v])=>{if(v)p.set(k,String(v));else p.delete(k)});return "catalog.html?"+p.toString();}
  function render(){
   if(!data)return;
-  const filtered=all.filter(item=>!isNigerian(item)&&isHindiDubbed(item)&&matches(item)).sort(latestFirst);
+  const filtered=all.filter(item=>!isNigerian(item)&&matches(item)).sort(categoryPriority);
   const pages=Math.max(1,Math.ceil(filtered.length/pageSize));
   const safePage=Math.min(page,pages);
   const start=(safePage-1)*pageSize;
@@ -242,7 +242,7 @@
      "cv:hollywood":"/language/english"
     };
     const category=(data.categories||[]).find(x=>[x.path,x.slug,x.label,x.name,x.title].some(v=>norm(v)===norm(selected)));
-    const apiPath=customPaths[selected]||text(category?.path)||(selected.startsWith("/")?selected:"");
+    const apiPath=customPaths[selected]||text(category?.path)||(selected.startsWith("/")?selected:(!selected?"/type/movies":""));
 
     if(apiPath&&apiPath!=="/"){
      status.textContent="Loading "+(category?.label||customLabels[selected]||"Category")+" · Page "+page+"…";
