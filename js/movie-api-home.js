@@ -8,23 +8,22 @@
  if(!root||!status||!search||!nav)return;
  let home=null,hindiCatalog=[];
  const isHindiDubbed=item=>{
-  const norm=value=>String(value??"").trim().toLowerCase().replace(/[_-]+/g," ").replace(/\s+/g," ");
-  const exactHindi=value=>{
-   const v=norm(value);
-   return /^(hindi|hindi dubbed|hindi dub|hindi audio|हिंदी|हिन्दी)$/.test(v);
-  };
-  const fields=[
+  const norm=value=>String(value??"").trim().toLowerCase().replace(/[_-]+/g," ").replace(/\\s+/g," ");
+  const exactHindi=value=>/^(hindi|hindi dubbed|hindi dub|hindi audio|हिंदी|हिन्दी)$/.test(norm(value));
+  const audioFields=[
    item?.audioLanguage,item?.audioLanguages,item?.dubLanguage,item?.dubLanguages,
    item?.dubbedLanguages,item?.availableAudio,item?.availableLanguages,item?.languages,
-   item?.audio,item?.audioTrack,item?.audioTracks,item?.dubbed,item?.dubbing,
+   item?.audio,item?.audioTrack,item?.audioTracks,item?.dubbing,
   ];
-  const values=fields.flatMap(value=>Array.isArray(value)?value:[value]).flatMap(value=>{
-   if(value&&typeof value==="object")return [value.language,value.name,value.label,value.code].filter(Boolean);
-   return [value];
-  });
-  // Only explicit Hindi audio metadata qualifies. A Hindi category/section alone
-  // must never turn a Korean- or English-audio title into a Hindi-dubbed title.
-  return exactHindi(item?.language)||values.some(exactHindi);
+  const isAudioEntry=value=>{
+   if(Array.isArray(value))return value.some(isAudioEntry);
+   if(value&&typeof value==="object"){
+    const code=norm(value.code||value.languageCode||value.lang);
+    return /^(hi|hi in|hin)$/.test(code)||[value.language,value.name,value.label,value.title].some(exactHindi);
+   }
+   return exactHindi(value);
+  };
+  return exactHindi(item?.language)||audioFields.some(isAudioEntry);
  };
  const pathOf=item=>{
   if(typeof item.path==="string"&&item.path.startsWith("/mb/"))return item.path;
@@ -35,7 +34,8 @@
   return "";
  };
  const uploadTime=item=>{
-  const fields=[item?.uploadedAtMs,item?.uploadTimestamp,item?.uploadedAt,item?.uploadTime,item?.createdAt,item?.addedAt,item?.dateAdded,item?.publishedAt,item?.releaseDate,item?.updatedAt];
+  // Never use release date, createdAt or updatedAt as upload time.
+  const fields=[item?.uploadedAtMs,item?.uploadTimestamp,item?.uploadedAt,item?.uploadTime,item?.dateAdded,item?.addedAt];
   for(const value of fields){
    if(value==null||value==="")continue;
    if(typeof value==="number"||(typeof value==="string"&&/^\\d{9,16}$/.test(value.trim()))){
@@ -208,7 +208,7 @@
    const type=String(item.typeBadge||item.type||"").toLowerCase();
    return /^(drama|series|tv show|tv series|show)$/i.test(type)||/drama|series|tv show|k drama|korean drama/.test(tags);
   };
-  const allLatest=items=>[...new Map(items.map(item=>[pathOf(item)||String(item.id||item.title||""),item])).values()].sort(newestFirst);
+  const allLatest=items=>[...new Map(items.map(item=>[pathOf(item)||String(item.id||item.title||""),item])).values()].filter(item=>uploadTime(item)>0).sort(newestFirst);
   const newReleases=allLatest(allTitles.filter(item=>(isMovie(item)||isDrama(item))&&!isAnime(item)));
   const hindiMovies=allLatest(allTitles.filter(item=>isMovie(item)&&!isAnime(item)&&isHindiDubbed(item)));
   const hindiKdramas=allLatest(allTitles.filter(item=>isKDrama(item)&&isHindiDubbed(item)));
