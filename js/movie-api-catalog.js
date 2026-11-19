@@ -145,15 +145,17 @@
  function render(){
   if(!data)return;
   const filtered=all.filter(item=>!isNigerian(item)&&matches(item)).sort(categoryPriority);
-  const pages=Math.max(1,Math.ceil(filtered.length/pageSize));
+  const pages=apiCatalogMode
+   ? Math.max(1,Number(apiMeta?.maxPage||apiMeta?.totalPages||apiMeta?.pages)||1)
+   : Math.max(1,Math.ceil(filtered.length/pageSize));
   const safePage=Math.min(page,pages);
   const start=(safePage-1)*pageSize;
-  const items=filtered.slice(start,start+pageSize);
+  const items=apiCatalogMode?filtered:filtered.slice(start,start+pageSize);
   root.innerHTML=items.map(card).join("")||'<p class="muted">এই Category-তে কোনো title পাওয়া যায়নি। অন্য Category নির্বাচন করো।</p>';
   const c=(data.categories||[]).find(x=>[x.path,x.slug,x.label,x.name,x.title].some(v=>norm(v)===norm(selected)));
   heading.textContent=selected?(customLabels[selected]||c?.label||c?.name||c?.title||selected):"All Movies & Dramas A–Z";
   status.textContent=apiCatalogMode
-   ? "Page "+safePage+" of "+pages+" · Showing "+filtered.length+" titles"
+   ? "Page "+safePage+" of "+pages+" · Showing "+items.length+" titles"
    : filtered.length+" titles · Page "+safePage+" of "+pages+" · Showing "+(filtered.length?start+1:0)+"–"+Math.min(start+pageSize,filtered.length);
 
   const pageNumbers=[...new Set([1,safePage-1,safePage,safePage+1,pages].filter(n=>n>=1&&n<=pages))].sort((a,b)=>a-b);
@@ -234,25 +236,23 @@
      const cr=await fetch("/api/movie-api/catalog?path="+encodeURIComponent(apiPath)+"&page=1");
      const cd=await cr.json();
      if(!cr.ok||cd.ok!==true)throw new Error(cd.error||"Movie Catalog API unavailable");
-     const maxPage=Math.max(1,Math.min(100,Number(cd.maxPage)||1));
-     const pages=[cd];
-     for(let start=2;start<=maxPage;start+=6){
-      const batch=await Promise.all(Array.from({length:Math.min(6,maxPage-start+1)},(_,i)=>start+i).map(async pageNo=>{
-       const pageResponse=await fetch("/api/movie-api/catalog?path="+encodeURIComponent(apiPath)+"&page="+pageNo);
-       const pagePayload=await pageResponse.json();
-       if(!pageResponse.ok||pagePayload.ok!==true)throw new Error(pagePayload.error||"Movie Catalog API page "+pageNo+" unavailable");
-       return pagePayload;
-      }));
-      pages.push(...batch);
+     /* Fetch only the page the visitor requested. Previously this downloaded every
+        page in the category (sometimes dozens) before showing the first posters. */
+     const requestedPage=Math.max(1,Math.min(100,page));
+     let pagePayload=cd;
+     if(requestedPage!==1){
+      const pageResponse=await fetch("/api/movie-api/catalog?path="+encodeURIComponent(apiPath)+"&page="+requestedPage,{headers:{Accept:"application/json"},cache:"default"});
+      pagePayload=await pageResponse.json();
+      if(!pageResponse.ok||pagePayload.ok!==true)throw new Error(pagePayload.error||"Movie Catalog API page "+requestedPage+" unavailable");
      }
      const unique=new Map();
-     pages.forEach(pagePayload=>(Array.isArray(pagePayload.items)?pagePayload.items:[]).forEach(item=>{
+     (Array.isArray(pagePayload.items)?pagePayload.items:[]).forEach(item=>{
       const key=pathOf(item)||norm(item.title);
       if(key&&!unique.has(key))unique.set(key,{...item,_sections:[],_sources:["catalog"]});
-     }));
+     });
      all=[...unique.values()].filter(item=>!isNigerian(item)).map(item=>apiPath==="/language/hindi-dubbed"?({...item,_hindiCatalog:true}):item);
      apiCatalogMode=true;
-     apiMeta=cd;
+     apiMeta=pagePayload;
     }else{
      all=flatten(data);
     }
