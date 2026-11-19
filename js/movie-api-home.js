@@ -33,30 +33,37 @@
   }
   return "";
  };
- const uploadTime=item=>{
-  const fields=[
-   item?.uploadedAtMs,item?.uploadTimestamp,item?.uploadedAt,item?.uploadTime,item?.uploadDate,item?.upload_date,item?.uploaded_on,
-   item?.createdAtMs,item?.created_at,item?.createdAt,item?.dateAdded,item?.addedAt,item?.added_at,item?.publishedAt,item?.published_at,
-   item?.lastUpdated,item?.updatedAt,item?.updated_at,item?.modifiedAt,item?.date
-  ];
-  for(const value of fields){
-   if(value==null||value==="")continue;
-   const raw=typeof value==="object"?(value.timestamp||value.date||value.value||""):value;
-   if(typeof raw==="number"||(typeof raw==="string"&&/^\d{9,16}$/.test(raw.trim()))){
-    const n=Number(raw);if(Number.isFinite(n)&&n>0)return n<1000000000000?n*1000:n;
-   }
-   const parsed=Date.parse(String(raw));if(Number.isFinite(parsed)&&parsed>0)return parsed;
+ const dateValue=value=>{
+  if(value==null||value==="")return 0;
+  const raw=typeof value==="object"?(value.timestamp||value.date||value.value||""):value;
+  if(typeof raw==="number"||(typeof raw==="string"&&/^\d{9,16}$/.test(raw.trim()))){
+   const n=Number(raw);if(Number.isFinite(n)&&n>0)return n<1000000000000?n*1000:n;
   }
+  const parsed=Date.parse(String(raw));return Number.isFinite(parsed)&&parsed>0?parsed:0;
+ };
+ const uploadTime=item=>{
+  const fields=[item?.uploadedAtMs,item?.uploadTimestamp,item?.uploadedAt,item?.uploadTime,item?.uploadDate,item?.upload_date,item?.uploaded_on,item?.createdAtMs,item?.created_at,item?.createdAt,item?.dateAdded,item?.addedAt,item?.added_at,item?.publishedAt,item?.published_at,item?.lastUpdated,item?.updatedAt,item?.updated_at,item?.modifiedAt];
+  for(const value of fields){const time=dateValue(value);if(time)return time;}
   return 0;
  };
- const newestFirst=(a,b)=>uploadTime(b)-uploadTime(a);
+ const releaseTime=item=>{
+  const fields=[item?.releaseTimestamp,item?.releaseDate,item?.release_date,item?.releaseAt,item?.release_at,item?.firstAirDate,item?.first_air_date,item?.airDate,item?.air_date,item?.premiereDate,item?.premiere_date,item?.theatricalReleaseDate,item?.theatrical_release_date,item?.publishDate,item?.publish_date,item?.date];
+  for(const value of fields){const time=dateValue(value);if(time)return time;}
+  return uploadTime(item);
+ };
+ const chronologicalFirst=(a,b)=>{
+  const now=Date.now(),ta=releaseTime(a),tb=releaseTime(b),aFuture=ta>now,bFuture=tb>now;
+  if(aFuture!==bFuture)return aFuture?-1:1;
+  if(aFuture&&bFuture)return ta-tb;
+  return tb-ta;
+ };
  const isPinned=item=>item?.pinned===true||item?.isPinned===true||item?.featured===true||item?.is_featured===true||/^(1|true|yes)$/i.test(String(item?.pin||item?.is_pinned||""));
  const popularity=item=>["views","viewCount","view_count","totalViews","total_views","downloads","downloadCount","popularity","watchCount","watch_count","visits","hits"].reduce((best,key)=>Math.max(best,Number(item?.[key])||0),0);
- const recentFirst=(a,b)=>Number(isHindiDubbed(b))-Number(isHindiDubbed(a))||newestFirst(a,b)||Number(isPinned(b))-Number(isPinned(a));
+ const recentFirst=(a,b)=>chronologicalFirst(a,b)||Number(isHindiDubbed(b))-Number(isHindiDubbed(a));
  const isKDrama=item=>/k[- ]?drama|korean drama|south korea/i.test([item?.title,item?.type,item?.typeBadge,item?.category,item?.categoryName,item?.genre,item?.genres,item?.country,...(Array.isArray(item?._sections)?item._sections:[])].flat().map(v=>typeof v==="object"?[v?.name,v?.label,v?.title].filter(Boolean).join(" "):String(v||"")).join(" "));
- const popularFirst=(a,b)=>Number(isHindiDubbed(b))-Number(isHindiDubbed(a))||Number(isPinned(b))-Number(isPinned(a))||popularity(b)-popularity(a)||newestFirst(a,b)||Number(isKDrama(b))-Number(isKDrama(a));
- const sort=items=>[...items].sort(recentFirst);
- const prioritySort=items=>[...items].sort(popularFirst);
+ const popularFirst=(a,b)=>chronologicalFirst(a,b)||Number(isHindiDubbed(b))-Number(isHindiDubbed(a))||Number(isPinned(b))-Number(isPinned(a))||popularity(b)-popularity(a);
+ const sort=items=>[...items].sort(chronologicalFirst);
+ const prioritySort=items=>[...items].sort(chronologicalFirst);
  function card(item){
   const title=item.title||"Untitled",poster=posterOf(item),path=pathOf(item);
   return '<article class="movie-card movie-api-card"><button class="movie-api-poster" type="button" data-path="'+esc(path)+'" '+(!path?"disabled":"")+' aria-label="Open '+esc(title)+'">'+(poster?'<img loading="lazy" decoding="async" src="'+esc(poster)+'" alt="'+esc(title)+' poster">':'<span class="movie-api-placeholder">MOVIESTREAM BD</span>')+'<span class="quality">'+esc(item.quality||item.typeBadge||"HD")+'</span>'+(isHindiDubbed(item)?'<span class="movie-api-language-badge">HINDI DUBBED</span>':"")+'<span class="overlay">▶<small>View details &amp; watch</small></span></button><div class="movie-info"><h3>'+esc(title)+'</h3><p>'+esc(item.language||item.country||item.typeBadge||"")+'</p></div></article>';
@@ -86,7 +93,7 @@
   bannerPool.forEach(item=>{const key=pathOf(item)||String(item.id||item.title||"");if(key&&!uniqueSlides.has(key))uniqueSlides.set(key,item);});
   const allSlides=[...uniqueSlides.values()].filter(item=>!isNigerianItem(item)&&posterOf(item));
   const hindiSlides=allSlides.filter(item=>isHindiDubbed(item)&&(!item.mediaType&&!item.contentType&&!item.type&&!item.typeBadge||/movie|film/i.test(String(item.mediaType||item.contentType||item.type||item.typeBadge))));
-  const slides=(hindiSlides.length?hindiSlides:allSlides).sort((a,b)=>popularity(b)-popularity(a)||timeOf(b)-timeOf(a)).slice(0,10);
+  const slides=(hindiSlides.length?hindiSlides:allSlides).sort(chronologicalFirst).slice(0,10);
   if(!slides.length){hero.classList.remove("ms-featured-hero","ms-hero-slider");hero.innerHTML='<div class="hero-copy"><p class="eyebrow">MOVIESTREAM BD · MOVIES & DRAMAS</p><h1>Your next <em>favorite</em><br>story starts here.</h1><p>Explore the latest movies and dramas from our catalog.</p><a class="btn primary" href="#movieApiCatalog">▶ Explore Collection</a></div>';return;}
   let current=0,timer=null,startX=0,startY=0,dragging=false,slideDirection=1;
   hero.classList.add("ms-featured-hero","ms-hero-slider");
@@ -265,13 +272,13 @@
   });
   const newReleases=allLatest(newReleasePool);
   const hindiMovies=allLatest(allTitles.filter(item=>isMovie(item)&&!isAnime(item)&&!isNigerian(item)&&isHindiDubbed(item)));
-  const allKdramas=allLatest(allTitles.filter(item=>isKDrama(item)&&isDrama(item)&&!isNigerian(item))).sort((a,b)=>Number(isHindiDubbed(b))-Number(isHindiDubbed(a))||newestFirst(a,b));
+  const allKdramas=allLatest(allTitles.filter(item=>isKDrama(item)&&isDrama(item)&&!isNigerian(item))).sort(chronologicalFirst);
   const hindiDramas=allLatest(allTitles.filter(item=>isDrama(item)&&!isKDrama(item)&&!isAnime(item)&&!isNigerian(item)&&isHindiDubbed(item)));
   const hindiAnime=allLatest(allTitles.filter(item=>isAnime(item)&&!isNigerian(item)&&isHindiDubbed(item)));
   let out="";
   const topTen=prioritySort((Array.isArray(home._topTen)&&home._topTen.length?home._topTen:trending).filter(item=>!isNigerian(item))).slice(0,10);
   const collections=Array.isArray(home.collections)?home.collections:[];
-  const upcoming=(Array.isArray(home.upcoming)?home.upcoming:(Array.isArray(home.upcomingReleases)?home.upcomingReleases:[])).filter(item=>!isNigerian(item));
+  const upcoming=[...(Array.isArray(home.upcoming)?home.upcoming:(Array.isArray(home.upcomingReleases)?home.upcomingReleases:[]))].filter(item=>!isNigerian(item)).sort(chronologicalFirst);
   const tagged=pattern=>allLatest(allTitles.filter(item=>pattern.test(sectionTags(item)+" "+String([item.category,item.genre,item.genres,item.type,item.typeBadge,item.language,item.country,item.originCountry].join(" ")).toLowerCase())));
   const southIndian=tagged(/south indian|tamil|telugu|malayalam|kannada/);
   const cDramas=tagged(/c[- ]?drama|chinese drama|china/).filter(isDrama);
