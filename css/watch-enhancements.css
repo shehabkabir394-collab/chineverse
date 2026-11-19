@@ -71,3 +71,49 @@
 .ms-watch-player .cv-player.cv-ui-visible .cv-mid-skip{opacity:1;pointer-events:none}
 .ms-watch-player .cv-mid-skip button{pointer-events:auto}
 .ms-watch-player .cv-player:not(.cv-ui-visible) .cv-mid-skip button{pointer-events:none}
+
+
+/* Mobile player controls: aligned compact grid, no overflow or clipped buttons. */
+@media (max-width:600px){
+ .ms-watch-player .cv-player{width:100%;max-width:100%;overflow:hidden;touch-action:pan-y}
+ .ms-watch-player .cv-player video{width:100%;height:auto;max-height:58vh;aspect-ratio:16/9;object-fit:contain}
+ .ms-watch-player .cv-controls{
+  left:0;right:0;bottom:0;width:100%;box-sizing:border-box;
+  padding:34px 8px 8px;transform:translateY(5px);
+  background:linear-gradient(transparent 0%,rgba(0,0,0,.78) 34%,rgba(0,0,0,.96) 100%);
+ }
+ .ms-watch-player .cv-progress{height:17px;width:100%;margin:0 0 4px}
+ .ms-watch-player .cv-control-row{
+  display:grid;grid-template-columns:repeat(4,minmax(0,1fr));
+  align-items:center;justify-items:stretch;gap:6px;width:100%;min-width:0;
+ }
+ .ms-watch-player .cv-control-row>*{box-sizing:border-box;min-width:0;max-width:100%;width:100%;margin:0}
+ .ms-watch-player .cv-control-row button,
+ .ms-watch-player .cv-control-row select{
+  min-width:0;width:100%;height:34px;min-height:34px;
+  padding:4px 3px;font-size:11px;line-height:1;
+  border-radius:7px;text-align:center;overflow:hidden;text-overflow:ellipsis;
+ }
+ .ms-watch-player .cv-control-row button{display:grid;place-items:center}
+ .ms-watch-player .cv-control-row .cv-time{
+  display:flex;align-items:center;justify-content:center;
+  white-space:nowrap;font-size:10px;letter-spacing:-.25px;
+  padding:0 2px;overflow:hidden;
+ }
+ .ms-watch-player .cv-control-row .cv-volume{width:100%;height:28px;padding:0;min-height:28px}
+ .ms-watch-player .cv-mid-skip{padding:0 10px}
+ .ms-watch-player .cv-mid-skip button{width:40px;height:40px;min-width:40px;padding:0}
+ .ms-watch-player .cv-mid-skip button span{font-size:21px;line-height:19px}
+ .ms-watch-player .cv-mid-skip button small{font-size:9px}
+ .ms-watch-player .cv-center-play{width:50px;height:50px}
+ .ms-watch-player .cv-center-play span{font-size:21px}
+ .ms-watch-player .cv-resume{left:8px;bottom:112px;max-width:calc(100% - 16px);font-size:11px}
+}
+@media (max-width:360px){
+ .ms-watch-player .cv-controls{padding-left:5px;padding-right:5px}
+ .ms-watch-player .cv-control-row{gap:4px}
+ .ms-watch-player .cv-control-row button,.ms-watch-player .cv-control-row select{font-size:10px;height:32px;min-height:32px}
+ .ms-watch-player .cv-control-row .cv-time{font-size:9px}
+ .ms-watch-player .cv-mid-skip{padding:0 7px}
+ .ms-watch-player .cv-mid-skip button{width:36px;height:36px;min-width:36px}
+}
