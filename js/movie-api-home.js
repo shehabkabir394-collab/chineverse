@@ -9,7 +9,7 @@
  let home=null,hindiCatalog=[];
  const isHindiDubbed=item=>{
   if(item?._hindiCatalog===true)return true;
-  const norm=value=>String(value??"").trim().toLowerCase().replace(/[_-]+/g," ").replace(/\\s+/g," ");
+  const norm=value=>String(value??"").trim().toLowerCase().replace(/[_-]+/g," ").replace(/\s+/g," ");
   const exactHindi=value=>/^(hindi|hindi dubbed|hindi dub|hindi audio|हिंदी|हिन्दी|hi|hin)$/.test(norm(value));
   const containsHindi=value=>{
    if(Array.isArray(value))return value.some(containsHindi);
@@ -17,7 +17,7 @@
     const code=norm(value.code||value.languageCode||value.lang);
     return /^(hi|hin)$/.test(code)||[value.language,value.name,value.label,value.title].some(exactHindi);
    }
-   return exactHindi(value)||/(^|[,;|/])\\s*(hindi|hi|hin|हिंदी|हिन्दी)\\s*($|[,;|/])/.test(norm(value));
+   return exactHindi(value)||/(^|[,;|/])\s*(hindi|hi|hin|हिंदी|हिन्दी)\s*($|[,;|/])/.test(norm(value));
   };
   const audioFields=[item?.audioLanguage,item?.audioLanguages,item?.dubLanguage,item?.dubLanguages,item?.dubbedLanguages,item?.availableAudio,item?.availableLanguages,item?.languages,item?.audio,item?.audioTrack,item?.audioTracks,item?.dubbing,item?.audioInfo,item?.audioOptions];
   return exactHindi(item?.language)||audioFields.some(containsHindi);
