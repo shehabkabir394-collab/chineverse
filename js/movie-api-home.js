@@ -120,16 +120,17 @@
    return type==="movie"||type==="movies"||/movie|movies|film|cinema/.test(tags);
   };
   const latest=(a,b)=>(Number(b.uploadedAtMs)||Date.parse(b.uploadedAt||b.createdAt||b.updatedAt||"")||0)-(Number(a.uploadedAtMs)||Date.parse(a.uploadedAt||a.createdAt||a.updatedAt||"")||0);
-  const kdramas=allTitles.filter(isKDrama).sort(latest);
-  const recentMovies=allTitles.filter(isMovie).sort(latest);
+  const prioritySort=items=>[...items].sort((a,b)=>Number(isHindiDubbed(b))-Number(isHindiDubbed(a))||latest(a,b));
+  const kdramas=prioritySort(allTitles.filter(isKDrama));
+  const recentMovies=prioritySort(allTitles.filter(isMovie));
   const koreanDubbed=dubbed.filter(item=>isKDrama(item));
   const otherDubbed=dubbed.filter(item=>!isKDrama(item));
   let out="";
-  out+=section("Latest K-Dramas","🇰🇷 NEW KOREAN DRAMA UPLOADS",kdramas.slice(0,14),"/language/korean");
-  out+=section("Recently Uploaded Movies","🆕 LATEST MOVIE UPLOADS",recentMovies.slice(0,14),"/type/movies");
+  out+=section("Hindi Dubbed K-Dramas · Latest First","🇰🇷 HINDI DUBBED K-DRAMA FIRST",kdramas.slice(0,14),"/language/korean");
+  out+=section("Recently Uploaded Movies","🆕 HINDI DUBBED FIRST · LATEST UPLOADS",recentMovies.slice(0,14),"/type/movies");
   out+=section("K-Drama Hindi Dubbed","KOREAN · HINDI DUBBED",koreanDubbed.slice(0,14),"/language/hindi-dubbed");
   out+=section("Hindi Dubbed Movies & Series","HINDI DUBBED",otherDubbed.slice(0,14),"/language/hindi-dubbed");
-  if(trending.length)out+=section("Trending Now","POPULAR RIGHT NOW",sort(trending).slice(0,14),"/mostwatch/7d");
+  if(trending.length)out+=section("Trending Now","🔥 HINDI DUBBED FIRST · POPULAR RIGHT NOW",prioritySort(trending).slice(0,14),"/mostwatch/7d");
   const used=new Set(["trending bengali movies","south indian & hindi dubbed","anime in hindi"]);
   sections.forEach(s=>{
    const title=text(s.title)||"Discover";
@@ -138,7 +139,7 @@
    out+=section(title,text(s.badge)||"COLLECTION",sort(items).slice(0,14),text(s.categoryPath)||"/type/movies");
   });
   root.innerHTML=out||'<p class="muted">No titles available.</p>';
-  status.textContent=korean.length+" confirmed Korean Hindi Dubbed · "+otherDubbed.length+" other confirmed Hindi Dubbed · "+trending.length+" trending · "+sections.length+" collections.";
+  status.textContent=koreanDubbed.length+" Korean Hindi Dubbed · "+otherDubbed.length+" other Hindi Dubbed · "+trending.length+" trending · "+sections.length+" collections.";
   renderHero();
  }
  root.addEventListener("click",e=>{
