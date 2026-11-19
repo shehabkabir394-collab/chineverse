@@ -2,6 +2,7 @@
 const $=s=>document.querySelector(s),esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const arr=(v)=>Array.isArray(v)?v:Array.isArray(v?.items)?v.items:Array.isArray(v?.list)?v.list:Array.isArray(v?.results)?v.results:[];
 const title=x=>String(x?.name||x?.title||x?.label||x?.platformName||x?.platform||"").trim();
+ const isHindiDubbed=x=>{const vals=[x?.language,x?.audioLanguage,x?.audioLanguages,x?.dubLanguage,x?.dubLanguages,x?.availableLanguages,x?.languages,x?.audio,x?.audioTracks];return x?._hindiCatalog===true||vals.some(v=>Array.isArray(v)?v.some(y=>/hindi|हिंदी|हिन्दी|^hi(n)?$/i.test(String(y?.name||y?.language||y?.code||y||""))):/hindi|हिंदी|हिन्दी|^hi(n)?$/i.test(String(v||"")));};
 const path=x=>String(x?.path||x?.detailPath||"");
 const image=x=>String(x?.poster||x?.logo||x?.icon||x?.image||"");
 const platformBox=$("#movieApiPlatformSection");
@@ -11,7 +12,7 @@ async function loadPlatform(name){
  const box=$("#cvPlatformResults");if(!box)return;
  box.innerHTML='<p class="muted">Loading '+esc(name)+'…</p>';
  try{const r=await fetch('/api/movie-api/platform?name='+encodeURIComponent(name)+'&page=1',{cache:"no-store"}),d=await r.json();if(!r.ok||d.ok===false)throw Error(d.error||"Platform unavailable");
- const items=arr(d.items||d.results||d.data||d);box.innerHTML=items.length?'<div class="cv-platform-grid">'+items.slice(0,24).map(card).join("")+'</div>':'<p class="muted">এই Platform-এ এখন কোনো title পাওয়া যায়নি।</p>';
+ const items=arr(d.items||d.results||d.data||d).filter(isHindiDubbed);box.innerHTML=items.length?'<div class="cv-platform-grid">'+items.slice(0,24).map(card).join("")+'</div>':'<p class="muted">এই Platform-এ এখন কোনো title পাওয়া যায়নি।</p>';
  }catch(e){box.innerHTML='<p class="muted">'+esc(e.message||"Platform unavailable")+'</p>';}
 }
 async function initPlatforms(){
