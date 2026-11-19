@@ -27,7 +27,9 @@
  }
  function section(title,badgeText,items,target){
   if(!items.length)return "";
-  return '<section class="movie-api-row"><div class="section-head"><div><p class="eyebrow">'+esc(badgeText)+'</p><h2>'+esc(title)+'</h2></div><a class="btn ghost" href="catalog.html?category='+encodeURIComponent(target||"/type/movies")+'">View all →</a></div><div class="movie-api-shelf">'+items.map(card).join("")+'</div></section>';
+  const mobile=window.matchMedia("(max-width:760px)").matches;
+  const visible=items.slice(0,mobile?8:12);
+  return '<section class="movie-api-row"><div class="section-head"><div><p class="eyebrow">'+esc(badgeText)+'</p><h2>'+esc(title)+'</h2></div><a class="btn ghost" href="catalog.html?category='+encodeURIComponent(target||"/type/movies")+'">View all →</a></div><div class="movie-api-shelf">'+visible.map(card).join("")+'</div></section>';
  }
  function renderHero(){
   if(!hero)return;
