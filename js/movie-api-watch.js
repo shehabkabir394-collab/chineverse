@@ -42,7 +42,7 @@
    const audioSelect=$("#movieWatchAudio");if(audioSelect&&playerApi?.wrap){const audioLabel=audioSelect.closest("label")||audioSelect;audioLabel.classList.add("cv-audio-choice");playerApi.wrap.querySelector(".cv-top-right")?.appendChild(audioLabel);}
    if(!playerApi){video.controls=true;video.src=activeSources[0].url;video.load();video.play().catch(()=>{message.textContent="Tap the video to start playback.";});}
   }else playerApi.setSources(activeSources);
-  const audioSelect=$("#movieWatchAudio");
+  const audioSelect=$("#movieWatchAudio");if(audioSelect&&playerApi?.wrap){const audioLabel=audioSelect.closest("label")||audioSelect;audioLabel.classList.add("cv-audio-choice");playerApi.wrap.querySelector(".cv-top-right")?.appendChild(audioLabel);}
   if(audioSelect)audioSelect.addEventListener("change",()=>{const chosen=sourcesForLanguage(currentSources,audioSelect.value);playerApi?.setSources(chosen);});
   $("#movieWatchUnmute").hidden=false;
  }
