@@ -9,6 +9,16 @@
  const root=$("#catalogGrid"),status=$("#catalogStatus"),pager=$("#catalogPager"),nav=$("#catalogCategories"),az=$("#catalogAZ"),search=$("#catalogSearch"),heading=$("#catalogHeading");
  const pageSize=24;
  let data=null,all=[],apiCatalogMode=false,apiMeta=null;
+ const isNigerian=item=>{
+  const fields=[item?.country,item?.originCountry,item?.productionCountry,item?.originalCountry,item?.nationality,item?.region,item?.title,item?.language,item?.originalLanguage,item?.productionCountries,item?.countries,item?.description,...(Array.isArray(item?._sections)?item._sections:[])];
+  return fields.some(v=>Array.isArray(v)?v.some(x=>/nigeria|nigerian|nollywood|naija/i.test(String(x?.name||x?.code||x||""))):/nigeria|nigerian|nollywood|naija/i.test(String(v||"")));
+ };
+ const releaseTime=item=>{
+  const fields=[item?.uploadedAtMs,item?.uploadTimestamp,item?.uploadedAt,item?.uploadDate,item?.createdAt,item?.created_at,item?.publishedAt,item?.updatedAt,item?.releaseTimestamp,item?.releaseDate,item?.release_date,item?.firstAirDate,item?.first_air_date,item?.year];
+  for(const v of fields){if(v==null||v==="")continue;const raw=typeof v==="object"?(v.timestamp||v.date||v.value||""):v;if(typeof raw==="number"||(typeof raw==="string"&&/^\d{9,16}$/.test(raw.trim()))){const n=Number(raw);if(Number.isFinite(n)&&n>0)return n<1e12?n*1000:n;}const d=Date.parse(String(raw));if(Number.isFinite(d))return d;}
+  return 0;
+ };
+ const latestFirst=(a,b)=>releaseTime(b)-releaseTime(a);
  const vals=item=>{
   const out=[];
   ["categoryPath","category","categoryName","categoryLabel","categorySlug","type","typeBadge","genre","language","country"].forEach(k=>{
@@ -44,7 +54,7 @@
   (Array.isArray(d.trending)?d.trending:[]).forEach(x=>add(x,"Trending Now","trending"));
   (Array.isArray(d.comingSoon)?d.comingSoon:[]).forEach(x=>add(x,"Coming Soon","comingSoon"));
   (Array.isArray(d.banners)?d.banners:[]).forEach(x=>add(x,"Featured","banner"));
-  return [...map.values()].sort((a,b)=>Number(isHindiDubbed(b))-Number(isHindiDubbed(a))||(Number(b.uploadedAtMs)||0)-(Number(a.uploadedAtMs)||0));
+  return [...map.values()].filter(item=>!isNigerian(item)).sort((a,b)=>latestFirst(a,b)||Number(isHindiDubbed(b))-Number(isHindiDubbed(a)));
  }
  const customLabels={"cv:movie":"Movie","cv:anime":"Anime","cv:drama":"Drama","cv:kdrama":"K-Drama","cv:cdrama":"C-Drama","cv:south":"South Movies","cv:bollywood":"Bollywood","cv:hollywood":"Hollywood"};
  function groupOf(item){
@@ -111,7 +121,7 @@
  function link(extra){const p=new URLSearchParams();if(selected)p.set("category",selected);if(letter)p.set("letter",letter);if(search?.value.trim())p.set("q",search.value.trim());Object.entries(extra||{}).forEach(([k,v])=>{if(v)p.set(k,String(v));else p.delete(k)});return "catalog.html?"+p.toString();}
  function render(){
   if(!data)return;
-  const filtered=all.filter(matches);
+  const filtered=all.filter(item=>!isNigerian(item)&&matches(item)).sort((a,b)=>latestFirst(a,b)||Number(isHindiDubbed(b))-Number(isHindiDubbed(a)));
   const pages=apiCatalogMode?Math.max(1,Number(apiMeta?.maxPage)||1):Math.max(1,Math.ceil(filtered.length/pageSize));
   const safePage=Math.min(page,pages);
   const start=apiCatalogMode?0:(safePage-1)*pageSize;
@@ -165,7 +175,7 @@
     const sr=await fetch("/api/movie-api/search?q="+encodeURIComponent(q)+"&page="+page);
     const sd=await sr.json();
     if(!sr.ok||sd.ok!==true)throw new Error(sd.error||"Movie Search API unavailable");
-    all=(Array.isArray(sd.items)?sd.items:[]).map(item=>({...item,_sections:[],_sources:["search"]}));
+    all=(Array.isArray(sd.items)?sd.items:[]).filter(item=>!isNigerian(item)).map(item=>({...item,_sections:[],_sources:["search"]}));
    }else{
     const customPaths={
      "cv:movie":"/type/movies",
@@ -185,7 +195,7 @@
      const cr=await fetch("/api/movie-api/catalog?path="+encodeURIComponent(apiPath)+"&page="+page);
      const cd=await cr.json();
      if(!cr.ok||cd.ok!==true)throw new Error(cd.error||"Movie Catalog API unavailable");
-     all=(Array.isArray(cd.items)?cd.items:[]).map(item=>({...item,_sections:[],_sources:["catalog"]}));
+     all=(Array.isArray(cd.items)?cd.items:[]).filter(item=>!isNigerian(item)).map(item=>({...item,_sections:[],_sources:["catalog"]}));
      apiCatalogMode=true;
      apiMeta=cd;
     }else{
