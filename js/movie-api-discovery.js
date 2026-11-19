@@ -45,17 +45,34 @@
   const wrap=document.createElement("div");wrap.className="cv-search-wrap";search.parentNode.insertBefore(wrap,search);wrap.appendChild(search);
   const panel=document.createElement("div");panel.className="cv-search-panel";panel.hidden=true;wrap.appendChild(panel);
   let timer=0,request=0;
-  const show=(items)=>{panel.innerHTML=items.slice(0,8).map(x=>{const p=pathOf(x),t=typeof x==="string"?x:titleOf(x);return '<a href="'+(p?'watch.html?path='+encodeURIComponent(p):'catalog.html?q='+encodeURIComponent(t))+'">'+esc(t)+'</a>';}).join("");panel.hidden=!items.length;};
-  search.addEventListener("input",()=>{clearTimeout(timer);const q=search.value.trim();if(q.length<2){panel.hidden=true;return;}timer=setTimeout(async()=>{const id=++request;try{const d=await api("/api/movie-api/suggest?q="+encodeURIComponent(q));if(id!==request)return;show(arrays(d));}catch{panel.hidden=true;}},260);});
+  let hotItems=null,hotLoading=null;
+  const renderHot=()=>{
+   if(!hotItems?.length){panel.hidden=true;return;}
+   panel.innerHTML='<div class="cv-search-panel-heading">🔥 Trending searches</div><div class="cv-search-hot-list">'+hotItems.slice(0,12).map(x=>{const q=typeof x==="string"?x:titleOf(x);return '<a class="cv-search-hot-chip" href="catalog.html?q='+encodeURIComponent(q)+'">'+esc(q)+'</a>';}).join("")+'</div>';
+   panel.hidden=false;
+  };
+  const loadHot=async()=>{
+   if(hotItems)return hotItems;
+   if(!hotLoading)hotLoading=api("/api/movie-api/hot-search").then(d=>(hotItems=arrays(d))).catch(()=>{hotItems=[];});
+   await hotLoading;return hotItems;
+  };
+  const showSuggestions=(items)=>{
+   panel.innerHTML='<div class="cv-search-panel-heading">Search suggestions</div>'+items.slice(0,8).map(x=>{const p=pathOf(x),t=typeof x==="string"?x:titleOf(x);return '<a class="cv-search-suggestion" href="'+(p?'watch.html?path='+encodeURIComponent(p):'catalog.html?q='+encodeURIComponent(t))+'">'+esc(t)+'</a>';}).join("");
+   panel.hidden=!items.length;
+  };
+  search.addEventListener("focus",async()=>{
+   if(search.value.trim().length<2){await loadHot();if(search.value.trim().length<2)renderHot();}
+  });
+  search.addEventListener("input",()=>{
+   clearTimeout(timer);const q=search.value.trim();
+   if(q.length<2){loadHot().then(()=>{if(document.activeElement===search&&search.value.trim().length<2)renderHot();});return;}
+   panel.hidden=false;panel.innerHTML='<div class="cv-search-panel-heading">Searching…</div>';
+   timer=setTimeout(async()=>{const id=++request;try{const d=await api("/api/movie-api/suggest?q="+encodeURIComponent(q));if(id!==request||search.value.trim()!==q)return;const items=arrays(d);if(items.length)showSuggestions(items);else{panel.innerHTML='<div class="cv-search-panel-heading">No suggestions — press Enter to search</div>';panel.hidden=false;}}catch{panel.innerHTML='<div class="cv-search-panel-heading">Press Enter to search</div>';panel.hidden=false;}},260);
+  });
+  search.form?.addEventListener("submit",e=>{if(!search.value.trim()){e.preventDefault();search.focus();}});
   document.addEventListener("click",e=>{if(!wrap.contains(e.target))panel.hidden=true;});
   search.addEventListener("keydown",e=>{if(e.key==="Escape")panel.hidden=true;});
  }
- const addHotSearch=async()=>{
-  try{const d=await api("/api/movie-api/hot-search");const items=arrays(d);if(!items.length)return;
-   const box=document.createElement("section");box.className="cv-hot-search";box.innerHTML='<div><p class="eyebrow">TRENDING QUERIES</p><h2>Hot Search</h2></div><div class="cv-hot-chips">'+items.slice(0,14).map(x=>{const q=typeof x==="string"?x:titleOf(x);return '<a href="catalog.html?q='+encodeURIComponent(q)+'">'+esc(q)+'</a>';}).join("")+'</div>';
-   const tools=$(".movie-api-tools");(tools||extras||document.querySelector("#movieApiCatalog"))?.after(box);
-  }catch{}
- };
  const loadExtras=async()=>{
   if(!extras)return;
   const jobs=[["upcoming","/api/movie-api/upcoming?page=1","Upcoming Releases","COMING SOON"],["shorts","/api/movie-api/shorts?page=1","Movie Shorts","QUICK WATCH"],["sports","/api/movie-api/sports","Live Sports","SPORTS & LIVE EVENTS"]];
@@ -68,5 +85,5 @@
    cats.forEach(c=>{const label=titleOf(c),path=String(c.path||c.categoryPath||c.slug||"");if(!label||existing.has(label.toLowerCase()))return;const a=document.createElement("a");a.className="catalog-chip";a.textContent=label;a.href="catalog.html?category="+encodeURIComponent(path.startsWith("/")?path:"/"+path);nav.appendChild(a);});
   }catch{}
  };
- addHotSearch();loadExtras();loadCategories();
+ loadExtras();loadCategories();
 })();
