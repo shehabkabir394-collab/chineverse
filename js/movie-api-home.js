@@ -214,6 +214,9 @@
     ...sourceSections.flatMap(section=>(Array.isArray(section.items)?section.items:[]).map(item=>({
      ...item,_sections:[...(item._sections||[]),text(section.title)]
     }))),
+    ...(Array.isArray(home.allOfficialSections)?home.allOfficialSections.flatMap(section=>(Array.isArray(section.items)?section.items:[]).map(item=>({
+     ...item,_sections:[...(item._sections||[]),text(section.title)]
+    }))):[]),
     ...(Array.isArray(home.trending)?home.trending:[]).map(item=>({...item,_sections:[...(item._sections||[]),"Trending Now"]}))
    ];
    const keys=new Set();
