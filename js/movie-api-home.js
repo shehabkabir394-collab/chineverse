@@ -102,10 +102,32 @@
    nav.insertAdjacentElement("afterend",more);
   }
   const dubbed=sort(hindiCatalog.filter(isHindiDubbed));
-  const korean=dubbed.filter(item=>/korea|south korea/i.test(String(item.country||"")));
-  const otherDubbed=dubbed.filter(item=>!/korea|south korea/i.test(String(item.country||"")));
+  const pool=[
+   ...sections.flatMap(s=>(Array.isArray(s.items)?s.items:[]).map(item=>({...item,_sections:[...(item._sections||[]),text(s.title)]}))),
+   ...(Array.isArray(home.allOfficialSections)?home.allOfficialSections.flatMap(s=>(Array.isArray(s.items)?s.items:[]).map(item=>({...item,_sections:[...(item._sections||[]),text(s.title)]}))):[]),
+   ...trending
+  ];
+  const unique=new Map();
+  pool.forEach(item=>{const key=pathOf(item)||String(item.id||item.title||"");if(key&&!unique.has(key))unique.set(key,item);});
+  const allTitles=[...unique.values()];
+  const isKDrama=item=>{
+   const tags=(item._sections||[]).join(" ").toLowerCase();
+   return /k[- ]?drama|korean drama/.test(tags)||/korea|south korea|republic of korea/i.test(String(item.country||""))||/^korean$/i.test(String(item.language||""));
+  };
+  const isMovie=item=>{
+   const tags=(item._sections||[]).join(" ").toLowerCase();
+   const type=String(item.typeBadge||item.type||"").toLowerCase();
+   return type==="movie"||type==="movies"||/movie|movies|film|cinema/.test(tags);
+  };
+  const latest=(a,b)=>(Number(b.uploadedAtMs)||Date.parse(b.uploadedAt||b.createdAt||b.updatedAt||"")||0)-(Number(a.uploadedAtMs)||Date.parse(a.uploadedAt||a.createdAt||a.updatedAt||"")||0);
+  const kdramas=allTitles.filter(isKDrama).sort(latest);
+  const recentMovies=allTitles.filter(isMovie).sort(latest);
+  const koreanDubbed=dubbed.filter(item=>isKDrama(item));
+  const otherDubbed=dubbed.filter(item=>!isKDrama(item));
   let out="";
-  out+=section("K-Drama Hindi Dubbed","KOREAN · HINDI DUBBED",korean.slice(0,14),"/language/hindi-dubbed");
+  out+=section("Latest K-Dramas","🇰🇷 NEW KOREAN DRAMA UPLOADS",kdramas.slice(0,14),"/language/korean");
+  out+=section("Recently Uploaded Movies","🆕 LATEST MOVIE UPLOADS",recentMovies.slice(0,14),"/type/movies");
+  out+=section("K-Drama Hindi Dubbed","KOREAN · HINDI DUBBED",koreanDubbed.slice(0,14),"/language/hindi-dubbed");
   out+=section("Hindi Dubbed Movies & Series","HINDI DUBBED",otherDubbed.slice(0,14),"/language/hindi-dubbed");
   if(trending.length)out+=section("Trending Now","POPULAR RIGHT NOW",sort(trending).slice(0,14),"/mostwatch/7d");
   const used=new Set(["trending bengali movies","south indian & hindi dubbed","anime in hindi"]);
