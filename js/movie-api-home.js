@@ -8,10 +8,25 @@
  if(!root||!status||!search||!nav)return;
  let home=null,hindiCatalog=[];
  const isHindiDubbed=item=>{
-  const language=String(item?.language||"").trim().toUpperCase();
-  const values=[item?.audioLanguage,item?.audioLanguages,item?.dubLanguage,item?.dubLanguages,item?.dubbedLanguages,item?.availableAudio,item?.availableLanguages,item?.languages]
-   .flatMap(value=>Array.isArray(value)?value:[value]).map(value=>String(value||"").trim().toUpperCase());
-  return language==="HINDI DUBBED"||values.some(value=>/^(HINDI|HINDI DUBBED|HINDI AUDIO)$/.test(value));
+  const norm=value=>String(value??"").trim().toLowerCase().replace(/[_-]+/g," ").replace(/\\s+/g," ");
+  const language=norm(item?.language);
+  const fields=[
+   item?.audioLanguage,item?.audioLanguages,item?.dubLanguage,item?.dubLanguages,
+   item?.dubbedLanguages,item?.availableAudio,item?.availableLanguages,item?.languages,
+   item?.audio,item?.audioTrack,item?.audioTracks,item?.dubbed,item?.dubbing,
+   item?.subtitleLanguage
+  ];
+  const values=fields.flatMap(value=>Array.isArray(value)?value:[value]).map(value=>{
+   if(value&&typeof value==="object")return [value.language,value.name,value.label,value.code].map(norm).join(" ");
+   return norm(value);
+  });
+  const audioHindi=values.some(value=>/\\bhindi\\b|हिंदी/.test(value));
+  const sectionHindiDub=Array.isArray(item?._sections)&&item._sections.some(value=>
+   /(?:hindi|हिंदी).*(?:dub|dubbing|audio)|(?:dub|dubbing|audio).*(?:hindi|हिंदी)/i.test(String(value||""))
+  );
+  return language==="hindi dubbed"||language==="hindi audio"||
+   (audioHindi&&(sectionHindiDub||language==="hindi dubbed"))||
+   (language==="hindi"&&sectionHindiDub)||sectionHindiDub;
  };
  const pathOf=item=>{
   if(typeof item.path==="string"&&item.path.startsWith("/mb/"))return item.path;
