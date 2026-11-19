@@ -137,7 +137,7 @@
    return type==="movie"||type==="movies"||/movie|movies|film|cinema/.test(tags);
   };
   const latest=(a,b)=>(Number(b.uploadedAtMs)||Date.parse(b.uploadedAt||b.createdAt||b.updatedAt||"")||0)-(Number(a.uploadedAtMs)||Date.parse(a.uploadedAt||a.createdAt||a.updatedAt||"")||0);
-  const prioritySort=items=>[...items].sort((a,b)=>Number(isHindiDubbed(b))-Number(isHindiDubbed(a))||latest(a,b));
+  const prioritySort=items=>[...items].sort((a,b)=>latest(a,b)||Number(isHindiDubbed(b))-Number(isHindiDubbed(a)));
   const kdramas=prioritySort(allTitles.filter(isKDrama));
   const recentMovies=prioritySort(allTitles.filter(isMovie));
   const koreanDubbed=dubbed.filter(item=>isKDrama(item));
