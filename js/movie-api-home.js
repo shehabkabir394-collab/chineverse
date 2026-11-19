@@ -115,8 +115,13 @@
    return '<a class="catalog-chip" href="catalog.html?category='+encodeURIComponent(target)+'"><span class="category-emoji">'+emojiFor(label)+'</span><span>'+esc(label)+'</span></a>';
   }).join("");
   nav.classList.remove("expanded");
-  const oldMore=nav.parentElement.querySelector(".category-see-more");
-  if(oldMore)oldMore.remove();
+  const oldActions=nav.parentElement.querySelector(".category-action-row");
+  if(oldActions)oldActions.remove();
+  const tools=$("#movieApiCatalog .movie-api-tools");
+  const azLink=tools?.querySelector('a[href="catalog.html"]');
+  const actionRow=document.createElement("div");
+  actionRow.className="category-action-row";
+  if(azLink){azLink.classList.add("category-az-link");actionRow.appendChild(azLink);}
   if(actualCategories.length>9){
    const more=document.createElement("button");
    more.type="button";
@@ -128,8 +133,10 @@
     more.setAttribute("aria-expanded",String(expanded));
     more.textContent=expanded?"See Less":"See More";
    });
-   nav.insertAdjacentElement("afterend",more);
+   actionRow.appendChild(more);
   }
+  nav.insertAdjacentElement("afterend",actionRow);
+  if(tools)tools.hidden=true;
   const dubbed=sort(hindiCatalog.filter(isHindiDubbed));
   const pool=[
    ...sections.flatMap(s=>(Array.isArray(s.items)?s.items:[]).map(item=>({...item,_sections:[...(item._sections||[]),text(s.title)]}))),
@@ -156,8 +163,9 @@
   const recentVisibleKeys=new Set(recentMovies.slice(0,14).map(item=>pathOf(item)||String(item.id||item.title||"")));
   const otherDubbed=dubbed.filter(item=>!isKDrama(item)&&!recentVisibleKeys.has(pathOf(item)||String(item.id||item.title||"")));
   let out="";
+  out+=section("Latest Movie Uploads","🆕 NEWEST MOVIES · FIRST ROW",recentMovies.slice(0,8),"/type/movies");
+  out+=section("More New Movies","🎬 NEXT RECENT MOVIE UPLOADS",recentMovies.slice(8,16),"/type/movies");
   out+=section("Latest K-Dramas","🇰🇷 KOREAN DRAMAS · LATEST UPLOADS",kdramas.slice(0,14),"/language/korean");
-  out+=section("Recently Uploaded Movies","🆕 HINDI DUBBED FIRST · LATEST UPLOADS",recentMovies.slice(0,14),"/type/movies");
   out+=section("Hindi Dubbed K-Dramas","🇰🇷 VERIFIED HINDI AUDIO",koreanDubbed.slice(0,14),"/language/hindi-dubbed");
   out+=section("Hindi Dubbed Movies & Series","HINDI DUBBED",otherDubbed.slice(0,14),"/language/hindi-dubbed");
   if(trending.length)out+=section("Trending Now","🔥 HINDI DUBBED FIRST · POPULAR RIGHT NOW",prioritySort(trending).slice(0,14),"/mostwatch/7d");
