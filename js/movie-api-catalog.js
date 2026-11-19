@@ -192,45 +192,31 @@
  }
  ["#catalogLanguageFilter","#catalogTypeFilter","#catalogGenreFilter"].forEach(id=>$(id)?.addEventListener("change",render));
  async function load(){
-  status.textContent="Loading Movie API catalog…";
+  const q=params.get("q")||"";
+  if(search)search.value=q;
+  apiCatalogMode=false;
+  apiMeta=null;
   try{
-   const r=await fetch("/api/movie-api/home");
-   const d=await r.json();
-   if(!r.ok||d.ok!==true)throw new Error(d.error||"Movie API unavailable");
-   data=d;
-   const q=params.get("q")||"";
-   if(search)search.value=q;
-   apiCatalogMode=false;
-   apiMeta=null;
-
    if(q){
-    status.textContent="Searching Hindi-dubbed movies and dramas…";
-    const [sr,hr]=await Promise.all([
-     fetch("/api/movie-api/search?q="+encodeURIComponent(q)+"&page="+page),
-     fetch("/api/movie-api/catalog?path="+encodeURIComponent("/language/hindi-dubbed")+"&page=1")
-    ]);
-    const [sd,hd]=await Promise.all([sr.json(),hr.json()]);
-    if(!sr.ok||sd.ok!==true)throw new Error(sd.error||"Movie Search API unavailable");
-    if(!hr.ok||hd.ok!==true)throw new Error(hd.error||"Hindi catalog unavailable");
-    const hindiPages=[hd],maxPage=Math.max(1,Math.min(100,Number(hd.maxPage)||1));
-    for(let start=2;start<=maxPage;start+=6){
-     const batch=await Promise.all(Array.from({length:Math.min(6,maxPage-start+1)},(_,i)=>start+i).map(async p=>{
-      const response=await fetch("/api/movie-api/catalog?path="+encodeURIComponent("/language/hindi-dubbed")+"&page="+p);
-      const payload=await response.json();
-      if(!response.ok||payload.ok!==true)throw new Error(payload.error||"Hindi catalog page "+p+" unavailable");
-      return payload;
-     }));
-     hindiPages.push(...batch);
-    }
+    /* Search directly. Do not wait for homepage data or download every Hindi catalog page. */
+    data={categories:[]};
+    status.textContent="Searching movies and dramas…";
+    const response=await fetch("/api/movie-api/search?q="+encodeURIComponent(q)+"&page="+page,{headers:{Accept:"application/json"},cache:"default"});
+    const payload=await response.json();
+    if(!response.ok||payload.ok!==true)throw new Error(payload.error||"Movie Search API unavailable");
     const unique=new Map();
-    (Array.isArray(sd.items)?sd.items:[]).filter(item=>!isNigerian(item)&&isHindiDubbed(item)).forEach(item=>{
-     const key=pathOf(item)||norm(item.title);if(key)unique.set(key,{...item,_sections:[],_sources:["search"]});
+    (Array.isArray(payload.items)?payload.items:[]).filter(item=>!isNigerian(item)).forEach(item=>{
+     const key=pathOf(item)||norm(item.title);
+     if(key&&!unique.has(key))unique.set(key,{...item,_sections:[],_sources:["search"],_hindiCatalog:isHindiDubbed(item)});
     });
-    hindiPages.forEach(payload=>(Array.isArray(payload.items)?payload.items:[]).forEach(item=>{
-     const key=pathOf(item)||norm(item.title);if(key&&!isNigerian(item)&&!unique.has(key))unique.set(key,{...item,_sections:[],_sources:["hindiCatalog"],_hindiCatalog:true});
-    }));
     all=[...unique.values()];
+    if(!all.length)status.textContent="No matching movies or dramas found.";
    }else{
+    status.textContent="Loading Movie API catalog…";
+    const response=await fetch("/api/movie-api/home",{headers:{Accept:"application/json"},cache:"default"});
+    const payload=await response.json();
+    if(!response.ok||payload.ok!==true)throw new Error(payload.error||"Movie API unavailable");
+    data=payload;
     const customPaths={
      "cv:movie":"/type/movies",
      "cv:anime":"/anime",
@@ -243,7 +229,6 @@
     };
     const category=(data.categories||[]).find(x=>[x.path,x.slug,x.label,x.name,x.title].some(v=>norm(v)===norm(selected)));
     const apiPath=customPaths[selected]||text(category?.path)||(selected.startsWith("/")?selected:(!selected?"/type/movies":""));
-
     if(apiPath&&apiPath!=="/"){
      status.textContent="Loading "+(category?.label||customLabels[selected]||"Category")+" · Page "+page+"…";
      const cr=await fetch("/api/movie-api/catalog?path="+encodeURIComponent(apiPath)+"&page=1");
@@ -252,16 +237,16 @@
      const maxPage=Math.max(1,Math.min(100,Number(cd.maxPage)||1));
      const pages=[cd];
      for(let start=2;start<=maxPage;start+=6){
-      const batch=await Promise.all(Array.from({length:Math.min(6,maxPage-start+1)},(_,i)=>start+i).map(async p=>{
-       const response=await fetch("/api/movie-api/catalog?path="+encodeURIComponent(apiPath)+"&page="+p);
-       const payload=await response.json();
-       if(!response.ok||payload.ok!==true)throw new Error(payload.error||"Movie Catalog API page "+p+" unavailable");
-       return payload;
+      const batch=await Promise.all(Array.from({length:Math.min(6,maxPage-start+1)},(_,i)=>start+i).map(async pageNo=>{
+       const pageResponse=await fetch("/api/movie-api/catalog?path="+encodeURIComponent(apiPath)+"&page="+pageNo);
+       const pagePayload=await pageResponse.json();
+       if(!pageResponse.ok||pagePayload.ok!==true)throw new Error(pagePayload.error||"Movie Catalog API page "+pageNo+" unavailable");
+       return pagePayload;
       }));
       pages.push(...batch);
      }
      const unique=new Map();
-     pages.forEach(payload=>(Array.isArray(payload.items)?payload.items:[]).forEach(item=>{
+     pages.forEach(pagePayload=>(Array.isArray(pagePayload.items)?pagePayload.items:[]).forEach(item=>{
       const key=pathOf(item)||norm(item.title);
       if(key&&!unique.has(key))unique.set(key,{...item,_sections:[],_sources:["catalog"]});
      }));
@@ -269,7 +254,7 @@
      apiCatalogMode=true;
      apiMeta=cd;
     }else{
-     all=flatten(d);
+     all=flatten(data);
     }
    }
    renderNav();
