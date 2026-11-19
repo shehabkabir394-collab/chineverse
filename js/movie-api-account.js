@@ -18,6 +18,7 @@ async function initPlatforms(){
  if(!platformBox)return;
  try{const r=await fetch('/api/movie-api/home',{cache:"no-store"}),d=await r.json();if(!r.ok||!d.ok)return;
  const raw=[...arr(d.platforms),...arr(d.platformList),...arr(d.platformCategories)];
+ if(!raw.length){try{const cr=await fetch("/api/movie-api/categories",{cache:"no-store"}),cd=await cr.json();const cats=arr(cd.categories||cd.items||cd.data||cd);raw.push(...cats.filter(x=>/platform/i.test(String(x.type||x.kind||x.categoryType||""))||x.platformName||x.platforms));}catch{}}
  platformNames=[...new Map(raw.map(x=>[title(x).toLowerCase(),x]).filter(x=>x[0])).values()];
  if(!platformNames.length)return;
  platformBox.hidden=false;
