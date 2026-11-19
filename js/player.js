@@ -10,7 +10,12 @@
   const qualityOptions=['<option value="auto">Auto</option>',...ordered.map(x=>'<option value="'+esc(x.quality)+'">'+esc(x.quality)+'</option>')].join("");
   controls.innerHTML='<div class="cv-progress"><input class="cv-seek" type="range" min="0" max="1000" value="0" aria-label="Seek"></div><div class="cv-control-row"><button type="button" class="cv-play" aria-label="Play">▶</button><button type="button" class="cv-back" aria-label="Back 10 seconds">↶10</button><button type="button" class="cv-forward" aria-label="Forward 10 seconds">10↷</button><span class="cv-time">0:00 / 0:00</span><input class="cv-volume" type="range" min="0" max="1" step=".05" value="1" aria-label="Volume"><select class="cv-quality" aria-label="Quality">'+qualityOptions+'</select><select class="cv-speed" aria-label="Playback speed"><option>0.25</option><option>0.5</option><option>0.75</option><option selected>1</option><option>1.25</option><option>1.5</option><option>1.75</option><option>2</option></select><select class="cv-subtitles" aria-label="Subtitles"><option value="-1">Subtitles Off</option></select><button type="button" class="cv-pip" title="Picture in Picture">▣</button><button type="button" class="cv-full" title="Fullscreen">⛶</button></div><div class="cv-buffer" hidden>Buffering…</div>';
   wrap.appendChild(controls);
+  const centerPlay=document.createElement("button");centerPlay.type="button";centerPlay.className="cv-center-play";centerPlay.setAttribute("aria-label","Play video");centerPlay.innerHTML="<span>▶</span>";wrap.appendChild(centerPlay);
+  const skipHint=document.createElement("div");skipHint.className="cv-skip-hint";skipHint.setAttribute("aria-live","polite");wrap.appendChild(skipHint);
   const $=s=>controls.querySelector(s),play=$(".cv-play"),seek=$(".cv-seek"),time=$(".cv-time"),quality=$(".cv-quality"),subs=$(".cv-subtitles");
+  let hideTimer=0;
+  function revealControls(){wrap.classList.add("cv-ui-visible");clearTimeout(hideTimer);if(!video.paused&&!video.ended)hideTimer=setTimeout(()=>wrap.classList.remove("cv-ui-visible"),2800);}
+  function showSkip(delta){skipHint.textContent=delta<0?"−10 seconds":"＋10 seconds";skipHint.classList.add("show");clearTimeout(showSkip.timer);showSkip.timer=setTimeout(()=>skipHint.classList.remove("show"),650);}
   const fmt=t=>{if(!Number.isFinite(t))return"0:00";const h=Math.floor(t/3600),m=Math.floor(t%3600/60),s=Math.floor(t%60);return h?h+":"+String(m).padStart(2,"0")+":"+String(s).padStart(2,"0"):m+":"+String(s).padStart(2,"0")};
   let activeHls=null,sourceToken=0;
   function loadHlsLibrary(){if(window.Hls)return Promise.resolve(window.Hls);if(window.__odHlsPromise)return window.__odHlsPromise;window.__odHlsPromise=new Promise((resolve,reject)=>{const script=document.createElement("script");script.src="https://cdn.jsdelivr.net/npm/hls.js@1.6.15/dist/hls.min.js";script.onload=()=>resolve(window.Hls);script.onerror=reject;document.head.appendChild(script);});return window.__odHlsPromise;}
@@ -26,7 +31,13 @@
   setSource(initial,false,true);quality.value=initial?.quality||"720p";
   quality.addEventListener("change",()=>{const src=quality.value==="auto"?best():ordered.find(x=>x.quality===quality.value);if(src)setSource(src)});
   play.addEventListener("click",()=>video.paused?video.play().catch(()=>{}):video.pause());
-  video.addEventListener("play",()=>play.textContent="Ⅱ");video.addEventListener("pause",()=>play.textContent="▶");
+  centerPlay.addEventListener("click",()=>video.paused?video.play().catch(()=>{}):video.pause());
+  video.addEventListener("click",()=>{if(video.paused)video.play().catch(()=>{});else revealControls();});
+  video.addEventListener("play",()=>{play.textContent="Ⅱ";centerPlay.classList.remove("visible");wrap.classList.add("cv-playing");revealControls();});
+  video.addEventListener("pause",()=>{play.textContent="▶";centerPlay.classList.add("visible");wrap.classList.remove("cv-playing");revealControls();});
+  ["pointermove","pointerdown","touchstart"].forEach(evt=>wrap.addEventListener(evt,revealControls,{passive:true}));
+  wrap.addEventListener("mouseleave",()=>{if(!video.paused)wrap.classList.remove("cv-ui-visible")});
+  video.addEventListener("ended",()=>{centerPlay.classList.add("visible");wrap.classList.add("cv-ui-visible")});
   $(".cv-back").addEventListener("click",()=>video.currentTime=Math.max(0,video.currentTime-10));
   $(".cv-forward").addEventListener("click",()=>video.currentTime=Math.min(video.duration||Infinity,video.currentTime+10));
   video.addEventListener("timeupdate",()=>{if(video.duration){seek.value=Math.round(video.currentTime/video.duration*1000);time.textContent=fmt(video.currentTime)+" / "+fmt(video.duration);}});
@@ -42,7 +53,7 @@
   video.addEventListener("loadedmetadata",()=>{if(saved>15&&saved<video.duration-20){const resume=document.createElement("button");resume.className="cv-resume";resume.textContent="▶ Resume from "+fmt(saved);wrap.appendChild(resume);resume.addEventListener("click",()=>{video.currentTime=saved;resume.remove();video.play().catch(()=>{})},{once:true});}});
   let saveAt=0;video.addEventListener("timeupdate",()=>{if(video.currentTime-saveAt>8){saveAt=video.currentTime;localStorage.setItem(storageKey,String(Math.floor(saveAt)))}});video.addEventListener("ended",()=>localStorage.removeItem(storageKey));
   wrap.tabIndex=0;wrap.addEventListener("keydown",e=>{if(["INPUT","SELECT","BUTTON"].includes(e.target.tagName))return;if(e.code==="Space"){e.preventDefault();video.paused?video.play():video.pause()}else if(e.key==="ArrowRight")video.currentTime+=10;else if(e.key==="ArrowLeft")video.currentTime-=10;else if(e.key.toLowerCase()==="f")$(".cv-full").click()});
-  let tap=0;video.addEventListener("touchend",e=>{const x=e.changedTouches[0].clientX,r=video.getBoundingClientRect();if(Math.abs(x-(r.left+r.width/2))<r.width*.12)return;const now=Date.now();if(now-tap<320){video.currentTime+=x<r.left+r.width/2?-10:10;tap=0}else tap=now},{passive:true});
+  let tap=0,lastTapX=0;video.addEventListener("touchend",e=>{const x=e.changedTouches[0].clientX,r=video.getBoundingClientRect();if(Math.abs(x-(r.left+r.width/2))<r.width*.12){tap=0;return;}const now=Date.now();if(now-tap<320&&Math.abs(x-lastTapX)<70){const delta=x<r.left+r.width/2?-10:10;video.currentTime=Math.max(0,Math.min(video.duration||Infinity,video.currentTime+delta));showSkip(delta);tap=0;revealControls();}else{tap=now;lastTapX=x;}},{passive:true});
   function setSources(next){ordered=[...next].filter(x=>x&&x.url).sort((a,b)=>Number(a.quality.replace(/p/i,""))-Number(b.quality.replace(/p/i,"")));quality.innerHTML="<option value=\"auto\">Auto</option>"+ordered.map(x=>"<option value=\""+esc(x.quality)+"\">"+esc(x.quality)+"</option>").join("");if(ordered.length){const preferred=ordered.find(x=>x.quality==="720p")||ordered[0];setSource(preferred,false,true);quality.value=preferred.quality;}}return {video,wrap,setSource,setSources};
  }
  window.CineVersePlayer={mount};
