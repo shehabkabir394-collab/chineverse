@@ -252,17 +252,43 @@
   const hindiDramas=allLatest(allTitles.filter(item=>isDrama(item)&&!isKDrama(item)&&!isAnime(item)&&!isNigerian(item)&&isHindiDubbed(item)));
   const hindiAnime=allLatest(allTitles.filter(item=>isAnime(item)&&!isNigerian(item)&&isHindiDubbed(item)));
   let out="";
-  out+=section("New Release Movies & Dramas","🆕 NEW MOVIE & DRAMA UPLOADS · NEWEST FIRST",newReleases.slice(0,24),"/type/movies");
+  const within24h=allLatest(allTitles.filter(item=>uploadTime(item)>Date.now()-24*60*60*1000&&uploadTime(item)<=Date.now()+60*60*1000));
+  const topTen=prioritySort(trending).slice(0,10);
+  const collections=Array.isArray(home.collections)?home.collections:[];
+  const upcoming=Array.isArray(home.upcoming)?home.upcoming:(Array.isArray(home.upcomingReleases)?home.upcomingReleases:[]);
+  const tagged=pattern=>allLatest(allTitles.filter(item=>pattern.test(sectionTags(item)+" "+String([item.category,item.genre,item.genres,item.type,item.typeBadge,item.language,item.country,item.originCountry].join(" ")).toLowerCase())));
+  const southIndian=tagged(/south indian|tamil|telugu|malayalam|kannada/);
+  const cDramas=tagged(/c[- ]?drama|chinese drama|china/).filter(isDrama);
+  const jDramas=tagged(/j[- ]?drama|japanese drama|japan/).filter(isDrama);
+  const ongoing=allLatest(allTitles.filter(item=>isDrama(item)&&/ongoing|returning|in production|currently airing/i.test(String([item.status,item.releaseStatus,item.airingStatus,item._sections].join(" ")))));
+  const animations=tagged(/animation|animated|cartoon/);
+  const dramaSeries=allLatest(allTitles.filter(item=>isDrama(item)&&!isAnime(item)&&!isNigerian(item)));
+  const movieTitles=allLatest(allTitles.filter(item=>isMovie(item)&&!isAnime(item)&&!isNigerian(item)));
+  if(within24h.length)out+=section("Last 24 Hours","⏱️ FRESH UPDATES · LAST 24 HOURS",within24h.slice(0,24),"/new");
+  out+=section("Recently Updated","🆕 LATEST MOVIES, DRAMAS & EPISODES",newReleases.slice(0,24),"/new");
+  if(upcoming.length)out+=section("Upcoming / Release Soon","🎬 COMING SOON",upcoming.slice(0,12),"/upcoming");
+  if(topTen.length)out+=section("🏆 Top 10 This Week","🔥 MOST POPULAR THIS WEEK",topTen,"/mostwatch/7d");
+  if(collections.length){
+   collections.forEach(collection=>out+=section(text(collection.title)||text(collection.name)||"Collection",text(collection.badge)||"📚 CURATED COLLECTION",Array.isArray(collection.items)?collection.items.slice(0,14):[] ,text(collection.path)||text(collection.categoryPath)||"/type/movies"));
+  }else{
+   sections.filter(s=>/collection|marvel|universe|south indian|horror|thriller|romance|bangla dubbed|korean drama|family|animation/i.test(String(s.title||""))).forEach(s=>out+=section(text(s.title)||"Collection",text(s.badge)||"📚 COLLECTION",sort(s.items||[]).slice(0,14),text(s.categoryPath)||"/type/movies"));
+  }
+  out+=section("New & Popular","✨ NEWEST & MOST DISCOVERED",prioritySort([...newReleases,...trending]).slice(0,18),"/new");
+  out+=section("Movies","🎬 MOVIE COLLECTION · NEWEST FIRST",movieTitles.slice(0,18),"/type/movies");
+  out+=section("Series & TV Shows","📺 SERIES COLLECTION · NEWEST FIRST",dramaSeries.slice(0,18),"/type/series");
+  out+=section("K-Dramas","🇰🇷 HINDI DUBBED FIRST · KOREAN DRAMAS",allKdramas.slice(0,18),"/language/korean");
+  out+=section("C-Dramas","🇨🇳 CHINESE DRAMAS",cDramas.slice(0,14),"/language/chinese");
+  out+=section("J-Dramas","🎌 JAPANESE DRAMAS",jDramas.slice(0,14),"/language/japanese");
+  out+=section("South Indian","🔥 TAMIL · TELUGU · MALAYALAM · KANNADA",southIndian.slice(0,18),"/south-indian");
+  out+=section("Ongoing Series","📡 CURRENTLY AIRING SERIES",ongoing.slice(0,14),"/ongoing");
+  out+=section("Anime Zone","🎌 ANIME COLLECTION",hindiAnime.length?hindiAnime:allLatest(allTitles.filter(isAnime)),"/anime");
+  out+=section("Animation","🧸 ANIMATION & CARTOONS",animations.slice(0,14),"/animation");
   out+=section("Hindi / Hindi Dubbed Movies","🇮🇳 HINDI AUDIO · NEWEST FIRST",hindiMovies.slice(0,14),"/language/hindi-dubbed");
-  out+=section("K-Dramas","🇰🇷 HINDI DUBBED FIRST · ALL KOREAN DRAMAS",allKdramas.slice(0,18),"/language/korean");
   out+=section("Hindi Dubbed Dramas","🇮🇳 VERIFIED HINDI AUDIO · NEWEST FIRST",hindiDramas.slice(0,14),"/language/hindi-dubbed");
-  out+=section("Hindi Dubbed Anime","🎌 VERIFIED HINDI AUDIO · NEWEST FIRST",hindiAnime.slice(0,14),"/language/hindi-dubbed");
-  const shownKeys=new Set([...newReleases,...hindiMovies,...allKdramas,...hindiAnime].map(item=>pathOf(item)||String(item.id||item.title||"")));
-  if(trending.length)out+=section("Trending Now","🔥 HINDI DUBBED FIRST · POPULAR RIGHT NOW",prioritySort(trending).slice(0,14),"/mostwatch/7d");
-  const used=new Set(["trending bengali movies","south indian & hindi dubbed","anime in hindi"]);
+  const used=new Set(["trending bengali movies","south indian & hindi dubbed","anime in hindi","collections"]);
   sections.forEach(s=>{
    const title=text(s.title)||"Discover";
-   if(used.has(title.toLowerCase()))return;
+   if(used.has(title.toLowerCase())||/collection|marvel|universe|south indian|horror|thriller|romance|bangla dubbed|korean drama|family|animation/i.test(title))return;
    const items=(Array.isArray(s.items)?s.items:[]).map(item=>({...item,_sections:[...(item._sections||[]),title]}));
    out+=section(title,text(s.badge)||"COLLECTION",sort(items).slice(0,14),text(s.categoryPath)||"/type/movies");
   });
