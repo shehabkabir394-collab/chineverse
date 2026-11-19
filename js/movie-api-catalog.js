@@ -19,6 +19,12 @@
   return 0;
  };
  const latestFirst=(a,b)=>releaseTime(b)-releaseTime(a);
+ const popularity=item=>["views","viewCount","view_count","totalViews","total_views","downloads","downloadCount","popularity","watchCount","watch_count","visits","hits","playCount","play_count","view","watchers"].reduce((best,key)=>Math.max(best,Number(item?.[key])||0),0);
+ const isKDramaItem=item=>{
+  const textValue=[item?.title,item?.type,item?.typeBadge,item?.category,item?.categoryName,item?.categoryLabel,item?.categoryPath,item?.genre,item?.genres,item?.country,item?.language,...(Array.isArray(item?._sections)?item._sections:[])].flat().map(v=>typeof v==="object"?[v?.name,v?.label,v?.title,v?.path].filter(Boolean).join(" "):String(v||"")).join(" ").toLowerCase();
+  return /k[- ]?drama|korean drama|south korea|korea drama/.test(textValue);
+ };
+ const categoryPriority=(a,b)=>latestFirst(a,b)||popularity(b)-popularity(a)||Number(isHindiDubbed(b))-Number(isHindiDubbed(a))||Number(isKDramaItem(b))-Number(isKDramaItem(a));
  const vals=item=>{
   const out=[];
   ["categoryPath","category","categoryName","categoryLabel","categorySlug","type","typeBadge","genre","language","country"].forEach(k=>{
@@ -65,7 +71,7 @@
   (Array.isArray(d.trending)?d.trending:[]).forEach(x=>add(x,"Trending Now","trending"));
   (Array.isArray(d.comingSoon)?d.comingSoon:[]).forEach(x=>add(x,"Coming Soon","comingSoon"));
   (Array.isArray(d.banners)?d.banners:[]).forEach(x=>add(x,"Featured","banner"));
-  return [...map.values()].filter(item=>!isNigerian(item)).sort((a,b)=>latestFirst(a,b)||Number(isHindiDubbed(b))-Number(isHindiDubbed(a)));
+  return [...map.values()].filter(item=>!isNigerian(item)).sort(categoryPriority);
  }
  const customLabels={"cv:movie":"Movie","cv:anime":"Anime","cv:drama":"Drama","cv:kdrama":"K-Drama","cv:cdrama":"C-Drama","cv:south":"South Movies","cv:bollywood":"Bollywood","cv:hollywood":"Hollywood"};
  function groupOf(item){
