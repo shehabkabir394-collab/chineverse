@@ -161,3 +161,20 @@
  content:"SWIPE  ← →";font-size:10px;letter-spacing:1px;color:#b9c6d8;
  margin-left:auto;white-space:nowrap;opacity:.8
 }
+
+
+/* Reliable horizontal poster swiping on touch screens */
+#movieApiSections .movie-api-shelf{
+ display:flex!important;flex-wrap:nowrap!important;width:100%;max-width:100%;min-width:0;
+ overflow-x:auto!important;overflow-y:hidden!important;
+ touch-action:pan-x pan-y!important;-webkit-overflow-scrolling:touch!important;
+ overscroll-behavior-x:contain;scrollbar-width:none;scroll-snap-type:x mandatory;
+}
+#movieApiSections .movie-api-shelf>.movie-api-card{
+ flex:0 0 clamp(128px,38vw,158px)!important;width:clamp(128px,38vw,158px)!important;
+ min-width:clamp(128px,38vw,158px)!important;max-width:none!important;
+ scroll-snap-align:start;
+}
+#movieApiSections .movie-api-shelf.is-dragging{cursor:grabbing;user-select:none}
+#movieApiSections .movie-api-shelf.is-dragging img{pointer-events:none}
+#movieApiStatus{display:none!important}
