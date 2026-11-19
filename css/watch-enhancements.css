@@ -49,3 +49,19 @@
  .ms-watch-player .cv-center-play span{font-size:23px}
 }
 @media(prefers-reduced-motion:reduce){.ms-watch-player .cv-controls,.ms-watch-player .cv-center-play{transition:none}}
+
+.ms-watch-player .cv-mid-skip{position:absolute;inset:0;display:flex;align-items:center;justify-content:space-between;padding:0 clamp(20px,9%,100px);z-index:4;pointer-events:none}
+.ms-watch-player .cv-mid-skip button{pointer-events:auto;width:54px;height:54px;border-radius:50%;border:1px solid #ffffff55;background:#07172dbd;color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;box-shadow:0 5px 24px #0008;backdrop-filter:blur(8px)}
+.ms-watch-player .cv-mid-skip button span{font-size:24px;line-height:22px}.ms-watch-player .cv-mid-skip button small{font-size:10px;font-weight:800}
+.ms-episode-section{margin:18px 0 26px;padding:clamp(12px,2vw,20px);border:1px solid #ffffff18;border-radius:16px;background:linear-gradient(145deg,#111b2c,#0a101c)}
+.ms-episode-section .section-head{margin-bottom:12px}.ms-episode-section .movie-api-episodes{display:grid;gap:10px}
+.ms-season-card{overflow:hidden;border:1px solid #ffffff18;border-radius:12px;background:#0b1422}
+.ms-season-heading{width:100%;display:flex;align-items:center;gap:12px;padding:15px 16px;border:0;background:#14243a;color:#fff;text-align:left;font-weight:750}
+.ms-season-heading span{flex:1;font-size:15px}.ms-season-heading small{color:#a9c5dc;font-size:12px}.ms-season-heading b{font-size:20px}
+.ms-season-episodes{padding:7px;display:grid;gap:7px}
+.ms-episode-section .ms-episode-button{display:flex;align-items:center;gap:12px;width:100%;padding:10px 12px;border:1px solid #ffffff12;border-radius:9px;background:#111e30;color:#f5f8fc;text-align:left}
+.ms-episode-section .ms-episode-button.active{border-color:#28bfff;background:#12304a}
+.ms-episode-number{flex:0 0 34px;height:34px;display:grid;place-items:center;border-radius:7px;background:#ffffff12;color:#8edcff;font-weight:800}
+.ms-episode-info{flex:1;min-width:0;display:grid;gap:3px}.ms-episode-info b{font-size:13px}.ms-episode-info small{font-size:11px}
+.ms-episode-quality{font-size:10px;color:#a9c5dc;white-space:nowrap}.ms-episode-action{font-size:16px;color:#45ceff}
+@media(max-width:600px){.ms-watch-player .cv-mid-skip{padding:0 13px}.ms-watch-player .cv-mid-skip button{width:43px;height:43px}.ms-episode-section{margin:14px 0 20px;padding:10px}.ms-season-heading{padding:13px 12px}.ms-episode-section .ms-episode-button{gap:8px;padding:9px 8px}.ms-episode-number{flex-basis:30px;height:30px}.ms-episode-quality{font-size:9px}}
