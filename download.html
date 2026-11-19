@@ -6,10 +6,18 @@
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <link rel="stylesheet" href="css/style.css"><link rel="stylesheet" href="css/only-drama.css"><link rel="stylesheet" href="css/movie-api.css"><link rel="stylesheet" href="css/moviestream-bd.css"><link rel="stylesheet" href="css/liquid-glass-red.css">
 <style>
-.ms-download-page{max-width:850px;margin:0 auto;padding:22px 14px 60px}.ms-download-card{margin:22px 0;padding:clamp(18px,4vw,30px);border:1px solid #ffffff20;border-radius:20px;background:linear-gradient(145deg,#14243aee,#09111fee);box-shadow:0 18px 55px #0007}.ms-download-head{display:flex;gap:16px;align-items:center}.ms-download-poster{width:86px;aspect-ratio:2/3;object-fit:cover;border-radius:10px;background:#111}.ms-download-head h1{font-size:clamp(20px,4vw,29px);margin:4px 0}.ms-download-head p{margin:4px 0}.ms-download-form{display:grid;gap:15px;margin-top:25px}.ms-download-form label{display:grid;gap:8px;color:#c9d9e9;font-size:13px;font-weight:700}.ms-download-form select{width:100%;min-height:48px;padding:10px 13px;border:1px solid #ffffff2c;border-radius:10px;background:#0c192a;color:#fff;font-size:15px}.ms-download-action{display:flex;align-items:center;justify-content:center;gap:10px;min-height:50px;padding:12px 18px;border:1px solid #53d8ff66;border-radius:12px;background:linear-gradient(110deg,#087fa8,#1354a5);color:#fff;font-weight:800;text-decoration:none}.ms-download-action[aria-disabled=true]{opacity:.45;pointer-events:none}.ms-download-note{padding:12px;border-radius:10px;background:#ffffff0b;color:#a9bfd2;font-size:12px;line-height:1.6}.ms-download-back{display:inline-flex;margin-top:10px;color:#9edfff;text-decoration:none}.ms-download-status{color:#b9d2e6;min-height:22px;font-size:13px}.ms-download-quality{font-size:12px;color:#a9bfd2}
+body.ms-watch-page{background:radial-gradient(ellipse at 50% -10%,#1c1645 0,#090b18 52%,#070a12 100%)}
+.ms-download-page{max-width:850px;margin:0 auto;padding:22px 14px 60px}.ms-download-card{margin:22px 0;padding:clamp(18px,4vw,30px);border:1px solid #ffffff20;border-radius:20px;background:linear-gradient(145deg,#17152fee,#0b1020ee);box-shadow:0 18px 55px #0007}
+.ms-download-meta{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0}.ms-download-meta span{padding:7px 10px;border:1px solid #ffffff14;border-radius:8px;background:#ffffff0b;color:#d8e7fa;font-size:11px}
+.ms-download-notice{margin:17px 0;padding:14px;border-left:3px solid #ffc83d;border-radius:10px;background:#111b30;color:#f5c95b;font-size:13px;line-height:1.6}
+.ms-download-action{background:linear-gradient(110deg,#5550ed,#245de9);border:0;box-shadow:0 8px 24px #3d50ed55}
+.ms-download-action.zip{background:linear-gradient(110deg,#7b35e9,#3f55f4);min-height:62px;font-size:16px;box-shadow:0 8px 25px #713cf055}
+.ms-download-action.fast{background:linear-gradient(110deg,#6336df,#8b35ec)}
+.ms-download-progress{height:9px;overflow:hidden;border-radius:20px;background:#ffffff16;margin:9px 0}.ms-download-progress>i{display:block;width:0;height:100%;background:linear-gradient(90deg,#24c9ef,#8a49f5);transition:width .2s}
+.ms-download-status{line-height:1.5}.ms-download-head{display:flex;gap:16px;align-items:center}.ms-download-poster{width:86px;aspect-ratio:2/3;object-fit:cover;border-radius:10px;background:#111}.ms-download-head h1{font-size:clamp(20px,4vw,29px);margin:4px 0}.ms-download-head p{margin:4px 0}.ms-download-form{display:grid;gap:15px;margin-top:25px}.ms-download-form label{display:grid;gap:8px;color:#c9d9e9;font-size:13px;font-weight:700}.ms-download-form select{width:100%;min-height:48px;padding:10px 13px;border:1px solid #ffffff2c;border-radius:10px;background:#0c192a;color:#fff;font-size:15px}.ms-download-action{display:flex;align-items:center;justify-content:center;gap:10px;min-height:50px;padding:12px 18px;border:1px solid #53d8ff66;border-radius:12px;background:linear-gradient(110deg,#087fa8,#1354a5);color:#fff;font-weight:800;text-decoration:none}.ms-download-action[aria-disabled=true]{opacity:.45;pointer-events:none}.ms-download-note{padding:12px;border-radius:10px;background:#ffffff0b;color:#a9bfd2;font-size:12px;line-height:1.6}.ms-download-back{display:inline-flex;margin-top:10px;color:#9edfff;text-decoration:none}.ms-download-status{color:#b9d2e6;min-height:22px;font-size:13px}.ms-download-quality{font-size:12px;color:#a9bfd2}
 @media(max-width:420px){.ms-download-head{align-items:flex-start}.ms-download-poster{width:70px}.ms-download-card{border-radius:15px}}
 </style>
-<script defer src="js/movie-api-download.js?v=streamapi1"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script><script defer src="js/movie-api-download.js?v=fullzip1"></script>
 </head>
 <body class="ms-watch-page">
 <header class="topbar"><a class="brand" href="./"><img src="images/moviestreambd-logo.svg" alt="MovieStreamBD" style="display:block;width:clamp(145px,19vw,220px);height:auto;max-height:48px;object-fit:contain"></a><nav><a href="./">HOME</a><a href="catalog.html">MOVIES & DRAMAS</a></nav></header>
@@ -19,8 +27,12 @@
 <div class="ms-download-form">
 <label id="downloadEpisodeWrap" hidden>Episode / Version<select id="downloadEpisode"></select></label>
 <label>Download Quality<select id="downloadQuality" disabled><option>Loading available qualities…</option></select></label>
+<div class="ms-download-meta"><span>⬇ Direct MP4</span><span>⚡ Multiple quality</span><span>🔒 Secure source</span></div>
+<div id="downloadNotice" class="ms-download-notice" hidden>⚠️ ডাউনলোড শুরু করতে নিচের বাটন চাপুন।</div>
 <div id="downloadStatus" class="ms-download-status" aria-live="polite">Checking available download sources…</div>
 <a id="downloadAction" class="ms-download-action" href="#" aria-disabled="true">⬇ Select quality to continue</a>
+<button id="downloadZip" class="ms-download-action zip" type="button" hidden>📦 Download Full Drama ZIP</button>
+<div id="zipProgress" hidden><div class="ms-download-progress"><i id="zipProgressBar"></i></div><div id="zipProgressText" class="ms-download-quality">Preparing ZIP…</div></div>
 <div class="ms-download-note">শুধু সরবরাহকারীর অনুমোদিত সরাসরি MP4 ডাউনলোড লিংক থাকলে ডাউনলোড চালু হবে। HLS/স্ট্রিমিং-only লিংক ডাউনলোড হিসেবে দেখানো হবে না। কিছু সার্ভার নিজস্ব নিয়মে ফাইল সেভ সীমিত করতে পারে।</div>
 </div></section></main>
 </body></html>
