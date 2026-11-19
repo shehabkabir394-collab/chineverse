@@ -20,7 +20,7 @@
  function getSubtitles(...objects){
   const found=[],seen=new Set();
   const add=value=>{if(!value)return;const list=Array.isArray(value)?value:[value];list.forEach((item,i)=>{
-   if(typeof item==="string"){if(/^https?:\/\//i.test(item)&&/\.(?:vtt|srt|ass|ssa)(?:$|[?#])/i.test(item))push({url:item,label:"Subtitle "+(i+1),language:"und"});return;}
+   if(typeof item==="string"){if(/^https?:\/\//i.test(item)&&/\.(?:vtt|srt)(?:$|[?#])/i.test(item))push({url:item,label:"Subtitle "+(i+1),language:"und"});return;}
    if(!item||typeof item!=="object")return;
    const url=item.url||item.src||item.file||item.subtitleUrl||item.subtitle_url||item.captionUrl||item.caption_url||item.downloadUrl||item.download_url||item.webvtt||item.vtt||item.link;
    if(!url)return;push({url,label:String(item.label||item.name||item.language||item.lang||item.title||("Subtitle "+(i+1))),language:String(item.language||item.lang||item.srclang||item.locale||"und")});
@@ -101,11 +101,11 @@
    const relatedResponse=await fetch("/api/movie-api/related?title="+encodeURIComponent(detail.title||""));
    const relatedPayload=await relatedResponse.json();
    const relatedItems=Array.isArray(relatedPayload.items)?relatedPayload.items:Array.isArray(relatedPayload.related)?relatedPayload.related:Array.isArray(relatedPayload.results)?relatedPayload.results:[];
-   const usable=relatedItems.filter(x=>x&&typeof x==="object"&&String(x.path||"").startsWith("/mb/")&&x.path!==path&&isHindiDubbed(x)).slice(0,12);
+   const usable=relatedItems.filter(x=>x&&typeof x==="object"&&String(x.path||"").startsWith("/mb/")&&x.path!==path&&!/nigeria|nollywood/i.test(String(x.country||"")+" "+String(x.language||""))).slice(0,12);
    if(usable.length){
     title.textContent="Related to "+(detail.title||"this title");
     grid.innerHTML=usable.map(x=>'<a class="ms-suggested-card" href="watch.html?path='+encodeURIComponent(x.path)+'"><img loading="lazy" decoding="async" src="'+esc(safeImage(x.poster||x.previewImage))+'" alt="'+esc(x.title||"")+'"><span><b>'+esc(x.title||"Untitled")+'</b><small>'+esc(x.language||x.typeBadge||"")+'</small></span></a>').join("");
-    box.hidden=false;return;
+    box.hidden=false;playerApi?.setSuggestions?.(grid.innerHTML);return;
    }
   }catch{}
   const response=await fetch("/api/movie-api/home");if(!response.ok)throw new Error("Catalog API unavailable");
@@ -121,16 +121,17 @@
    const best=current._sections.find(s=>!/(trending|coming soon|featured)/i.test(s));
    if(best){group="section";label=best;}
   }
-  let list=[...map.values()].filter(x=>x.path!==path&&isHindiDubbed(x));
+  let list=[...map.values()].filter(x=>x.path!==path&&!/nigeria|nollywood/i.test(String(x.country||"")+" "+String(x.language||"")));
   if(group==="section")list=list.filter(x=>x._sections.includes(label));
   else if(group)list=list.filter(x=>suggestedGroup(x)[0]===group);
-  if(!list.length&&current?._sections?.length)list=[...map.values()].filter(x=>x.path!==path&&isHindiDubbed(x)&&x._sections.some(s=>current._sections.includes(s)));
+  if(!list.length&&current?._sections?.length)list=[...map.values()].filter(x=>x.path!==path&&!/nigeria|nollywood/i.test(String(x.country||"")+" "+String(x.language||""))&&x._sections.some(s=>current._sections.includes(s)));
   const hindi=x=>/hindi dubbed/i.test(String(x.language||""))||(/hindi/i.test(String(x.language||""))&&(x._sections||[]).some(s=>/south indian.*hindi dubbed|anime in hindi/i.test(s)));
   list.sort((a,b)=>Number(hindi(b))-Number(hindi(a))||(Number(b.uploadedAtMs)||0)-(Number(a.uploadedAtMs)||0));
+  list.sort((a,b)=>Number(isHindiDubbed(b))-Number(isHindiDubbed(a))||(Number(b.uploadedAtMs)||0)-(Number(a.uploadedAtMs)||0));
   list=list.slice(0,12);if(!list.length)return;
   title.textContent="More "+label;
   grid.innerHTML=list.map(x=>'<a class="ms-suggested-card" href="watch.html?path='+encodeURIComponent(x.path)+'"><img loading="lazy" decoding="async" src="'+esc(safeImage(x.poster||x.previewImage))+'" alt="'+esc(x.title||"")+'"><span><b>'+esc(x.title||"Untitled")+'</b><small>'+esc(x.language||x.typeBadge||"")+'</small></span></a>').join("");
-  box.hidden=false;
+  box.hidden=false;playerApi?.setSuggestions?.(grid.innerHTML);
  }
  async function load(){
   if(!/^\/mb\/[a-zA-Z0-9_./-]{1,300}$/.test(path)){status.textContent="Invalid title link.";return;}
