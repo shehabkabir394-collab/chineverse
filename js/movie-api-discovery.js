@@ -5,7 +5,7 @@
  const safeUrl=v=>{try{const u=new URL(String(v||""),location.origin);return ["http:","https:"].includes(u.protocol)?u.href:"";}catch{return "";}};
  const pathOf=x=>typeof x?.path==="string"&&x.path.startsWith("/mb/")?x.path:"";
  const imageOf=x=>safeUrl(x?.poster||x?.previewImage||x?.thumbnail||x?.image||x?.cover||x?.posterUrl);
- const titleOf=x=>String(x?.title||x?.name||x?.label||x?.keyword||"Untitled");
+ const titleOf=x=>String(x?.title||x?.name||x?.label||x?.keyword||x?.suggestion||x?.text||x?.value||x?.query||"Untitled");
  const arrays=d=>{
   const preferred=[];
   const seen=new Set();
