@@ -7,7 +7,7 @@
  const root=$("#movieApiSections"),status=$("#movieApiStatus"),search=$("#movieApiSearch"),nav=$("#movieApiCategories");
  const hero=document.querySelector(".ms-hero");
  if(!root||!status||!search||!nav)return;
- let home=null,hindiCatalog=[];
+ let home=null,hindiCatalog=[],homeRenderedKeys=new Set();
  const isHindiDubbed=item=>{
   if(item?._hindiCatalog===true)return true;
   const norm=value=>String(value??"").trim().toLowerCase().replace(/[_-]+/g," ").replace(/\s+/g," ");
@@ -62,10 +62,18 @@
   return '<article class="movie-card movie-api-card"><button class="movie-api-poster" type="button" data-path="'+esc(path)+'" '+(!path?"disabled":"")+' aria-label="Open '+esc(title)+'">'+(poster?'<img loading="lazy" decoding="async" src="'+esc(poster)+'" alt="'+esc(title)+' poster">':'<span class="movie-api-placeholder">MOVIESTREAM BD</span>')+'<span class="quality">'+esc(item.quality||item.typeBadge||"HD")+'</span>'+(isHindiDubbed(item)?'<span class="movie-api-language-badge">HINDI DUBBED</span>':"")+'<span class="overlay">▶<small>View details &amp; watch</small></span></button><div class="movie-info"><h3>'+esc(title)+'</h3><p>'+esc(item.language||item.country||item.typeBadge||"")+'</p></div></article>';
  }
  function section(title,badgeText,items,target){
-  items=items.filter(item=>!isNigerianItem(item));
+  const localKeys=new Set();
+  items=items.filter(item=>{
+   if(isNigerianItem(item))return false;
+   const key=pathOf(item)||String(item.id||item.title||"").trim().toLowerCase();
+   if(!key||homeRenderedKeys.has(key)||localKeys.has(key))return false;
+   localKeys.add(key);
+   return true;
+  });
   if(!items.length)return "";
   const mobile=window.matchMedia("(max-width:760px)").matches;
   const visible=items.slice(0,mobile?8:12);
+  visible.forEach(item=>homeRenderedKeys.add(pathOf(item)||String(item.id||item.title||"").trim().toLowerCase()));
   return '<section class="movie-api-row"><div class="section-head"><div><p class="eyebrow">'+esc(badgeText)+'</p><h2>'+esc(title)+'</h2></div><a class="btn ghost" href="catalog.html?category='+encodeURIComponent(target||"/type/movies")+'">View all →</a></div><div class="movie-api-shelf">'+visible.map(card).join("")+'</div></section>';
  }
  function renderHero(){
@@ -130,6 +138,7 @@
  }
  function render(){
   if(!home)return;
+  homeRenderedKeys=new Set();
   const sections=Array.isArray(home.sections)?home.sections:[];
   const trending=Array.isArray(home.trending)?home.trending:[];
   const categories=Array.isArray(home.categories)?home.categories:[];
@@ -271,8 +280,8 @@
   const animations=tagged(/animation|animated|cartoon/);
   const dramaSeries=allLatest(allTitles.filter(item=>isDrama(item)&&!isAnime(item)&&!isNigerian(item)));
   const movieTitles=allLatest(allTitles.filter(item=>isMovie(item)&&!isAnime(item)&&!isNigerian(item)));
+  if(topTen.length)out+=section("Trending Now","🔥 MOST WATCHED THIS WEEK · POPULAR PICKS",topTen,"/mostwatch/7d");
   out+=section("Hindi / Hindi Dubbed Movies","🇮🇳 HINDI AUDIO · NEWEST FIRST",hindiMovies.slice(0,14),"/language/hindi-dubbed");
-  if(topTen.length)out+=section("🔥 Most Watched This Week","POPULAR PICKS · TRENDING NOW",topTen,"/mostwatch/7d");
   out+=section("Recently Updated","🆕 LATEST MOVIES, DRAMAS & EPISODES · NEWEST FIRST",newReleases.slice(0,24),"/new");
   const hindiDubbedKdramas=allLatest(allKdramas.filter(isHindiDubbed));
   out+=section("K-Drama Hindi Dubbed","🇰🇷 HINDI DUBBED K-DRAMAS · LATEST UPDATES FIRST",hindiDubbedKdramas.slice(0,24),"/language/korean");
