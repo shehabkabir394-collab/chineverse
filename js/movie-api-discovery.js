@@ -45,7 +45,7 @@
   const wrap=document.createElement("div");wrap.className="cv-search-wrap";search.parentNode.insertBefore(wrap,search);wrap.appendChild(search);
   const panel=document.createElement("div");panel.className="cv-search-panel";panel.hidden=true;wrap.appendChild(panel);
   let timer=0,request=0;
-  const show=(items)=>{panel.innerHTML=items.slice(0,8).map(x=>{const p=pathOf(x),t=titleOf(x);return '<a href="'+(p?'watch.html?path='+encodeURIComponent(p):'catalog.html?q='+encodeURIComponent(t))+'">'+esc(t)+'</a>';}).join("");panel.hidden=!items.length;};
+  const show=(items)=>{panel.innerHTML=items.slice(0,8).map(x=>{const p=pathOf(x),t=typeof x==="string"?x:titleOf(x);return '<a href="'+(p?'watch.html?path='+encodeURIComponent(p):'catalog.html?q='+encodeURIComponent(t))+'">'+esc(t)+'</a>';}).join("");panel.hidden=!items.length;};
   search.addEventListener("input",()=>{clearTimeout(timer);const q=search.value.trim();if(q.length<2){panel.hidden=true;return;}timer=setTimeout(async()=>{const id=++request;try{const d=await api("/api/movie-api/suggest?q="+encodeURIComponent(q));if(id!==request)return;show(arrays(d));}catch{panel.hidden=true;}},260);});
   document.addEventListener("click",e=>{if(!wrap.contains(e.target))panel.hidden=true;});
   search.addEventListener("keydown",e=>{if(e.key==="Escape")panel.hidden=true;});
