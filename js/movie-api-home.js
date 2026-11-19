@@ -292,14 +292,16 @@
    const sectionList=[...(Array.isArray(home.sections)?home.sections:[]),...(Array.isArray(home.allOfficialSections)?home.allOfficialSections:[])];
    const latestSections=sectionList.filter(section=>/(latest|recent|new release|new upload|newly added|recently added)/i.test(String(section.title||"")));
    const latestCategories=(Array.isArray(home.categories)?home.categories:[]).filter(category=>/(latest|recent|new release|new upload|newly added)/i.test(String(category.label||category.name||category.title||category.slug||"")));
-   const latestPaths=[...new Set([...latestSections,...latestCategories].map(section=>String(section.categoryPath||section.path||section.slug||"").trim()).filter(path=>path.startsWith("/")))];
+   const categoryPaths=[...sectionList,...(Array.isArray(home.categories)?home.categories:[])].map(section=>String(section.categoryPath||section.path||"").trim()).filter(path=>path.startsWith("/"));
+   const latestPaths=[...new Set([...latestSections,...latestCategories].map(section=>String(section.categoryPath||section.path||"").trim()).filter(path=>path.startsWith("/")))];
+   const discoveryPaths=[...new Set([...latestPaths,...categoryPaths])];
    const fetchPages=async(path,limit)=>{
     const first=await catalogPage(path,1);
     const max=Math.min(limit,Math.max(1,Number(first.maxPage)||1));
     const rest=await Promise.all(Array.from({length:max-1},(_,i)=>catalogPage(path,i+2).catch(()=>({items:[]}))));
     return [first,...rest].flatMap(payload=>Array.isArray(payload.items)?payload.items:[]);
    };
-   const latestJobs=latestPaths.slice(0,3).map(path=>fetchPages(path,8).then(items=>items.map(item=>({...item,_latestFeed:true,_sections:["Latest Uploads"]}))).catch(()=>[]));
+   const latestJobs=discoveryPaths.slice(0,14).map(path=>fetchPages(path,latestPaths.includes(path)?8:2).then(items=>items.map(item=>({...item,_latestFeed:true,_sections:["Latest Uploads"]}))).catch(()=>[]));
    const hindiJob=fetchPages("/language/hindi-dubbed",10).then(items=>items.map(item=>({...item,_hindiCatalog:true,_sections:[...(item._sections||[]),"Hindi Dubbed Catalog"]}))).catch(()=>[]);
    const dramaJob=fetchPages("/drama",4).then(items=>items.map(item=>({...item,_dramaCatalog:true,_sections:[...(item._sections||[]),"Drama Catalog"]}))).catch(()=>[]);
    const koreanJob=fetchPages("/language/korean",4).then(items=>items.map(item=>({...item,_koreanCatalog:true,_sections:[...(item._sections||[]),"Korean Catalog"]}))).catch(()=>[]);
@@ -307,9 +309,12 @@
    const [latestResults,hindiResults,dramaResults,koreanResults,animeResults]=await Promise.all([
     Promise.all(latestJobs),hindiJob,dramaJob,koreanJob,animeJob
    ]);
+   const keyOf=item=>pathOf(item)||String(item.id||item.title||"").trim().toLowerCase();
+   const hindiKeys=new Set(hindiResults.map(keyOf).filter(Boolean));
+   const markHindiIntersection=items=>items.map(item=>({...item,_hindiCatalog:hindiKeys.has(keyOf(item))}));
    home._extraLatest=latestResults.flat();
    home._extraHindi=hindiResults;
-   home._extraClassified=[...dramaResults,...koreanResults,...animeResults];
+   home._extraClassified=[...markHindiIntersection(dramaResults),...markHindiIntersection(koreanResults),...markHindiIntersection(animeResults)];
    const sourceSections=Array.isArray(home.sections)?home.sections:[];
    const pool=[
     ...sourceSections.flatMap(section=>(Array.isArray(section.items)?section.items:[]).map(item=>({...item,_sections:[...(item._sections||[]),text(section.title)]}))),
