@@ -133,10 +133,10 @@
  function render(){
   if(!data)return;
   const filtered=all.filter(item=>!isNigerian(item)&&matches(item)).sort((a,b)=>latestFirst(a,b)||Number(isHindiDubbed(b))-Number(isHindiDubbed(a)));
-  const pages=apiCatalogMode?Math.max(1,Number(apiMeta?.maxPage)||1):Math.max(1,Math.ceil(filtered.length/pageSize));
+  const pages=Math.max(1,Math.ceil(filtered.length/pageSize));
   const safePage=Math.min(page,pages);
-  const start=apiCatalogMode?0:(safePage-1)*pageSize;
-  const items=apiCatalogMode?filtered:filtered.slice(start,start+pageSize);
+  const start=(safePage-1)*pageSize;
+  const items=filtered.slice(start,start+pageSize);
   root.innerHTML=items.map(card).join("")||'<p class="muted">এই Category-তে কোনো title পাওয়া যায়নি। অন্য Category নির্বাচন করো।</p>';
   const c=(data.categories||[]).find(x=>[x.path,x.slug,x.label,x.name,x.title].some(v=>norm(v)===norm(selected)));
   heading.textContent=selected?(customLabels[selected]||c?.label||c?.name||c?.title||selected):"All Movies & Dramas A–Z";
@@ -223,7 +223,7 @@
       if(key&&!unique.has(key))unique.set(key,{...item,_sections:[],_sources:["catalog"]});
      }));
      all=[...unique.values()].filter(item=>!isNigerian(item));
-     apiCatalogMode=false;
+     apiCatalogMode=true;
      apiMeta=cd;
     }else{
      all=flatten(d);
