@@ -182,7 +182,18 @@
    ...(Array.isArray(home._extraHindi)?home._extraHindi:[])
   ];
   const unique=new Map();
-  pool.forEach(item=>{const key=pathOf(item)||String(item.id||item.title||"");if(key&&!unique.has(key))unique.set(key,item);});
+  pool.forEach(item=>{
+   const key=pathOf(item)||String(item.id||item.title||"");
+   if(!key)return;
+   if(!unique.has(key))unique.set(key,item);
+   else{
+    const saved=unique.get(key);
+    if(!posterOf(saved)&&posterOf(item))saved.poster=posterOf(item);
+    if(item._hindiCatalog)saved._hindiCatalog=true;
+    if(item._latestFeed)saved._latestFeed=true;
+    saved._sections=[...new Set([...(saved._sections||[]),...(item._sections||[])])];
+   }
+  });
   const allTitles=[...unique.values()];
   const sectionTags=item=>(item._sections||[]).join(" ").toLowerCase();
   const isKDrama=item=>{
@@ -198,13 +209,13 @@
   };
   const isMovie=item=>{
    const tags=sectionTags(item);
-   const type=String(item.typeBadge||item.type||"").toLowerCase();
-   return /^(movie|movies|film)$/i.test(type)||/movie|movies|film|cinema/.test(tags);
+   const type=String(item.mediaType||item.contentType||item.type||item.typeBadge||item.category||"").toLowerCase();
+   return /^(movie|movies|film|feature film)$/i.test(type)||/movie|movies|film|cinema/.test(tags)||item.isMovie===true;
   };
   const isDrama=item=>{
    const tags=sectionTags(item);
-   const type=String(item.typeBadge||item.type||"").toLowerCase();
-   return /^(drama|series|tv show|tv series|show|web series)$/i.test(type)||/drama|series|tv show|k drama|korean drama|tv show/.test(tags)||Array.isArray(item.episodes);
+   const type=String(item.mediaType||item.contentType||item.type||item.typeBadge||item.category||"").toLowerCase();
+   return /^(drama|series|tv show|tv series|show|web series|serial)$/i.test(type)||/drama|series|tv show|k drama|korean drama|tv show/.test(tags)||item.isSeries===true||item.isDrama===true||Array.isArray(item.episodes)||Number(item.episodeCount)>0||Number(item.totalEpisodes)>0;
   };
   const allLatest=items=>[...new Map(items.map(item=>[pathOf(item)||String(item.id||item.title||""),item])).values()].sort(newestFirst);
   const recentCutoff=Date.now()-180*24*60*60*1000;
@@ -220,8 +231,8 @@
   let out="";
   out+=section("New Release Movies & Dramas","🆕 VERIFIED RECENT UPLOADS · NEWEST FIRST",newReleases.slice(0,14),"/type/movies");
   out+=section("Hindi / Hindi Dubbed Movies","🇮🇳 HINDI AUDIO · NEWEST FIRST",hindiMovies.slice(0,14),"/language/hindi-dubbed");
-  out+=section("Hindi Dubbed Dramas","🇮🇳 VERIFIED HINDI AUDIO · NEWEST FIRST",hindiDramas.slice(0,14),"/language/hindi-dubbed");
   out+=section("Hindi Dubbed K-Dramas","🇰🇷 KOREAN DRAMA · HINDI AUDIO ONLY",hindiKdramas.slice(0,14),"/language/hindi-dubbed");
+  out+=section("Hindi Dubbed Dramas","🇮🇳 VERIFIED HINDI AUDIO · NEWEST FIRST",hindiDramas.slice(0,14),"/language/hindi-dubbed");
   out+=section("Hindi Dubbed Anime","🎌 VERIFIED HINDI AUDIO · NEWEST FIRST",hindiAnime.slice(0,14),"/language/hindi-dubbed");
   const shownKeys=new Set([...newReleases,...hindiMovies,...hindiKdramas,...hindiAnime].map(item=>pathOf(item)||String(item.id||item.title||"")));
   if(trending.length)out+=section("Trending Now","🔥 HINDI DUBBED FIRST · POPULAR RIGHT NOW",prioritySort(trending).slice(0,14),"/mostwatch/7d");
