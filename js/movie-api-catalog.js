@@ -43,7 +43,7 @@
     const code=norm(value.code||value.languageCode||value.lang);
     return /^(hi|hin)$/.test(code)||[value.language,value.name,value.label,value.title].some(exact);
    }
-   return exact(value)||/(^|[,;|/])\\s*(hindi|hi|hin|हिंदी|हिन्दी)\\s*($|[,;|/])/.test(norm(value));
+   return exact(value)||/(^|[,;|/])\s*(hindi|hi|hin|हिंदी|हिन्दी)\s*($|[,;|/])/.test(norm(value));
   };
   const audioFields=[item?.audioLanguage,item?.audioLanguages,item?.dubLanguage,item?.dubLanguages,item?.dubbedLanguages,item?.availableAudio,item?.availableLanguages,item?.languages,item?.audio,item?.audioTrack,item?.audioTracks,item?.dubbing,item?.audioInfo,item?.audioOptions];
   const sections=(item?._sections||[]).map(norm);
