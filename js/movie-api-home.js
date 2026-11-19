@@ -45,34 +45,43 @@
   const sections=Array.isArray(home.sections)?home.sections:[];
   const trending=Array.isArray(home.trending)?home.trending:[];
   const categories=Array.isArray(home.categories)?home.categories:[];
-  const categoryButtons=[
-   ["📡","LIVENOW",["live now","livenow","live"]],
-   ["🇧🇩","BANGLA",["bangla movies","bangla","bengali"]],
-   ["🗣️","BANGLA DUB",["bangla dub","bengali dubbed"]],
-   ["🎬","BOLLYWOOD",["bollywood"]],
-   ["🇮🇳","HINDI",["hindi movies","hindi"]],
-   ["🎤","HINDI DUB",["hindi dubbed","hindi-dubbed"]],
-   ["🎧","DUAL AUDIO",["dual audio"]],
-   ["🇮🇩","INDONESIAN",["indonesian"]],
-   ["🇺🇸","ENGLISH",["english movies","english"]],
-   ["⚔️","ACTION",["action"]],
-   ["🧩","THRILLER",["thriller"]],
-   ["👻","HORROR",["horror"]],
-   ["💕","ROMANCE",["romance"]],
-   ["🎬","MOVIES",["movies","movie"]],
-   ["📺","WEB SERIES",["web series","series"]],
-   ["🥇","WWE",["wwe"]],
-   ["🛡️","MCU",["mcu","marvel"]],
-   ["🦇","DC",["dc comics","dc universe"]]
-  ];
   const norm=v=>String(v||"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim();
-  nav.innerHTML=categoryButtons.map(([emoji,label,terms])=>{
-   const found=categories.find(c=>{
-    const fields=[c.label,c.name,c.title,c.slug,c.path].map(norm);
-    return terms.some(term=>fields.some(value=>value===norm(term)||value.includes(norm(term))));
-   });
-   const target=found?(text(found.path)||text(found.slug)||text(found.label)||label):label;
-   return '<a class="catalog-chip" href="catalog.html?category='+encodeURIComponent(target)+'"><span class="category-emoji">'+emoji+'</span><span>'+esc(label)+'</span></a>';
+  const emojiFor=label=>{
+   const v=norm(label);
+   if(/live|tv/.test(v))return "📡";
+   if(/bangla|bengali/.test(v))return "🇧🇩";
+   if(/hindi/.test(v))return "🇮🇳";
+   if(/english|hollywood/.test(v))return "🇺🇸";
+   if(/indonesia/.test(v))return "🇮🇩";
+   if(/korean|k drama/.test(v))return "🇰🇷";
+   if(/chinese|c drama/.test(v))return "🇨🇳";
+   if(/japanese|anime/.test(v))return "🎌";
+   if(/bollywood|movie|film/.test(v))return "🎬";
+   if(/series|drama/.test(v))return "📺";
+   if(/action/.test(v))return "⚔️";
+   if(/thriller/.test(v))return "🧩";
+   if(/horror/.test(v))return "👻";
+   if(/romance/.test(v))return "💕";
+   if(/comedy/.test(v))return "😂";
+   if(/wwe|wrestling/.test(v))return "🥇";
+   if(/marvel|mcu/.test(v))return "🛡️";
+   if(/dc comics|dc universe/.test(v))return "🦇";
+   if(/dub|audio/.test(v))return "🎧";
+   return "🎞️";
+  };
+  const seenCategories=new Set();
+  const actualCategories=categories.filter(c=>{
+   const label=text(c.label)||text(c.name)||text(c.title)||text(c.slug)||text(c.path);
+   const target=text(c.path)||text(c.slug)||label;
+   const key=norm(target||label);
+   if(!label||!target||seenCategories.has(key))return false;
+   seenCategories.add(key);
+   return true;
+  });
+  nav.innerHTML=actualCategories.map(c=>{
+   const label=text(c.label)||text(c.name)||text(c.title)||text(c.slug)||text(c.path);
+   const target=text(c.path)||text(c.slug)||label;
+   return '<a class="catalog-chip" href="catalog.html?category='+encodeURIComponent(target)+'"><span class="category-emoji">'+emojiFor(label)+'</span><span>'+esc(label)+'</span></a>';
   }).join("");
   const dubbed=sort(hindiCatalog.filter(isHindiDubbed));
   const korean=dubbed.filter(item=>/korea|south korea/i.test(String(item.country||"")));
