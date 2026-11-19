@@ -7,13 +7,28 @@
  const imageOf=x=>safeUrl(x?.poster||x?.previewImage||x?.thumbnail||x?.image||x?.cover||x?.posterUrl);
  const titleOf=x=>String(x?.title||x?.name||x?.label||x?.keyword||"Untitled");
  const arrays=d=>{
-  const found=[];const seen=new Set();
-  const walk=(v,depth=0)=>{
-   if(!v||depth>4)return;
-   if(Array.isArray(v)){if(v.length&&v.some(x=>x&&typeof x==="object")){const sig=v.map(x=>titleOf(x)).join("|");if(!seen.has(sig)){seen.add(sig);found.push(v);}}else v.forEach(x=>walk(x,depth+1));return;}
-   if(typeof v==="object")Object.entries(v).forEach(([k,x])=>{if(Array.isArray(x)&&/(items|list|results|records|data|categories|suggestions|shorts|videos|sports|upcoming|hot|staff|comments)/i.test(k))walk(x,depth+1);else if(x&&typeof x==="object")walk(x,depth+1);});
-  };walk(d);return found.sort((a,b)=>b.length-a.length)[0]||[];
- };
+  const preferred=[];
+  const seen=new Set();
+  const walk=(v,key="",depth=0)=>{
+   if(depth>5||v==null)return;
+   if(Array.isArray(v)){
+    const values=v.filter(x=>typeof x==="string"||typeof x==="number"||(x&&typeof x==="object"));
+    if(values.length&&/(suggest|hot|keyword|items|list|results|records|data|categories|shorts|videos|sports|upcoming)/i.test(key)){
+     const sig=values.map(x=>typeof x==="object"?titleOf(x):String(x)).join("|");
+     if(!seen.has(sig)){seen.add(sig);preferred.push({key,values});}
+    }
+    v.forEach(x=>{if(x&&typeof x==="object")walk(x,key,depth+1);});
+    return;
+   }
+   if(typeof v==="object")Object.entries(v).forEach(([k,x])=>walk(x,k,depth+1));
+  };
+  walk(d);
+  preferred.sort((a,b)=>{
+   const score=k=>(/suggest|hot|keyword/i.test(k)?3:/items|list|results|records|data/i.test(k)?2:1);
+   return score(b.key)-score(a.key)||b.values.length-a.values.length;
+  });
+  return preferred[0]?.values||[];
+ }
  const api=async(path)=>{const r=await fetch(path,{headers:{Accept:"application/json"}});const d=await r.json().catch(()=>({}));if(!r.ok||d.ok===false)throw new Error(d.error||"API unavailable");return d;};
  const section=(id,title,eyebrow,items,mode="cards")=>{
   if(!items.length)return "";
