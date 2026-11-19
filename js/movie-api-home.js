@@ -354,8 +354,17 @@
    const d=await r.json();
    if(!r.ok||d.ok!==true)throw new Error(d.error||"Catalog unavailable");
    home=d;
-   // Use one stable homepage response for every shelf. Avoid parallel geo-sensitive
-   // category requests that can return different regional catalogs during first paint.
+   // Keep one homepage snapshot and make only one dedicated Hindi-dubbed request.
+   // Parallel category feeds could return different geo-selected catalogs and cause
+   // the visible region/content to appear to switch after the first paint.
+   try{
+    const hr=await fetch("/api/movie-api/catalog?path="+encodeURIComponent("/language/hindi-dubbed")+"&page=1");
+    const hd=await hr.json();
+    if(hr.ok&&hd.ok===true&&Array.isArray(hd.items))home._extraHindi=hd.items.map(item=>({...item,_hindiCatalog:true,_sections:[...(item._sections||[]),"Hindi Dubbed Catalog"]}));
+   }catch{}
+   const basePool=[...(Array.isArray(home.sections)?home.sections.flatMap(section=>(Array.isArray(section.items)?section.items:[])):[]),...(Array.isArray(home.trending)?home.trending:[]),...(Array.isArray(home._extraHindi)?home._extraHindi:[])];
+   const keys=new Set();
+   hindiCatalog=basePool.filter(item=>{const key=String(item.id||item.path||item.title||"").trim();if(!key||keys.has(key))return false;keys.add(key);return true;});
    render();
   }catch(e){status.textContent="Catalog could not load: "+(e.message||"Unknown error");}
  }
