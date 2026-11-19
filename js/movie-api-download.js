@@ -7,13 +7,16 @@ let episodes=[],selected=requested,detail=null,downloadable=[],busy=false;
 const subjectIdOf=()=>detail?.subjectId||detail?.subject_id||detail?.subject?.subjectId||detail?.subject?.subject_id||detail?.subject?.id||detail?.id||detail?.subjectId;
 const seasonKey=item=>String(item?.seasonName||item?.seasonTitle||item?.seasonNumber||item?.season||"1");
 function episodeCoords(item,index){
- const season=item?.se??item?.seasonIndex??(item?.seasonNumber!=null?Number(item.seasonNumber)-1:0);
- const number=item?.ep??item?.episodeIndex??(item?.episodeNumber!=null?Number(item.episodeNumber)-1:(item?.number!=null?Number(item.number)-1:null));
  const same=episodes.slice(0,index).filter(x=>seasonKey(x)===seasonKey(item)).length;
- const primary={se:Math.max(0,Math.floor(Number(season)||0)),ep:Math.max(0,Math.floor(number==null?same:Number(number))||0)};
- const fallback={se:0,ep:index};
- const out=[primary,fallback];
+ const rawSeason=item?.se??item?.seasonIndex??(item?.seasonNumber!=null?Number(item.seasonNumber)-1:0);
+ const rawEpisode=item?.ep??item?.episodeIndex??(item?.episodeNumber!=null?Number(item.episodeNumber)-1:(item?.number!=null?Number(item.number)-1:null));
+ const primary={se:Math.max(0,Math.floor(Number(rawSeason)||0)),ep:Math.max(0,Math.floor(rawEpisode==null?same:Number(rawEpisode))||0)};
+ const out=[primary];
+ const label=String(item?.label||item?.name||item?.title||"");
+ const match=label.match(/S(?:eason)?\s*0*(\d+)\s*[-._ ]*E(?:pisode)?\s*0*(\d+)/i)||label.match(/Season\s*0*(\d+).*?Episode\s*0*(\d+)/i);
+ if(match)out.push({se:Math.max(0,Number(match[1])-1),ep:Math.max(0,Number(match[2])-1)});
  if(item?.seasonNumber!=null&&item?.episodeNumber!=null)out.push({se:Math.max(0,Number(item.seasonNumber)-1),ep:Math.max(0,Number(item.episodeNumber)-1)});
+ out.push({se:0,ep:index});
  return out.filter((v,i,a)=>a.findIndex(x=>x.se===v.se&&x.ep===v.ep)===i);
 }
 function getSources(ep){
@@ -69,7 +72,7 @@ $("#downloadZip").addEventListener("click",async()=>{
   const successes=episodes.length-failed.length;if(!successes)throw new Error("কোনো Episode ডাউনলোড করা যায়নি। "+(failed[0]||""));
   if(failed.length)root.file("DOWNLOAD-REPORT.txt","Download failed for these episodes:\n"+failed.join("\n"));
   label.textContent="ZIP archive তৈরি হচ্ছে…";
-  const blob=await zip.generateAsync({type:"blob",compression:"STORE"},m=>{bar.style.width=(75+Math.round(m.percent*.25))+"%";});
+  const blob=await zip.generateAsync({type:"blob",compression:"STORE",streamFiles:true},m=>{bar.style.width=(75+Math.round(m.percent*.25))+"%";});
   const a=document.createElement("a"),u=URL.createObjectURL(blob);a.href=u;a.download=safeName(detail?.title||"Drama")+"-Full-Drama.zip";document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),120000);
   label.textContent="Complete: "+successes+" / "+episodes.length+" episodes"+(failed.length?" · "+failed.length+" failed":"");$("#downloadStatus").textContent=failed.length?"ZIP তৈরি হয়েছে, তবে কিছু Episode পাওয়া যায়নি। ZIP-এর DOWNLOAD-REPORT.txt দেখুন।":"Full Drama ZIP download শুরু হয়েছে।";
  }catch(e){label.textContent=e.message||"ZIP তৈরি করা যায়নি।";$("#downloadStatus").textContent="ZIP ব্যর্থ: "+(e.message||"Unknown error");}
