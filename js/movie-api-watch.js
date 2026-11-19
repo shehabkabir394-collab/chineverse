@@ -18,9 +18,17 @@
   return matched.length?matched:sources;
  }
  function getSubtitles(...objects){
-  const found=[];const add=value=>{if(!value)return;const list=Array.isArray(value)?value:[value];list.forEach((item,i)=>{if(typeof item==="string"){if(/\.vtt(?:$|[?#])/i.test(item))found.push({url:item,label:"Subtitle "+(i+1),language:"und"});return;}if(!item||typeof item!=="object")return;const url=item.url||item.src||item.file||item.subtitleUrl||item.captionUrl||item.webvtt||item.vtt;if(!url)return;let absolute;try{absolute=new URL(url,location.origin).href;if(new URL(absolute).protocol!=="https:"&&location.protocol==="https:")return;}catch{return;}found.push({url:absolute,label:String(item.label||item.name||item.language||item.lang||("Subtitle "+(i+1))),language:String(item.language||item.lang||item.srclang||"und")});});};
-  objects.forEach(o=>{if(!o||typeof o!=="object")return;["subtitles","subtitle","captions","caption","tracks"].forEach(k=>add(o[k]));});
-  return [...new Map(found.map(x=>[x.url,x])).values()];
+  const found=[],seen=new Set();
+  const add=value=>{if(!value)return;const list=Array.isArray(value)?value:[value];list.forEach((item,i)=>{
+   if(typeof item==="string"){if(/^https?:\/\//i.test(item)&&/\.(?:vtt|srt|ass|ssa)(?:$|[?#])/i.test(item))push({url:item,label:"Subtitle "+(i+1),language:"und"});return;}
+   if(!item||typeof item!=="object")return;
+   const url=item.url||item.src||item.file||item.subtitleUrl||item.subtitle_url||item.captionUrl||item.caption_url||item.downloadUrl||item.download_url||item.webvtt||item.vtt||item.link;
+   if(!url)return;push({url,label:String(item.label||item.name||item.language||item.lang||item.title||("Subtitle "+(i+1))),language:String(item.language||item.lang||item.srclang||item.locale||"und")});
+  });};
+  const push=x=>{let absolute;try{absolute=new URL(x.url,location.origin).href;if(new URL(absolute).protocol!=="https:"&&location.protocol==="https:")return;}catch{return;}if(seen.has(absolute))return;seen.add(absolute);found.push({...x,url:absolute});};
+  const keys=["subtitles","subtitle","subtitleList","subtitle_list","subtitleTracks","subtitle_tracks","captions","caption","captionList","caption_tracks","tracks"];
+  objects.forEach(o=>{if(!o||typeof o!=="object")return;keys.forEach(k=>add(o[k]));["stream","data","result","detail","episode"].forEach(k=>{const nested=o[k];if(nested&&typeof nested==="object")keys.forEach(key=>add(nested[key]));});});
+  return found;
  }
  function audioOptions(sources){
   const langs=[...new Set(sources.map(s=>s.audioLanguage).filter(Boolean))];
