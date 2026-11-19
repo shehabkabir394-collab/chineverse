@@ -193,7 +193,7 @@
   };
   const isAnime=item=>{
    const tags=sectionTags(item);
-   const genreValues=[...(Array.isArray(item.genres)?item.genres:[]),...(Array.isArray(item.genre)?item.genre:[])].map(value=>value&&typeof value==="object"?(value.name||value.label||""):value).join(" ").toLowerCase();
+   const genreValues=[...(Array.isArray(item.genres)?item.genres:(item.genres?[item.genres]:[])),...(Array.isArray(item.genre)?item.genre:(item.genre?[item.genre]:[]))].map(value=>value&&typeof value==="object"?(value.name||value.label||""):value).join(" ").toLowerCase();
    const type=String(item.typeBadge||item.type||"").toLowerCase();
    return /anime|japanese animation|japan anime/.test(tags)||/anime|japanese animation|animation/.test(genreValues)||/^anime$/i.test(type)||item.isAnime===true;
   };
