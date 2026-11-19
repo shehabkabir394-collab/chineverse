@@ -336,3 +336,15 @@
  .ms-watch-player .cv-player .cv-control-row{grid-template-columns:29px 32px 32px minmax(48px,1fr) 28px 44px!important;gap:3px!important}
  .ms-watch-player .cv-player .cv-control-row .cv-volume{width:44px!important}
 }
+
+/* YouTube-like end screen over the player when playback finishes. */
+.ms-watch-player .cv-end-suggestions{display:none;position:absolute;z-index:20;inset:0;padding:clamp(12px,3vw,30px);box-sizing:border-box;overflow:auto;background:linear-gradient(135deg,rgba(3,8,17,.97),rgba(8,18,32,.94));color:#fff}
+.ms-watch-player .cv-player.cv-ended .cv-end-suggestions{display:block}
+.ms-watch-player .cv-end-heading{font-size:clamp(16px,2.5vw,24px);font-weight:800;margin:0 0 14px}
+.ms-watch-player .cv-end-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.ms-watch-player .cv-end-grid .ms-suggested-card{min-width:0}
+.ms-watch-player .cv-end-grid .ms-suggested-card img{max-height:clamp(85px,18vh,170px);object-fit:cover}
+.ms-watch-player .cv-end-grid .ms-suggested-card span{padding:6px}
+.ms-watch-player .cv-end-grid .ms-suggested-card b{font-size:11px}
+.ms-watch-player .cv-end-replay{margin-top:12px;border:1px solid #ffffff55;border-radius:22px;padding:8px 16px;background:#ffffff18;color:#fff;font-weight:700}
+@media(max-width:600px){.ms-watch-player .cv-end-suggestions{padding:10px}.ms-watch-player .cv-end-heading{font-size:15px;margin-bottom:8px}.ms-watch-player .cv-end-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}.ms-watch-player .cv-end-grid .ms-suggested-card img{max-height:100px}.ms-watch-player .cv-end-grid .ms-suggested-card span{padding:4px}.ms-watch-player .cv-end-grid .ms-suggested-card b{font-size:9px}.ms-watch-player .cv-end-grid .ms-suggested-card small{font-size:8px}}
