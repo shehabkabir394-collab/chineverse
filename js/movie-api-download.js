@@ -9,9 +9,9 @@ function getSources(ep){
  const fromButtons=Array.isArray(ep?.downloadButtons)?ep.downloadButtons.map(b=>({url:b.downloadUrl||b.url,quality:b.quality||b.label,type:b.type||"mp4",audioLanguage:b.audioLanguage||b.language})):[];
  raw.push(...fromButtons);
  return raw.filter(s=>{
-  try{const rawUrl=s.downloadUrl||s.url;const u=new URL(rawUrl);return u.protocol==="https:"&&Number.parseInt(String(s.quality||s.resolution||s.label||"").match(/\\d{3,4}/)?.[0]||0)>0;}
+  try{const rawUrl=s.downloadUrl||s.url;const u=new URL(rawUrl);return u.protocol==="https:"&&Number.parseInt(String(s.quality||s.resolution||s.label||"").match(/\d{3,4}/)?.[0]||0)>0;}
   catch{return false;}
- }).map(s=>({url:s.downloadUrl||s.url,quality:(Number.parseInt(String(s.quality||s.resolution||s.label||"").match(/\\d{3,4}/)?.[0]||0))+"p",type:String(s.type||""),language:String(s.audioLanguage||s.dubLanguage||s.language||s.lang||s.audio||s.label||""),downloadable:!(/m3u8/i.test(String(s.type||""))||/\.m3u8(?:$|[?#])/i.test(s.url))}))
+ }).map(s=>({url:s.downloadUrl||s.url,quality:(Number.parseInt(String(s.quality||s.resolution||s.label||"").match(/\d{3,4}/)?.[0]||0))+"p",type:String(s.type||""),language:String(s.audioLanguage||s.dubLanguage||s.language||s.lang||s.audio||s.label||""),downloadable:!(/m3u8/i.test(String(s.type||""))||/\.m3u8(?:$|[?#])/i.test(s.url))}))
  .sort((a,b)=>Number(b.quality.replace("p",""))-Number(a.quality.replace("p","")));
 }
 function updateSources(){
