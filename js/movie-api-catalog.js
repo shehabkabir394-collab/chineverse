@@ -204,11 +204,32 @@
    apiMeta=null;
 
    if(q){
-    status.textContent="Searching movies and dramas…";
-    const sr=await fetch("/api/movie-api/search?q="+encodeURIComponent(q)+"&page="+page);
-    const sd=await sr.json();
+    status.textContent="Searching Hindi-dubbed movies and dramas…";
+    const [sr,hr]=await Promise.all([
+     fetch("/api/movie-api/search?q="+encodeURIComponent(q)+"&page="+page),
+     fetch("/api/movie-api/catalog?path="+encodeURIComponent("/language/hindi-dubbed")+"&page=1")
+    ]);
+    const [sd,hd]=await Promise.all([sr.json(),hr.json()]);
     if(!sr.ok||sd.ok!==true)throw new Error(sd.error||"Movie Search API unavailable");
-    all=(Array.isArray(sd.items)?sd.items:[]).filter(item=>!isNigerian(item)).map(item=>({...item,_sections:[],_sources:["search"]}));
+    if(!hr.ok||hd.ok!==true)throw new Error(hd.error||"Hindi catalog unavailable");
+    const hindiPages=[hd],maxPage=Math.max(1,Math.min(100,Number(hd.maxPage)||1));
+    for(let start=2;start<=maxPage;start+=6){
+     const batch=await Promise.all(Array.from({length:Math.min(6,maxPage-start+1)},(_,i)=>start+i).map(async p=>{
+      const response=await fetch("/api/movie-api/catalog?path="+encodeURIComponent("/language/hindi-dubbed")+"&page="+p);
+      const payload=await response.json();
+      if(!response.ok||payload.ok!==true)throw new Error(payload.error||"Hindi catalog page "+p+" unavailable");
+      return payload;
+     }));
+     hindiPages.push(...batch);
+    }
+    const unique=new Map();
+    (Array.isArray(sd.items)?sd.items:[]).filter(item=>!isNigerian(item)&&isHindiDubbed(item)).forEach(item=>{
+     const key=pathOf(item)||norm(item.title);if(key)unique.set(key,{...item,_sections:[],_sources:["search"]});
+    });
+    hindiPages.forEach(payload=>(Array.isArray(payload.items)?payload.items:[]).forEach(item=>{
+     const key=pathOf(item)||norm(item.title);if(key&&!isNigerian(item)&&!unique.has(key))unique.set(key,{...item,_sections:[],_sources:["hindiCatalog"],_hindiCatalog:true});
+    }));
+    all=[...unique.values()];
    }else{
     const customPaths={
      "cv:movie":"/type/movies",
