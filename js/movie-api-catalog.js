@@ -144,7 +144,7 @@
  function link(extra){const p=new URLSearchParams();if(selected)p.set("category",selected);if(letter)p.set("letter",letter);if(search?.value.trim())p.set("q",search.value.trim());Object.entries(extra||{}).forEach(([k,v])=>{if(v)p.set(k,String(v));else p.delete(k)});return "catalog.html?"+p.toString();}
  function render(){
   if(!data)return;
-  const filtered=all.filter(item=>!isNigerian(item)&&matches(item)).sort((a,b)=>Number(isHindiDubbed(b))-Number(isHindiDubbed(a))||latestFirst(a,b));
+  const filtered=all.filter(item=>!isNigerian(item)&&isHindiDubbed(item)&&matches(item)).sort(latestFirst);
   const pages=Math.max(1,Math.ceil(filtered.length/pageSize));
   const safePage=Math.min(page,pages);
   const start=(safePage-1)*pageSize;
