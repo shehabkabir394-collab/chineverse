@@ -179,7 +179,8 @@
    ...(Array.isArray(home.allOfficialSections)?home.allOfficialSections.flatMap(s=>(Array.isArray(s.items)?s.items:[]).map(item=>({...item,_sections:[...(item._sections||[]),text(s.title)]}))):[]),
    ...trending,
    ...(Array.isArray(home._extraLatest)?home._extraLatest:[]),
-   ...(Array.isArray(home._extraHindi)?home._extraHindi:[])
+   ...(Array.isArray(home._extraHindi)?home._extraHindi:[]),
+   ...(Array.isArray(home._extraClassified)?home._extraClassified:[])
   ];
   const unique=new Map();
   pool.forEach(item=>{
@@ -191,6 +192,9 @@
     if(!posterOf(saved)&&posterOf(item))saved.poster=posterOf(item);
     if(item._hindiCatalog)saved._hindiCatalog=true;
     if(item._latestFeed)saved._latestFeed=true;
+    if(item._dramaCatalog)saved._dramaCatalog=true;
+    if(item._koreanCatalog)saved._koreanCatalog=true;
+    if(item._animeCatalog)saved._animeCatalog=true;
     saved._sections=[...new Set([...(saved._sections||[]),...(item._sections||[])])];
    }
   });
@@ -311,7 +315,8 @@
     ...sourceSections.flatMap(section=>(Array.isArray(section.items)?section.items:[]).map(item=>({...item,_sections:[...(item._sections||[]),text(section.title)]}))),
     ...(Array.isArray(home.allOfficialSections)?home.allOfficialSections.flatMap(section=>(Array.isArray(section.items)?section.items:[]).map(item=>({...item,_sections:[...(item._sections||[]),text(section.title)]}))):[]),
     ...(Array.isArray(home.trending)?home.trending:[]).map(item=>({...item,_sections:[...(item._sections||[]),"Trending Now"]})),
-    ...home._extraHindi
+    ...home._extraHindi,
+    ...home._extraClassified
    ];
    const keys=new Set();
    hindiCatalog=pool.filter(item=>{
