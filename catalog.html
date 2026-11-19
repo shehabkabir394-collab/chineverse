@@ -12,7 +12,7 @@
 <div class="section-head"><div><p class="eyebrow">CINEVERSE · COMPLETE API CATALOG</p><h1 id="catalogHeading">All Movies &amp; Dramas A–Z</h1><p class="muted">Select a category above or browse alphabetically. 24 titles per page.</p></div><button id="catalogRefresh" class="btn ghost" type="button">↻ Refresh</button></div>
 <div class="catalog-nav-title">CATEGORIES</div><nav id="catalogCategories" class="catalog-category-nav" aria-label="Movie categories"><a class="catalog-chip active" href="catalog.html">ALL A–Z</a></nav>
 <div class="catalog-nav-title">BROWSE A–Z</div><nav id="catalogAZ" class="catalog-az-nav" aria-label="Browse titles alphabetically"></nav>
-<div class="movie-api-tools"><input id="catalogSearch" type="search" placeholder="Search all movies and dramas…" aria-label="Search titles"><button id="catalogSearchButton" class="btn primary" type="button">Search</button></div>
+<div class="movie-api-tools"><select id="catalogLanguageFilter" aria-label="Filter language"><option value="">All languages</option></select><select id="catalogTypeFilter" aria-label="Filter type"><option value="">All types</option></select><select id="catalogGenreFilter" aria-label="Filter genre"><option value="">All genres</option></select><input id="catalogSearch" type="search" placeholder="Search all movies and dramas…" aria-label="Search titles"><button id="catalogSearchButton" class="btn primary" type="button">Search</button></div>
 <div id="catalogStatus" class="catalog-meta muted" aria-live="polite">Loading catalog…</div>
 <div id="catalogGrid" class="grid"></div><nav id="catalogPager" class="catalog-pagination" aria-label="Catalog pages"></nav>
 </section></main>
