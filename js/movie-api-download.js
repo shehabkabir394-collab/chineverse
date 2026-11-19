@@ -35,6 +35,7 @@ function updateSources(){
  if(downloadable.length){action.href=downloadable[0].url;action.setAttribute("aria-disabled","false");action.textContent="⚡ ONE CLICK DOWNLOAD · "+downloadable[0].quality;action.setAttribute("download",safeName(detail?.title)+"-"+safeName(ep?.label||("Episode "+(selected+1)))+"-"+downloadable[0].quality+".mp4");status.textContent=downloadable.length+"টি MP4 quality পাওয়া গেছে।";}
  else{action.href="#";action.removeAttribute("download");action.setAttribute("aria-disabled","true");action.textContent="Download source unavailable";status.textContent="এই Episode-এর সরাসরি MP4 source পাওয়া যায়নি। অন্য Episode নির্বাচন করে দেখুন।";}
  $("#downloadZip").hidden=episodes.length<2||!subjectIdOf();
+ renderEpisodeList();
 }
 async function loadStreamSources(index){
  const ep=episodes[index],subjectId=subjectIdOf();if(!subjectId)return;
@@ -45,7 +46,23 @@ async function loadStreamSources(index){
  }
 }
 $("#downloadQuality").addEventListener("change",()=>{const s=downloadable[Number($("#downloadQuality").value)];if(!s)return;const ep=episodes[selected],a=$("#downloadAction");a.href=s.url;a.setAttribute("aria-disabled","false");a.textContent="⚡ ONE CLICK DOWNLOAD · "+s.quality;a.setAttribute("download",safeName(detail?.title)+"-"+safeName(ep?.label||("Episode "+(selected+1)))+"-"+s.quality+".mp4");});
-$("#downloadEpisode").addEventListener("change",async()=>{selected=Number($("#downloadEpisode").value)||0;$("#downloadSubtitle").textContent=episodes[selected]?.label||("Episode "+(selected+1));$("#downloadStatus").textContent="Checking this Episode's download servers…";await loadStreamSources(selected);updateSources();});
+function renderEpisodeList(){
+ const section=$("#downloadEpisodeSection"),list=$("#downloadEpisodeList");
+ if(episodes.length<2){section.hidden=true;return;}
+ const groups=new Map();
+ episodes.forEach((ep,i)=>{const key=String(ep.seasonName||ep.seasonTitle||(ep.seasonNumber!=null?"Season "+ep.seasonNumber:(ep.season!=null?(typeof ep.season==="number"?"Season "+ep.season:String(ep.season)):"Season 1")));if(!groups.has(key))groups.set(key,[]);groups.get(key).push({ep,i});});
+ $("#downloadEpisodeCount").textContent="("+episodes.length+")";
+ list.innerHTML=[...groups.entries()].map(([season,items],si)=>'<section class="ms-season-card"><button class="ms-season-heading" type="button" aria-expanded="'+(si===0?"true":"false")+'"><span class="ms-season-name">'+esc(season)+'</span><small>'+items.length+' Episodes</small><b class="ms-season-chevron">⌄</b></button><div class="ms-season-episodes" '+(si===0?"":"hidden")+'>'+items.map(({ep,i})=>'<button class="movie-api-episode ms-episode-button '+(i===selected?"active":"")+'" type="button" data-download-episode="'+i+'"><span class="ms-episode-number">EP '+String(ep.number||i+1).padStart(2,"0")+'</span><span class="ms-episode-info"><b>'+esc(ep.label||("Episode "+(ep.number||i+1)))+'</b><small>'+esc(ep.kind||"Episode")+'</small></span><span class="ms-episode-action">'+(i===selected?"● SELECTED":"⬇ DOWNLOAD")+'</span></button>').join("")+'</div></section>').join("");
+ section.hidden=false;
+}
+async function selectEpisode(index){
+ selected=index;const ep=episodes[selected];$("#downloadSubtitle").textContent=ep?.label||("Episode "+(selected+1));$("#downloadStatus").textContent="Checking this Episode's download servers…";
+ renderEpisodeList();await loadStreamSources(selected);updateSources();renderEpisodeList();
+}
+$("#downloadEpisodeList").addEventListener("click",async e=>{
+ const heading=e.target.closest(".ms-season-heading");if(heading){const panel=heading.nextElementSibling,open=heading.getAttribute("aria-expanded")==="true";heading.setAttribute("aria-expanded",String(!open));panel.hidden=open;return;}
+ const button=e.target.closest("[data-download-episode]");if(button)await selectEpisode(Number(button.dataset.downloadEpisode));
+});
 async function fetchEpisode(subjectId,item,index){
  let last="No downloadable MP4 source";
  for(const c of episodeCoords(item,index)){
@@ -87,8 +104,8 @@ async function load(){
   $("#downloadCount").textContent=episodes.length+" Episodes / Versions";$("#downloadType").textContent=episodes.length>1?"Full Drama":"Single Video";
   if(detail.poster&&/^https:\/\//i.test(detail.poster)){const p=$("#downloadPoster");p.src=detail.poster;p.hidden=false;}
   $("#downloadBack").href="watch.html?path="+encodeURIComponent(path);
-  if(episodes.length>1){const wrap=$("#downloadEpisodeWrap"),select=$("#downloadEpisode");wrap.hidden=false;select.innerHTML=episodes.map((ep,i)=>'<option value="'+i+'" '+(i===selected?"selected":"")+'>'+esc(ep.label||("Episode "+(ep.number||i+1)))+'</option>').join("");}
-  await loadStreamSources(selected);updateSources();
+  renderEpisodeList();
+  await loadStreamSources(selected);updateSources();renderEpisodeList();
  }catch(e){$("#downloadTitle").textContent="Download unavailable";$("#downloadStatus").textContent=e.message||"Could not load download options.";}
 }
 load();
