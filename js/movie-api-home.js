@@ -133,16 +133,17 @@
    const d=await r.json();
    if(!r.ok||d.ok!==true)throw new Error(d.error||"Catalog unavailable");
    home=d;
-   const pages=await Promise.all([1,2,3].map(async page=>{
-    try{
-     const response=await fetch("/api/movie-api/catalog?path=%2Flanguage%2Fhindi-dubbed&page="+page);
-     if(!response.ok)return[];
-     const data=await response.json();
-     return Array.isArray(data.items)?data.items:[];
-    }catch{return[];}
-   }));
+   // Build dubbed shelves from the cached homepage payload.
+   // Avoid three extra upstream catalog requests on every homepage visit.
+   const sourceSections=Array.isArray(home.sections)?home.sections:[];
+   const pool=[
+    ...sourceSections.flatMap(section=>(Array.isArray(section.items)?section.items:[]).map(item=>({
+     ...item,_sections:[...(item._sections||[]),text(section.title)]
+    }))),
+    ...(Array.isArray(home.trending)?home.trending:[]).map(item=>({...item,_sections:[...(item._sections||[]),"Trending Now"]}))
+   ];
    const keys=new Set();
-   hindiCatalog=pages.flat().filter(item=>{
+   hindiCatalog=pool.filter(item=>{
     const key=String(item.id||item.path||item.title||"");
     if(!key||keys.has(key))return false;
     keys.add(key);
