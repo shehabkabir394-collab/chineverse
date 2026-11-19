@@ -218,3 +218,19 @@
  .ms-watch-player .cv-mid-skip button{width:42px;height:42px}
  .ms-watch-player .cv-settings{right:10px;bottom:8px;font-size:22px}
 }
+
+
+/* Always-on-by-default sound control: speaker toggle + adjustable volume on player footer */
+.ms-watch-player .cv-control-row .cv-mute{
+ display:inline-flex;align-items:center;justify-content:center;flex:0 0 38px;
+ width:38px;min-width:38px;height:38px;padding:0;border:0;border-radius:50%;
+ background:transparent;color:#fff;font-size:23px;cursor:pointer;
+}
+.ms-watch-player .cv-control-row .cv-volume{
+ display:block;flex:0 1 118px;width:118px;min-width:64px;height:28px;
+ margin:0;accent-color:#25d4e5;cursor:pointer;
+}
+@media(max-width:600px){
+ .ms-watch-player .cv-control-row .cv-mute{width:30px;min-width:30px;height:30px;flex-basis:30px;font-size:19px}
+ .ms-watch-player .cv-control-row .cv-volume{width:100%;min-width:45px;height:25px}
+}
