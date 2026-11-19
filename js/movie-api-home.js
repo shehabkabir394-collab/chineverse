@@ -354,63 +354,8 @@
    const d=await r.json();
    if(!r.ok||d.ok!==true)throw new Error(d.error||"Catalog unavailable");
    home=d;
-   // Build the complete homepage snapshot first, then render once.
-   // This prevents the initial API response from being replaced a few seconds later
-   // when the Hindi/K-Drama/Latest enrichment feeds finish loading.
-   const connection=navigator.connection||{};
-   const slowConnection=!!connection.saveData||/2g|slow-2g/i.test(connection.effectiveType||"")||(Number(connection.downlink)>0&&Number(connection.downlink)<1.5);
-   const catalogPage=async(path,page=1)=>{
-    const response=await fetch("/api/movie-api/catalog?path="+encodeURIComponent(path)+"&page="+page);
-    const payload=await response.json();
-    if(!response.ok||payload.ok!==true)throw new Error(payload.error||"Category feed unavailable");
-    return payload;
-   };
-   const sectionList=[...(Array.isArray(home.sections)?home.sections:[]),...(Array.isArray(home.allOfficialSections)?home.allOfficialSections:[])];
-   const latestSections=sectionList.filter(section=>/(latest|recent|new release|new upload|newly added|recently added)/i.test(String(section.title||"")));
-   const latestCategories=(Array.isArray(home.categories)?home.categories:[]).filter(category=>/(latest|recent|new release|new upload|newly added)/i.test(String(category.label||category.name||category.title||category.slug||"")));
-   const categoryPaths=[...sectionList,...(Array.isArray(home.categories)?home.categories:[])].map(section=>String(section.categoryPath||section.path||"").trim()).filter(path=>path.startsWith("/"));
-   const latestPaths=[...new Set([...latestSections,...latestCategories].map(section=>String(section.categoryPath||section.path||"").trim()).filter(path=>path.startsWith("/")))];
-   const discoveryPaths=[...new Set([...latestPaths,...categoryPaths])];
-   const fetchPages=async(path,limit)=>{
-    const first=await catalogPage(path,1);
-    const max=Math.min(limit,Math.max(1,Number(first.maxPage)||1));
-    const rest=await Promise.all(Array.from({length:max-1},(_,i)=>catalogPage(path,i+2).catch(()=>({items:[]}))));
-    return [first,...rest].flatMap(payload=>Array.isArray(payload.items)?payload.items:[]);
-   };
-   const latestJobs=discoveryPaths.slice(0,(slowConnection?2:4)).map(path=>fetchPages(path,latestPaths.includes(path)?(slowConnection?1:3):1).then(items=>items.map(item=>({...item,_latestFeed:latestPaths.includes(path),_categoryFeed:true,_sections:[latestPaths.includes(path)?"Latest Uploads":"Category Discovery"]}))).catch(()=>[]));
-   const hindiJob=fetchPages("/language/hindi-dubbed",slowConnection?2:4).then(items=>items.map(item=>({...item,_hindiCatalog:true,_sections:[...(item._sections||[]),"Hindi Dubbed Catalog"]}))).catch(()=>[]);
-   const dramaJob=fetchPages("/drama",slowConnection?1:2).then(items=>items.map(item=>({...item,_dramaCatalog:true,_sections:[...(item._sections||[]),"Drama Catalog"]}))).catch(()=>[]);
-   const koreanJob=fetchPages("/language/korean",slowConnection?1:2).then(items=>items.map(item=>({...item,_koreanCatalog:true,_sections:[...(item._sections||[]),"Korean Catalog"]}))).catch(()=>[]);
-   const animeJob=fetchPages("/anime",1).then(items=>items.map(item=>({...item,_animeCatalog:true,_sections:[...(item._sections||[]),"Anime Catalog"]}))).catch(()=>[]);
-   const topTenJob=fetchPages("/mostwatch/7d",1).catch(()=>[]);
-   const upcomingJob=fetchPages("/upcoming",1).catch(()=>[]);
-   const [latestResults,hindiResults,dramaResults,koreanResults,animeResults,topTenResults,upcomingResults]=await Promise.all([
-    Promise.all(latestJobs),hindiJob,dramaJob,koreanJob,animeJob,topTenJob,upcomingJob
-   ]);
-   const keyOf=item=>pathOf(item)||String(item.id||item.title||"").trim().toLowerCase();
-   const hindiKeys=new Set(hindiResults.map(keyOf).filter(Boolean));
-   const markHindiIntersection=items=>items.map(item=>({...item,_hindiCatalog:hindiKeys.has(keyOf(item))}));
-   home._extraLatest=latestResults.flat();
-   home._topTen=topTenResults;
-   if(upcomingResults.length)home.upcoming=upcomingResults;
-   home._extraHindi=hindiResults;
-   home._extraClassified=[...markHindiIntersection(dramaResults),...markHindiIntersection(koreanResults),...markHindiIntersection(animeResults)];
-   const sourceSections=Array.isArray(home.sections)?home.sections:[];
-   const pool=[
-    ...sourceSections.flatMap(section=>(Array.isArray(section.items)?section.items:[]).map(item=>({...item,_sections:[...(item._sections||[]),text(section.title)]}))),
-    ...(Array.isArray(home.allOfficialSections)?home.allOfficialSections.flatMap(section=>(Array.isArray(section.items)?section.items:[]).map(item=>({...item,_sections:[...(item._sections||[]),text(section.title)]}))):[]),
-    ...(Array.isArray(home.trending)?home.trending:[]).map(item=>({...item,_sections:[...(item._sections||[]),"Trending Now"]})),
-    ...home._extraHindi,
-    ...home._extraClassified
-   ];
-   const keys=new Set();
-   hindiCatalog=pool.filter(item=>{
-    const key=String(item.id||item.path||item.title||"");
-    if(!key||keys.has(key))return false;
-    keys.add(key);
-    return true;
-   });
-   // Single final render: keep the visible homepage stable after it appears.
+   // Use one stable homepage response for every shelf. Avoid parallel geo-sensitive
+   // category requests that can return different regional catalogs during first paint.
    render();
   }catch(e){status.textContent="Catalog could not load: "+(e.message||"Unknown error");}
  }
