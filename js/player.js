@@ -81,15 +81,22 @@
    else{try{screen.orientation?.unlock?.();}catch(e){}}
   });
   $(".cv-pip").addEventListener("click",async()=>{try{if(document.pictureInPictureElement)await document.exitPictureInPicture();else await video.requestPictureInPicture()}catch{}});
-  const trackList=[...video.querySelectorAll("track")];trackList.forEach((t,i)=>{const o=document.createElement("option");o.value=String(i);o.textContent=t.label||t.srclang||"Subtitle "+(i+1);subs.appendChild(o);});
-  (subtitles||[]).forEach((t,i)=>{if(!t.url)return;const el=document.createElement("track");el.kind="subtitles";el.label=t.label||t.language||"Subtitle "+(i+1);el.srclang=t.language||"en";el.src=t.url;video.appendChild(el);const o=document.createElement("option");o.value=String(video.querySelectorAll("track").length-1);o.textContent=el.label;subs.appendChild(o);});
+  let baseTrackCount=video.querySelectorAll("track").length;
+  function setSubtitles(list=[]){
+   video.querySelectorAll("track[data-cv-dynamic-subtitle]").forEach(t=>t.remove());
+   subs.innerHTML='<option value="-1">Subtitles Off</option>';
+   [...video.querySelectorAll("track")].forEach((t,i)=>{const o=document.createElement("option");o.value=String(i);o.textContent=t.label||t.srclang||"Subtitle "+(i+1);subs.appendChild(o);});
+   (Array.isArray(list)?list:[]).forEach((t,i)=>{if(!t?.url)return;const el=document.createElement("track");el.kind="subtitles";el.label=t.label||t.language||"Subtitle "+(i+1);el.srclang=t.language||"und";el.src=t.url;el.dataset.cvDynamicSubtitle="1";video.appendChild(el);const o=document.createElement("option");o.value=String(video.querySelectorAll("track").length-1);o.textContent=el.label;subs.appendChild(o);});
+   [...video.textTracks].forEach(t=>t.mode="disabled");subs.value="-1";
+  }
+  setSubtitles(subtitles);
   subs.addEventListener("change",()=>{[...video.textTracks].forEach((t,i)=>t.mode=String(i)===subs.value?"showing":"disabled")});
   video.addEventListener("waiting",()=>$(".cv-buffer").hidden=false);video.addEventListener("playing",()=>$(".cv-buffer").hidden=true);video.addEventListener("canplay",()=>$(".cv-buffer").hidden=true);
   video.addEventListener("loadedmetadata",()=>{if(saved>15&&saved<video.duration-20){const resume=document.createElement("button");resume.className="cv-resume";resume.textContent="▶ Resume from "+fmt(saved);wrap.appendChild(resume);resume.addEventListener("click",()=>{video.currentTime=saved;resume.remove();video.play().catch(()=>{})},{once:true});}});
   let saveAt=0;video.addEventListener("timeupdate",()=>{if(video.currentTime-saveAt>8){saveAt=video.currentTime;localStorage.setItem(storageKey,String(Math.floor(saveAt)))}});video.addEventListener("ended",()=>localStorage.removeItem(storageKey));
   wrap.tabIndex=0;wrap.addEventListener("keydown",e=>{if(["INPUT","SELECT","BUTTON"].includes(e.target.tagName))return;if(e.code==="Space"){e.preventDefault();video.paused?video.play():video.pause()}else if(e.key==="ArrowRight")video.currentTime+=10;else if(e.key==="ArrowLeft")video.currentTime-=10;else if(e.key.toLowerCase()==="f")$(".cv-full").click()});
   let tap=0,lastTapX=0;video.addEventListener("touchend",e=>{const x=e.changedTouches[0].clientX,r=video.getBoundingClientRect();if(Math.abs(x-(r.left+r.width/2))<r.width*.12){tap=0;return;}const now=Date.now();if(now-tap<320&&Math.abs(x-lastTapX)<70){const delta=x<r.left+r.width/2?-10:10;video.currentTime=Math.max(0,Math.min(video.duration||Infinity,video.currentTime+delta));showSkip(delta);tap=0;revealControls();}else{tap=now;lastTapX=x;}},{passive:true});
-  function setSources(next){ordered=[...next].filter(x=>x&&x.url).sort((a,b)=>Number(a.quality.replace(/p/i,""))-Number(b.quality.replace(/p/i,"")));quality.innerHTML="<option value=\"auto\">Auto</option>"+ordered.map(x=>"<option value=\""+esc(x.quality)+"\">"+esc(x.quality)+"</option>").join("");if(ordered.length){const preferred=ordered.find(x=>x.quality==="720p")||ordered[0];setSource(preferred,false,true);quality.value=preferred.quality;}}return {video,wrap,setSource,setSources};
+  function setSources(next){ordered=[...next].filter(x=>x&&x.url).sort((a,b)=>Number(a.quality.replace(/p/i,""))-Number(b.quality.replace(/p/i,"")));quality.innerHTML="<option value=\"auto\">Auto</option>"+ordered.map(x=>"<option value=\""+esc(x.quality)+"\">"+esc(x.quality)+"</option>").join("");if(ordered.length){const preferred=ordered.find(x=>x.quality==="720p")||ordered[0];setSource(preferred,false,true);quality.value=preferred.quality;}}return {video,wrap,setSource,setSources,setSubtitles};
  }
  window.CineVersePlayer={mount};
 })();
