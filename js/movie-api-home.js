@@ -71,7 +71,7 @@
  function section(title,badgeText,items,target){
   const localKeys=new Set();
   items=items.filter(item=>{
-   if(isNigerianItem(item))return false;
+   if(isNigerianItem(item)||!isHindiDubbed(item))return false;
    const key=pathOf(item)||String(item.id||item.title||"").trim().toLowerCase();
    if(!key||homeRenderedKeys.has(key)||localKeys.has(key))return false;
    localKeys.add(key);
@@ -91,9 +91,8 @@
   const timeOf=item=>uploadTime(item)||Number(item?.releaseTimestamp)||Date.parse(item?.releaseDate||item?.release_date||item?.firstAirDate||item?.first_air_date||"")||0;
   const uniqueSlides=new Map();
   bannerPool.forEach(item=>{const key=pathOf(item)||String(item.id||item.title||"");if(key&&!uniqueSlides.has(key))uniqueSlides.set(key,item);});
-  const allSlides=[...uniqueSlides.values()].filter(item=>!isNigerianItem(item)&&posterOf(item));
-  const hindiSlides=allSlides.filter(item=>isHindiDubbed(item)&&(!item.mediaType&&!item.contentType&&!item.type&&!item.typeBadge||/movie|film/i.test(String(item.mediaType||item.contentType||item.type||item.typeBadge))));
-  const slides=(hindiSlides.length?hindiSlides:allSlides).sort(chronologicalFirst).slice(0,10);
+  const allSlides=[...uniqueSlides.values()].filter(item=>!isNigerianItem(item)&&isHindiDubbed(item)&&posterOf(item));
+  const slides=allSlides.filter(item=>!item.mediaType&&!item.contentType&&!item.type&&!item.typeBadge||/movie|film/i.test(String(item.mediaType||item.contentType||item.type||item.typeBadge))).sort(chronologicalFirst).slice(0,10);
   if(!slides.length){hero.classList.remove("ms-featured-hero","ms-hero-slider");hero.innerHTML='<div class="hero-copy"><p class="eyebrow">MOVIESTREAM BD · MOVIES & DRAMAS</p><h1>Your next <em>favorite</em><br>story starts here.</h1><p>Explore the latest movies and dramas from our catalog.</p><a class="btn primary" href="#movieApiCatalog">▶ Explore Collection</a></div>';return;}
   let current=0,timer=null,startX=0,startY=0,dragging=false,slideDirection=1;
   hero.classList.add("ms-featured-hero","ms-hero-slider");
@@ -277,9 +276,9 @@
   const hindiAnime=allLatest(allTitles.filter(item=>isAnime(item)&&!isNigerian(item)&&isHindiDubbed(item)));
   let out="";
   const hindiDubbedAll=allLatest(allTitles.filter(item=>isHindiDubbed(item)&&!isNigerian(item)));
-  const topTen=prioritySort((Array.isArray(home._topTen)&&home._topTen.length?home._topTen:trending).filter(item=>!isNigerian(item))).slice(0,10);
+  const topTen=prioritySort((Array.isArray(home._topTen)&&home._topTen.length?home._topTen:trending).filter(item=>!isNigerian(item)&&isHindiDubbed(item))).slice(0,10);
   const collections=Array.isArray(home.collections)?home.collections:[];
-  const upcoming=[...(Array.isArray(home.upcoming)?home.upcoming:(Array.isArray(home.upcomingReleases)?home.upcomingReleases:[]))].filter(item=>!isNigerian(item)).sort(chronologicalFirst);
+  const upcoming=[...(Array.isArray(home.upcoming)?home.upcoming:(Array.isArray(home.upcomingReleases)?home.upcomingReleases:[]))].filter(item=>!isNigerian(item)&&isHindiDubbed(item)).sort(chronologicalFirst);
   const tagged=pattern=>allLatest(allTitles.filter(item=>pattern.test(sectionTags(item)+" "+String([item.category,item.genre,item.genres,item.type,item.typeBadge,item.language,item.country,item.originCountry].join(" ")).toLowerCase())));
   const southIndian=tagged(/south indian|tamil|telugu|malayalam|kannada/);
   const cDramas=tagged(/c[- ]?drama|chinese drama|china/).filter(isDrama);
