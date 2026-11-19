@@ -266,3 +266,30 @@
  .ms-hero-slider.is-swiping .ms-featured-poster,
  .ms-hero-slider.is-swiping .ms-hero-backdrop{transform:none!important;}
 }
+
+
+/* Native-home-screen smooth motion for the main featured poster */
+.ms-hero-slider .ms-featured-copy,
+.ms-hero-slider .ms-featured-poster,
+.ms-hero-slider .ms-hero-backdrop{
+ transition:opacity .52s cubic-bezier(.16,1,.3,1),transform .72s cubic-bezier(.16,1,.3,1)!important;
+}
+.ms-hero-slider:not(.slide-enter) .ms-featured-copy,
+.ms-hero-slider:not(.slide-enter) .ms-featured-poster{
+ opacity:0!important;
+ transform:translate3d(var(--hero-enter-x,42px),0,0) scale(.985)!important;
+}
+.ms-hero-slider.slide-enter .ms-featured-copy,
+.ms-hero-slider.slide-enter .ms-featured-poster{
+ opacity:1!important;
+ transform:translate3d(0,0,0) scale(1)!important;
+}
+.ms-hero-slider .ms-featured-poster img{
+ transition:transform .9s cubic-bezier(.16,1,.3,1),filter .6s ease!important;
+}
+.ms-hero-slider.slide-enter .ms-featured-poster img{transform:scale(1.015);}
+@media(max-width:760px){
+ .ms-hero-slider .ms-featured-copy,
+ .ms-hero-slider .ms-featured-poster{backface-visibility:hidden;transform-style:preserve-3d;}
+ .ms-hero-slider .ms-hero-backdrop{transition:opacity .8s ease,transform 1.1s cubic-bezier(.16,1,.3,1)!important;}
+}
