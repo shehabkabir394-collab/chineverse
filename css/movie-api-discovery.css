@@ -11,3 +11,9 @@
  .topbar .actions #movieApiSearch{display:block;width:100%;max-width:none;min-width:0;box-sizing:border-box}
  .topbar .cv-search-panel{left:0;right:0;width:100%;box-sizing:border-box}
 }
+/* Reliable homepage search form */
+.topbar .home-global-search{display:flex;align-items:center;gap:6px;min-width:0;width:min(360px,34vw);position:relative}
+.topbar .home-global-search .cv-search-wrap{flex:1 1 auto;width:100%;min-width:0}
+.topbar .home-global-search #movieApiSearch{width:100%;min-width:0;box-sizing:border-box}
+.topbar .home-search-submit{flex:0 0 40px;height:40px;border:1px solid #ffffff2b;border-radius:11px;background:linear-gradient(135deg,#ff526d,#b91e43);color:#fff;font-size:22px;cursor:pointer}
+@media(max-width:760px){.topbar .actions{display:flex!important}.topbar .home-global-search{width:100%;flex:1 1 auto}.topbar .home-global-search #movieApiSearch{width:100%}.topbar .home-search-submit{height:42px;flex-basis:44px}}
