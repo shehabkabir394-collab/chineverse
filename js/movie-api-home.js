@@ -34,13 +34,27 @@
  function renderHero(){
   if(!hero)return;
   const banners=Array.isArray(home.banners)?home.banners:[];
-  const item=banners.find(x=>posterOf(x)&&pathOf(x))||banners.find(x=>posterOf(x));
-  if(!item)return;
-  const image=posterOf(item),title=text(item.title)||"Featured";
-  hero.classList.add("ms-featured-hero");
-  hero.style.setProperty("--hero-image",'url("'+image.replace(/["\\]/g,"")+'")');
-  const path=pathOf(item);
-  hero.innerHTML='<div class="ms-featured-copy"><p class="eyebrow">MOVIESTREAM BD · FEATURED</p><span class="ms-featured-tag">'+esc(item.quality||"HD")+'</span><h1>'+esc(title)+'</h1><p class="ms-featured-meta">'+esc([item.country,item.year,item.sportGenre,item.language].filter(Boolean).join(" · "))+'</p><p class="ms-featured-description">'+esc(text(item.description)||"Discover this featured movie and explore more titles in our collection.")+'</p>'+(path?'<a class="btn primary" href="watch.html?path='+encodeURIComponent(path)+'">▶ Watch now</a>':'<a class="btn primary" href="#movieApiCatalog">Explore collection</a>')+'<a class="ms-featured-more" href="catalog.html">Browse all titles →</a></div><div class="ms-featured-poster"><img src="'+esc(image)+'" alt="'+esc(title)+' poster"></div>';
+  const timeOf=item=>Number(item?.uploadedAtMs)||Date.parse(item?.uploadedAt||item?.createdAt||item?.updatedAt||item?.date||"")||0;
+  const slides=banners.map((item,index)=>({item,index})).filter(x=>posterOf(x.item)).sort((a,b)=>timeOf(b.item)-timeOf(a.item)||a.index-b.index).map(x=>x.item);
+  if(!slides.length)return;
+  let current=0,timer=null,startX=0;
+  hero.classList.add("ms-featured-hero","ms-hero-slider");
+  const renderSlide=()=>{
+   const item=slides[current],image=posterOf(item),title=text(item.title)||"Featured";
+   const path=pathOf(item);
+   hero.style.setProperty("--hero-image",'url("'+image.replace(/["\\\\]/g,"")+'")');
+   hero.innerHTML='<div class="ms-hero-backdrop" aria-hidden="true"></div><div class="ms-featured-copy"><p class="eyebrow">MOVIESTREAM BD · FEATURED</p><span class="ms-featured-tag">'+esc(item.quality||"HD")+'</span><h1>'+esc(title)+'</h1><p class="ms-featured-meta">'+esc([item.country,item.year,item.sportGenre,item.language].filter(Boolean).join(" · "))+'</p><p class="ms-featured-description">'+esc(text(item.description)||"Discover this featured movie and explore more titles in our collection.")+'</p>'+(path?'<a class="btn primary" href="watch.html?path='+encodeURIComponent(path)+'">▶ Watch now</a>':'<a class="btn primary" href="#movieApiCatalog">Explore collection</a>')+'<a class="ms-featured-more" href="catalog.html">Browse all titles →</a></div><div class="ms-featured-poster"><img src="'+esc(image)+'" fetchpriority="high" decoding="async" alt="'+esc(title)+' poster"></div><div class="ms-hero-controls"><button type="button" class="ms-hero-arrow ms-hero-prev" aria-label="Previous featured movie">‹</button><div class="ms-hero-dots">'+slides.map((_,i)=>'<button type="button" class="ms-hero-dot '+(i===current?'active':'')+'" data-slide="'+i+'" aria-label="Show featured movie '+(i+1)+'"></button>').join("")+'</div><button type="button" class="ms-hero-arrow ms-hero-next" aria-label="Next featured movie">›</button></div><span class="ms-hero-counter">'+(current+1)+' / '+slides.length+'</span>';
+   hero.querySelector(".ms-hero-prev")?.addEventListener("click",()=>go(current-1));
+   hero.querySelector(".ms-hero-next")?.addEventListener("click",()=>go(current+1));
+   hero.querySelectorAll("[data-slide]").forEach(button=>button.addEventListener("click",()=>go(Number(button.dataset.slide))));
+  };
+  const go=index=>{current=(index+slides.length)%slides.length;renderSlide();restart();};
+  const restart=()=>{if(timer)clearInterval(timer);if(slides.length>1)timer=setInterval(()=>{current=(current+1)%slides.length;renderSlide();},6500);};
+  hero.addEventListener("pointerdown",e=>{if(e.pointerType!=="touch")return;startX=e.clientX;},{passive:true});
+  hero.addEventListener("pointerup",e=>{if(e.pointerType!=="touch"||!startX)return;const delta=e.clientX-startX;startX=0;if(Math.abs(delta)>55)go(current+(delta<0?1:-1));},{passive:true});
+  hero.addEventListener("mouseenter",()=>{if(timer)clearInterval(timer);});
+  hero.addEventListener("mouseleave",restart);
+  renderSlide();restart();
  }
  function render(){
   if(!home)return;
