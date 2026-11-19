@@ -36,7 +36,6 @@ export async function onRequestGet({ request, env }) {
     try { data = JSON.parse(body); } catch { return json({ error: "Movie API returned invalid JSON." }, 502); }
     if (!response.ok) return json({ error: "Movie API returned HTTP " + response.status, details: data?.message || data?.error || null }, 502);
     if (!data || data.ok !== true) return json({ error: "Invalid Movie API response." }, 502);
-    delete data.trial;
     delete data.apiKey;
     const result = json(data, 200, cacheControl);
     
