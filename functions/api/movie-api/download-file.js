@@ -1,6 +1,7 @@
 const BASE="https://hd-w0l1.onrender.com/api/trial/stream";
 const json=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{"Content-Type":"application/json; charset=utf-8","Cache-Control":"no-store","X-Content-Type-Options":"nosniff"}});
 const getItems=data=>[...(Array.isArray(data?.sources)?data.sources:[]),...(Array.isArray(data?.downloadButtons)?data.downloadButtons:[])];
+const sourceUrl=s=>s?.downloadUrl||s?.download_url||s?.url||s?.link||s?.fileUrl||s?.file_url||s?.downloadLink||s?.download_link||s?.src||"";
 const qualityOf=s=>String(s.quality||s.resolution||s.label||s.name||s.title||"").match(/\d{3,4}/)?.[0]||"";
 export async function onRequestGet({request,env}){
  if(!env.MOVIE_API_KEY)return json({error:"Movie API key is not configured."},503);
@@ -9,9 +10,9 @@ export async function onRequestGet({request,env}){
  const api=new URL(BASE);api.searchParams.set("subjectId",subjectId);api.searchParams.set("se",String(se));api.searchParams.set("ep",String(ep));api.searchParams.set("apiKey",env.MOVIE_API_KEY);
  try{
   const r=await fetch(api,{headers:{Accept:"application/json"},signal:AbortSignal.timeout(20000)});if(!r.ok)return json({error:"Stream API returned HTTP "+r.status},502);
-  const data=await r.json(),items=getItems(data).filter(s=>{const v=s.downloadUrl||s.download_url||s.url||s.link||s.fileUrl;return !!v&&/^https:\/\//i.test(String(v))&&!/\.m3u8(?:$|[?#])/i.test(String(v));});
+  const data=await r.json(),items=getItems(data).filter(s=>{const v=sourceUrl(s);return !!v&&/^https:\/\//i.test(String(v))&&!/\.m3u8(?:$|[?#])/i.test(String(v));});
   const item=quality==="best"?items.sort((a,b)=>Number(qualityOf(b))-Number(qualityOf(a)))[0]:items.find(s=>qualityOf(s)===quality);
-  const fileUrl=item?.downloadUrl||item?.download_url||item?.url||item?.link||item?.fileUrl;
+  const fileUrl=sourceUrl(item);
   if(!fileUrl)return json({error:"Requested MP4 quality was not returned."},404);
   const target=new URL(fileUrl);
   if(target.protocol!=="https:"||["localhost","127.0.0.1","0.0.0.0"].includes(target.hostname))return json({error:"Unsafe download source."},502);
