@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#080b14">
+<title>Download — MovieStream BD</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="stylesheet" href="css/style.css"><link rel="stylesheet" href="css/only-drama.css"><link rel="stylesheet" href="css/movie-api.css"><link rel="stylesheet" href="css/moviestream-bd.css"><link rel="stylesheet" href="css/liquid-glass-red.css">
+<style>
+.ms-download-page{max-width:850px;margin:0 auto;padding:22px 14px 60px}.ms-download-card{margin:22px 0;padding:clamp(18px,4vw,30px);border:1px solid #ffffff20;border-radius:20px;background:linear-gradient(145deg,#14243aee,#09111fee);box-shadow:0 18px 55px #0007}.ms-download-head{display:flex;gap:16px;align-items:center}.ms-download-poster{width:86px;aspect-ratio:2/3;object-fit:cover;border-radius:10px;background:#111}.ms-download-head h1{font-size:clamp(20px,4vw,29px);margin:4px 0}.ms-download-head p{margin:4px 0}.ms-download-form{display:grid;gap:15px;margin-top:25px}.ms-download-form label{display:grid;gap:8px;color:#c9d9e9;font-size:13px;font-weight:700}.ms-download-form select{width:100%;min-height:48px;padding:10px 13px;border:1px solid #ffffff2c;border-radius:10px;background:#0c192a;color:#fff;font-size:15px}.ms-download-action{display:flex;align-items:center;justify-content:center;gap:10px;min-height:50px;padding:12px 18px;border:1px solid #53d8ff66;border-radius:12px;background:linear-gradient(110deg,#087fa8,#1354a5);color:#fff;font-weight:800;text-decoration:none}.ms-download-action[aria-disabled=true]{opacity:.45;pointer-events:none}.ms-download-note{padding:12px;border-radius:10px;background:#ffffff0b;color:#a9bfd2;font-size:12px;line-height:1.6}.ms-download-back{display:inline-flex;margin-top:10px;color:#9edfff;text-decoration:none}.ms-download-status{color:#b9d2e6;min-height:22px;font-size:13px}.ms-download-quality{font-size:12px;color:#a9bfd2}
+@media(max-width:420px){.ms-download-head{align-items:flex-start}.ms-download-poster{width:70px}.ms-download-card{border-radius:15px}}
+</style>
+<script defer src="js/movie-api-download.js"></script>
+</head>
+<body class="ms-watch-page">
+<header class="topbar"><a class="brand" href="./"><img src="images/moviestreambd-logo.svg" alt="MovieStreamBD" style="display:block;width:clamp(145px,19vw,220px);height:auto;max-height:48px;object-fit:contain"></a><nav><a href="./">HOME</a><a href="catalog.html">MOVIES & DRAMAS</a></nav></header>
+<main class="ms-download-page"><a class="ms-back" id="downloadBack" href="./">← Back</a><section class="ms-download-card">
+<p class="eyebrow">MOVIESTREAM BD · DOWNLOAD</p>
+<div class="ms-download-head"><img id="downloadPoster" class="ms-download-poster" alt="" hidden><div><h1 id="downloadTitle">Preparing download…</h1><p id="downloadSubtitle" class="muted"></p></div></div>
+<div class="ms-download-form">
+<label id="downloadEpisodeWrap" hidden>Episode / Version<select id="downloadEpisode"></select></label>
+<label>Download Quality<select id="downloadQuality" disabled><option>Loading available qualities…</option></select></label>
+<div id="downloadStatus" class="ms-download-status" aria-live="polite">Checking available download sources…</div>
+<a id="downloadAction" class="ms-download-action" href="#" aria-disabled="true">⬇ Select quality to continue</a>
+<div class="ms-download-note">শুধু সরবরাহকারীর অনুমোদিত সরাসরি MP4 ডাউনলোড লিংক থাকলে ডাউনলোড চালু হবে। HLS/স্ট্রিমিং-only লিংক ডাউনলোড হিসেবে দেখানো হবে না। কিছু সার্ভার নিজস্ব নিয়মে ফাইল সেভ সীমিত করতে পারে।</div>
+</div></section></main>
+</body></html>
