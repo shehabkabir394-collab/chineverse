@@ -14,7 +14,7 @@
   const topRight=topbar.querySelector(".cv-top-right");topRight.append(quality,subs);
   const lockButton=document.createElement("button");lockButton.type="button";lockButton.className="cv-lock";lockButton.textContent="🔒";lockButton.setAttribute("aria-label","Lock controls");wrap.appendChild(lockButton);
   const settingsButton=document.createElement("button");settingsButton.type="button";settingsButton.className="cv-settings";settingsButton.textContent="⚙";settingsButton.setAttribute("aria-label","Settings");wrap.appendChild(settingsButton);
-  const settingsPanel=document.createElement("div");settingsPanel.className="cv-settings-panel";settingsPanel.innerHTML='<span>Playback speed</span>';settingsPanel.appendChild($(".cv-speed"));wrap.appendChild(settingsPanel);
+  const settingsPanel=document.createElement("div");settingsPanel.className="cv-settings-panel";settingsPanel.innerHTML='<span>Playback speed</span>';settingsPanel.appendChild(controls.querySelector(".cv-speed"));wrap.appendChild(settingsPanel);
   settingsButton.addEventListener("click",()=>settingsPanel.classList.toggle("open"));
   let locked=false;lockButton.addEventListener("click",()=>{locked=!locked;wrap.classList.toggle("cv-locked",locked);lockButton.textContent=locked?"🔓":"🔒";lockButton.setAttribute("aria-label",locked?"Unlock controls":"Lock controls");if(!locked)revealControls();});
   const centerPlay=document.createElement("button");centerPlay.type="button";centerPlay.className="cv-center-play";centerPlay.setAttribute("aria-label","Play video");centerPlay.innerHTML="<span>▶</span>";wrap.appendChild(centerPlay);
@@ -54,7 +54,7 @@
   video.addEventListener("timeupdate",()=>{if(video.duration){seek.value=Math.round(video.currentTime/video.duration*1000);time.textContent=fmt(video.currentTime)+" / "+fmt(video.duration);}});
   seek.addEventListener("input",()=>{if(video.duration)video.currentTime=Number(seek.value)/1000*video.duration});
   $(".cv-volume").addEventListener("input",e=>video.volume=Number(e.target.value));
-  $(".cv-speed").addEventListener("change",e=>video.playbackRate=Number(e.target.value));
+  settingsPanel.querySelector(".cv-speed").addEventListener("change",e=>video.playbackRate=Number(e.target.value));
   async function enterFullscreen(){
    try{
     if(!document.fullscreenElement){
