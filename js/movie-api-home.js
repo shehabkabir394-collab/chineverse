@@ -120,7 +120,7 @@
    hero.querySelector(".ms-hero-next")?.addEventListener("click",()=>go(current+1));
    hero.querySelectorAll("[data-slide]").forEach(button=>button.addEventListener("click",()=>go(Number(button.dataset.slide))));
   };
-  const go=index=>{slideDirection=index>=current?1:-1;current=(index+slides.length)%slides.length;hero.style.setProperty("--hero-enter-x",(slideDirection*42)+"px");renderSlide();restart();};
+  const go=index=>{slideDirection=index>=current?1:-1;current=(index+slides.length)%slides.length;hero.style.setProperty("--hero-enter-x",(slideDirection*42)+"px");hero.style.setProperty("--hero-out-x",(-slideDirection*100)+"%");renderSlide();restart();};
   const restart=()=>{if(timer){clearInterval(timer);timer=null;}if(slides.length>1&&!matchMedia("(prefers-reduced-motion: reduce)").matches)timer=setInterval(()=>go(current+1),6500);};
   hero.addEventListener("pointerdown",e=>{
    if(e.pointerType!=="touch"||e.target.closest("a,button"))return;
