@@ -28,9 +28,20 @@
   return out.filter(Boolean).map(norm);
  };
  const isHindiDubbed=item=>{
-  const language=norm(item?.language),sections=(item?._sections||[]).map(norm);
-  const confirmedHindi=language==="hindi dubbed"||language==="hindi";
-  return language==="hindi dubbed"||(confirmedHindi&&sections.some(s=>s==="south indian & hindi dubbed"||s==="anime in hindi"||s.includes("hindi dubbed")));
+  if(item?._hindiCatalog===true)return true;
+  const language=norm(item?.language);
+  const exact=value=>/^(hindi|hindi dubbed|hindi dub|hindi audio|hi|hin|हिंदी|हिन्दी)$/.test(norm(value));
+  const hasHindi=value=>{
+   if(Array.isArray(value))return value.some(hasHindi);
+   if(value&&typeof value==="object"){
+    const code=norm(value.code||value.languageCode||value.lang);
+    return /^(hi|hin)$/.test(code)||[value.language,value.name,value.label,value.title].some(exact);
+   }
+   return exact(value)||/(^|[,;|/])\\s*(hindi|hi|hin|हिंदी|हिन्दी)\\s*($|[,;|/])/.test(norm(value));
+  };
+  const audioFields=[item?.audioLanguage,item?.audioLanguages,item?.dubLanguage,item?.dubLanguages,item?.dubbedLanguages,item?.availableAudio,item?.availableLanguages,item?.languages,item?.audio,item?.audioTrack,item?.audioTracks,item?.dubbing,item?.audioInfo,item?.audioOptions];
+  const sections=(item?._sections||[]).map(norm);
+  return exact(item?.language)||audioFields.some(hasHindi)||sections.some(s=>s.includes("hindi dubbed")||s==="south indian & hindi dubbed"||s==="anime in hindi");
  };
  const badge=item=>isHindiDubbed(item)?"HINDI DUBBED":"";
  const pathOf=item=>{
@@ -54,7 +65,7 @@
   (Array.isArray(d.trending)?d.trending:[]).forEach(x=>add(x,"Trending Now","trending"));
   (Array.isArray(d.comingSoon)?d.comingSoon:[]).forEach(x=>add(x,"Coming Soon","comingSoon"));
   (Array.isArray(d.banners)?d.banners:[]).forEach(x=>add(x,"Featured","banner"));
-  return [...map.values()].filter(item=>!isNigerian(item)).sort((a,b)=>latestFirst(a,b)||Number(isHindiDubbed(b))-Number(isHindiDubbed(a)));
+  return [...map.values()].filter(item=>!isNigerian(item)).sort((a,b)=>Number(isHindiDubbed(b))-Number(isHindiDubbed(a))||latestFirst(a,b));
  }
  const customLabels={"cv:movie":"Movie","cv:anime":"Anime","cv:drama":"Drama","cv:kdrama":"K-Drama","cv:cdrama":"C-Drama","cv:south":"South Movies","cv:bollywood":"Bollywood","cv:hollywood":"Hollywood"};
  function groupOf(item){
