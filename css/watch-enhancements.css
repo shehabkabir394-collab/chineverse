@@ -117,3 +117,29 @@
  .ms-watch-player .cv-mid-skip{padding:0 7px}
  .ms-watch-player .cv-mid-skip button{width:36px;height:36px;min-width:36px}
 }
+
+
+/* Keep 10-second seek buttons in the bottom navigation row, never floating over the video. */
+.ms-watch-player .cv-mid-skip{display:none!important}
+.ms-watch-player .cv-control-row .cv-back,
+.ms-watch-player .cv-control-row .cv-forward{
+ display:flex;align-items:center;justify-content:center;gap:2px;
+ white-space:nowrap;font-weight:800;font-variant-numeric:tabular-nums;
+ border-color:#35cfff66;background:linear-gradient(145deg,#12304a,#0b1b2d);
+}
+.ms-watch-player .cv-control-row .cv-back:active,
+.ms-watch-player .cv-control-row .cv-forward:active{background:#17608a;transform:scale(.97)}
+@media(max-width:600px){
+ .ms-watch-player .cv-control-row{grid-template-columns:repeat(4,minmax(0,1fr));}
+ .ms-watch-player .cv-control-row .cv-play,
+ .ms-watch-player .cv-control-row .cv-back,
+ .ms-watch-player .cv-control-row .cv-forward,
+ .ms-watch-player .cv-control-row .cv-time{min-width:0;width:100%}
+ .ms-watch-player .cv-control-row .cv-back,
+ .ms-watch-player .cv-control-row .cv-forward{font-size:12px;padding-inline:2px}
+}
+@media(max-width:360px){
+ .ms-watch-player .cv-control-row{gap:3px}
+ .ms-watch-player .cv-control-row .cv-back,
+ .ms-watch-player .cv-control-row .cv-forward{font-size:10px;padding-inline:1px}
+}
