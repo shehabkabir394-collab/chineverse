@@ -255,7 +255,6 @@
   const hindiDramas=allLatest(allTitles.filter(item=>isDrama(item)&&!isKDrama(item)&&!isAnime(item)&&!isNigerian(item)&&isHindiDubbed(item)));
   const hindiAnime=allLatest(allTitles.filter(item=>isAnime(item)&&!isNigerian(item)&&isHindiDubbed(item)));
   let out="";
-  const within24h=allLatest(allTitles.filter(item=>!isNigerian(item)&&uploadTime(item)>Date.now()-24*60*60*1000&&uploadTime(item)<=Date.now()+60*60*1000));
   const topTen=(Array.isArray(home._topTen)&&home._topTen.length?home._topTen:prioritySort(trending)).filter(item=>!isNigerian(item)).slice(0,10);
   const collections=Array.isArray(home.collections)?home.collections:[];
   const upcoming=(Array.isArray(home.upcoming)?home.upcoming:(Array.isArray(home.upcomingReleases)?home.upcomingReleases:[])).filter(item=>!isNigerian(item));
@@ -267,8 +266,9 @@
   const animations=tagged(/animation|animated|cartoon/);
   const dramaSeries=allLatest(allTitles.filter(item=>isDrama(item)&&!isAnime(item)&&!isNigerian(item)));
   const movieTitles=allLatest(allTitles.filter(item=>isMovie(item)&&!isAnime(item)&&!isNigerian(item)));
-  if(within24h.length)out+=section("Last 24 Hours","⏱️ FRESH UPDATES · LAST 24 HOURS",within24h.slice(0,24),"/new");
-  out+=section("Recently Updated","🆕 LATEST MOVIES, DRAMAS & EPISODES",newReleases.slice(0,24),"/new");
+  out+=section("Recently Updated","🆕 LATEST MOVIES, DRAMAS & EPISODES · NEWEST FIRST",newReleases.slice(0,24),"/new");
+  const hindiDubbedKdramas=allLatest(allKdramas.filter(isHindiDubbed));
+  out+=section("K-Drama Hindi Dubbed","🇰🇷 HINDI DUBBED K-DRAMAS · LATEST UPDATES FIRST",hindiDubbedKdramas.slice(0,24),"/language/korean");
   if(upcoming.length)out+=section("Upcoming / Release Soon","🎬 COMING SOON",upcoming.slice(0,12),"/upcoming");
   if(topTen.length)out+=section("🏆 Top 10 This Week","🔥 MOST POPULAR THIS WEEK",topTen,"/mostwatch/7d");
   if(collections.length){
