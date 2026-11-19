@@ -126,6 +126,12 @@
   }else if(letter==="#"){
    if(/^[A-Z]/i.test(text(item.title)))return false;
   }
+  const lang=norm($("#catalogLanguageFilter")?.value||"");
+  const kind=norm($("#catalogTypeFilter")?.value||"");
+  const genre=norm($("#catalogGenreFilter")?.value||"");
+  if(lang&&norm(item.language)!==lang)return false;
+  if(kind&&!norm([item.type,item.typeBadge,item.mediaType].join(" ")).includes(kind))return false;
+  if(genre&&!norm([item.genre,item.genres,item.category,item.categoryName].join(" ")).includes(genre))return false;
   const q=norm(search?.value||"");
   if(q&&!norm([item.title,item.description,item.language,item.country,item.sportGenre,item.genre,...vals(item),...(item._sections||[])].join(" ")).includes(q))return false;
   return true;
@@ -175,6 +181,16 @@
   const letters="ABCDEFGHIJKLMNOPQRSTUVWXYZ#".split("");
   az.innerHTML=letters.map(l=>'<a class="catalog-letter '+(letter===l?"active":"")+'" href="'+esc(link({letter:l,page:1}))+'">'+l+'</a>').join("");
  }
+ async function loadFilterOptions(){
+  try{
+   const r=await fetch("/api/movie-api/filter-options");const d=await r.json();if(!r.ok||d.ok!==true)return;
+   const fill=(id,values)=>{const el=$(id);if(!el)return;const current=el.value;[...new Set((Array.isArray(values)?values:[]).map(v=>typeof v==="string"?v:(v.label||v.name||v.value||v.title||"")).filter(Boolean))].forEach(v=>{const o=document.createElement("option");o.value=v;o.textContent=v;el.appendChild(o);});el.value=current;};
+   fill("#catalogLanguageFilter",d.languages||d.language||d.audioLanguages);
+   fill("#catalogTypeFilter",d.types||d.type||d.mediaTypes);
+   fill("#catalogGenreFilter",d.genres||d.genre);
+  }catch{}
+ }
+ ["#catalogLanguageFilter","#catalogTypeFilter","#catalogGenreFilter"].forEach(id=>$(id)?.addEventListener("change",render));
  async function load(){
   status.textContent="Loading Movie API catalog…";
   try{
@@ -243,5 +259,5 @@
  search?.addEventListener("keydown",e=>{if(e.key==="Enter")location.href=link({page:1});});
  $("#catalogSearchButton")?.addEventListener("click",()=>location.href=link({page:1}));
  $("#catalogRefresh")?.addEventListener("click",load);
- load();
+ loadFilterOptions();load();
 })();
