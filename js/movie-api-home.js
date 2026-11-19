@@ -65,7 +65,7 @@
   const timeOf=item=>Number(item?.uploadedAtMs)||Date.parse(item?.uploadedAt||item?.createdAt||item?.updatedAt||item?.date||"")||0;
   const slides=banners.map((item,index)=>({item,index})).filter(x=>posterOf(x.item)).sort((a,b)=>timeOf(b.item)-timeOf(a.item)||a.index-b.index).map(x=>x.item);
   if(!slides.length)return;
-  let current=0,timer=null,startX=0,startY=0,dragging=false;
+  let current=0,timer=null,startX=0,startY=0,dragging=false,slideDirection=1;
   hero.classList.add("ms-featured-hero","ms-hero-slider");
   const renderSlide=()=>{
    const item=slides[current],image=posterOf(item),title=text(item.title)||"Featured";
@@ -78,8 +78,8 @@
    hero.querySelector(".ms-hero-next")?.addEventListener("click",()=>go(current+1));
    hero.querySelectorAll("[data-slide]").forEach(button=>button.addEventListener("click",()=>go(Number(button.dataset.slide))));
   };
-  const go=index=>{current=(index+slides.length)%slides.length;renderSlide();restart();};
-  const restart=()=>{if(timer)clearInterval(timer);if(slides.length>1)timer=setInterval(()=>{current=(current+1)%slides.length;renderSlide();},6500);};
+  const go=index=>{slideDirection=index>=current?1:-1;current=(index+slides.length)%slides.length;hero.style.setProperty("--hero-enter-x",(slideDirection*42)+"px");renderSlide();restart();};
+  const restart=()=>{if(timer)clearInterval(timer);if(slides.length>1)timer=setInterval(()=>{slideDirection=1;current=(current+1)%slides.length;hero.style.setProperty("--hero-enter-x","42px");renderSlide();},6500);};
   hero.addEventListener("pointerdown",e=>{
    if(e.pointerType!=="touch"||e.target.closest("a,button"))return;
    startX=e.clientX;startY=e.clientY;dragging=true;
@@ -187,13 +187,15 @@
   const allTitles=[...unique.values()];
   const sectionTags=item=>(item._sections||[]).join(" ").toLowerCase();
   const isKDrama=item=>{
-   const tags=sectionTags(item);
-   return /k[- ]?drama|korean drama/.test(tags)||/korea|south korea|republic of korea/i.test(String(item.country||""))||/^korean$/i.test(String(item.language||""));
+   const tags=sectionTags(item),type=String(item.typeBadge||item.type||"").toLowerCase();
+   const korean=/korea|south korea|republic of korea/i.test(String(item.country||""))||/^korean$/i.test(String(item.language||""));
+   return /k[- ]?drama|korean drama/.test(tags)||(korean&&(/^(drama|series|tv show|tv series)$/i.test(type)||/drama|series/.test(tags)));
   };
   const isAnime=item=>{
    const tags=sectionTags(item);
-   const genres=[...(Array.isArray(item.genres)?item.genres:[]),...(Array.isArray(item.genre)?item.genre:[])].join(" ").toLowerCase();
-   return /anime|japanese animation|japan anime/.test(tags)||/anime|japanese animation/.test(genres)||/^anime$/i.test(String(item.typeBadge||item.type||""))||/^japanese$/i.test(String(item.country||""));
+   const genreValues=[...(Array.isArray(item.genres)?item.genres:[]),...(Array.isArray(item.genre)?item.genre:[])].map(value=>value&&typeof value==="object"?(value.name||value.label||""):value).join(" ").toLowerCase();
+   const type=String(item.typeBadge||item.type||"").toLowerCase();
+   return /anime|japanese animation|japan anime/.test(tags)||/anime|japanese animation|animation/.test(genreValues)||/^anime$/i.test(type)||item.isAnime===true;
   };
   const isMovie=item=>{
    const tags=sectionTags(item);
