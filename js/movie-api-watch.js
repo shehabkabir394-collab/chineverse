@@ -61,6 +61,17 @@
  }
  async function loadSuggested(detail){
   const box=$("#movieWatchSuggested"),grid=$("#movieWatchSuggestedGrid"),title=$("#movieWatchSuggestedTitle");
+  try{
+   const relatedResponse=await fetch("/api/movie-api/related?title="+encodeURIComponent(detail.title||""));
+   const relatedPayload=await relatedResponse.json();
+   const relatedItems=Array.isArray(relatedPayload.items)?relatedPayload.items:Array.isArray(relatedPayload.related)?relatedPayload.related:Array.isArray(relatedPayload.results)?relatedPayload.results:[];
+   const usable=relatedItems.filter(x=>x&&typeof x==="object"&&String(x.path||"").startsWith("/mb/")&&x.path!==path).slice(0,12);
+   if(usable.length){
+    title.textContent="Related to "+(detail.title||"this title");
+    grid.innerHTML=usable.map(x=>'<a class="ms-suggested-card" href="watch.html?path='+encodeURIComponent(x.path)+'"><img loading="lazy" decoding="async" src="'+esc(safeImage(x.poster||x.previewImage))+'" alt="'+esc(x.title||"")+'"><span><b>'+esc(x.title||"Untitled")+'</b><small>'+esc(x.language||x.typeBadge||"")+'</small></span></a>').join("");
+    box.hidden=false;return;
+   }
+  }catch{}
   const response=await fetch("/api/movie-api/home");if(!response.ok)throw new Error("Catalog API unavailable");
   const api=await response.json();if(!api.ok)return;
   const map=new Map();
