@@ -9,8 +9,9 @@
  let home=null,hindiCatalog=[];
  const isHindiDubbed=item=>{
   const language=String(item?.language||"").trim().toUpperCase();
-  const sections=(item?._sections||[]).map(x=>String(x).trim().toLowerCase());
-  return language==="HINDI DUBBED"||sections.some(s=>s.includes("hindi dubbed")||s==="anime in hindi");
+  const values=[item?.audioLanguage,item?.audioLanguages,item?.dubLanguage,item?.dubLanguages,item?.dubbedLanguages,item?.availableAudio,item?.availableLanguages,item?.languages]
+   .flatMap(value=>Array.isArray(value)?value:[value]).map(value=>String(value||"").trim().toUpperCase());
+  return language==="HINDI DUBBED"||values.some(value=>/^(HINDI|HINDI DUBBED|HINDI AUDIO)$/.test(value));
  };
  const pathOf=item=>{
   if(typeof item.path==="string"&&item.path.startsWith("/mb/"))return item.path;
@@ -43,7 +44,9 @@
    const item=slides[current],image=posterOf(item),title=text(item.title)||"Featured";
    const path=pathOf(item);
    hero.style.setProperty("--hero-image",'url("'+image.replace(/["\\\\]/g,"")+'")');
+   hero.classList.remove("slide-enter");
    hero.innerHTML='<div class="ms-hero-backdrop" aria-hidden="true"></div><div class="ms-featured-copy"><p class="eyebrow">MOVIESTREAM BD · FEATURED</p><span class="ms-featured-tag">'+esc(item.quality||"HD")+'</span><h1>'+esc(title)+'</h1><p class="ms-featured-meta">'+esc([item.country,item.year,item.sportGenre,item.language].filter(Boolean).join(" · "))+'</p><p class="ms-featured-description">'+esc(text(item.description)||"Discover this featured movie and explore more titles in our collection.")+'</p>'+(path?'<a class="btn primary" href="watch.html?path='+encodeURIComponent(path)+'">▶ Watch now</a>':'<a class="btn primary" href="#movieApiCatalog">Explore collection</a>')+'<a class="ms-featured-more" href="catalog.html">Browse all titles →</a></div><div class="ms-featured-poster"><img src="'+esc(image)+'" fetchpriority="high" decoding="async" alt="'+esc(title)+' poster"></div><div class="ms-hero-controls"><button type="button" class="ms-hero-arrow ms-hero-prev" aria-label="Previous featured movie">‹</button><div class="ms-hero-dots">'+slides.map((_,i)=>'<button type="button" class="ms-hero-dot '+(i===current?'active':'')+'" data-slide="'+i+'" aria-label="Show featured movie '+(i+1)+'"></button>').join("")+'</div><button type="button" class="ms-hero-arrow ms-hero-next" aria-label="Next featured movie">›</button></div><span class="ms-hero-counter">'+(current+1)+' / '+slides.length+'</span>';
+   requestAnimationFrame(()=>hero.classList.add("slide-enter"));
    hero.querySelector(".ms-hero-prev")?.addEventListener("click",()=>go(current-1));
    hero.querySelector(".ms-hero-next")?.addEventListener("click",()=>go(current+1));
    hero.querySelectorAll("[data-slide]").forEach(button=>button.addEventListener("click",()=>go(Number(button.dataset.slide))));
@@ -141,9 +144,9 @@
   const recentVisibleKeys=new Set(recentMovies.slice(0,14).map(item=>pathOf(item)||String(item.id||item.title||"")));
   const otherDubbed=dubbed.filter(item=>!isKDrama(item)&&!recentVisibleKeys.has(pathOf(item)||String(item.id||item.title||"")));
   let out="";
-  out+=section("Hindi Dubbed K-Dramas · Latest First","🇰🇷 HINDI DUBBED K-DRAMA FIRST",kdramas.slice(0,14),"/language/korean");
+  out+=section("Latest K-Dramas","🇰🇷 KOREAN DRAMAS · LATEST UPLOADS",kdramas.slice(0,14),"/language/korean");
   out+=section("Recently Uploaded Movies","🆕 HINDI DUBBED FIRST · LATEST UPLOADS",recentMovies.slice(0,14),"/type/movies");
-  out+=section("K-Drama Hindi Dubbed","KOREAN · HINDI DUBBED",koreanDubbed.slice(0,14),"/language/hindi-dubbed");
+  out+=section("Hindi Dubbed K-Dramas","🇰🇷 VERIFIED HINDI AUDIO",koreanDubbed.slice(0,14),"/language/hindi-dubbed");
   out+=section("Hindi Dubbed Movies & Series","HINDI DUBBED",otherDubbed.slice(0,14),"/language/hindi-dubbed");
   if(trending.length)out+=section("Trending Now","🔥 HINDI DUBBED FIRST · POPULAR RIGHT NOW",prioritySort(trending).slice(0,14),"/mostwatch/7d");
   const used=new Set(["trending bengali movies","south indian & hindi dubbed","anime in hindi"]);
