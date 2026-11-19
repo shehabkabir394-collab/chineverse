@@ -82,7 +82,9 @@
   const renderSlide=()=>{
    const item=slides[current],image=posterOf(item),title=text(item.title)||"Featured";
    const path=pathOf(item);
-   const video=[item.trailerUrl,item.trailer_url,item.teaserUrl,item.teaser_url,item.previewVideoUrl,item.preview_video_url,item.bannerVideoUrl,item.banner_video_url].find(value=>typeof value==="string"&&value.startsWith("https://"));
+   const connection=navigator.connection||{};
+   const allowHeroVideo=!connection.saveData&&!/2g|slow-2g/i.test(connection.effectiveType||"")&&(!Number(connection.downlink)||Number(connection.downlink)>=3)&&!matchMedia("(max-width:760px)").matches;
+   const video=allowHeroVideo?[item.trailerUrl,item.trailer_url,item.teaserUrl,item.teaser_url,item.previewVideoUrl,item.preview_video_url,item.bannerVideoUrl,item.banner_video_url].find(value=>typeof value==="string"&&value.startsWith("https://")):"";
    hero.style.setProperty("--hero-image",'url("'+image.replace(/["\\\\]/g,"")+'")');
    hero.classList.remove("slide-enter");
    hero.innerHTML=(video?'<div class="ms-hero-video-layer" aria-hidden="true"><video class="ms-hero-video" autoplay muted loop playsinline preload="metadata" poster="'+esc(image)+'"><source src="'+esc(video)+'"></video></div>':'<div class="ms-hero-backdrop" aria-hidden="true"></div>')+'<div class="ms-featured-copy"><p class="eyebrow">MOVIESTREAM BD · FEATURED</p><span class="ms-featured-tag">'+esc(item.quality||"HD")+'</span><h1>'+esc(title)+'</h1><p class="ms-featured-meta">'+esc([item.country,item.year,item.sportGenre,item.language].filter(Boolean).join(" · "))+'</p><p class="ms-featured-description">'+esc(text(item.description)||"Discover this featured movie and explore more titles in our collection.")+'</p>'+(path?'<a class="btn primary" href="watch.html?path='+encodeURIComponent(path)+'">▶ Watch now</a>':'<a class="btn primary" href="#movieApiCatalog">Explore collection</a>')+'<a class="ms-featured-more" href="catalog.html">Browse all titles →</a></div><div class="ms-featured-poster"><img src="'+esc(image)+'" fetchpriority="high" decoding="async" alt="'+esc(title)+' poster"></div><div class="ms-hero-controls"><button type="button" class="ms-hero-arrow ms-hero-prev" aria-label="Previous featured movie">‹</button><div class="ms-hero-dots">'+slides.map((_,i)=>'<button type="button" class="ms-hero-dot '+(i===current?'active':'')+'" data-slide="'+i+'" aria-label="Show featured movie '+(i+1)+'"></button>').join("")+'</div><button type="button" class="ms-hero-arrow ms-hero-next" aria-label="Next featured movie">›</button></div><span class="ms-hero-counter">'+(current+1)+' / '+slides.length+'</span>';
@@ -331,6 +333,10 @@
    const d=await r.json();
    if(!r.ok||d.ok!==true)throw new Error(d.error||"Catalog unavailable");
    home=d;
+   // Paint the API homepage immediately; enrichment feeds load in the background.
+   render();
+   const connection=navigator.connection||{};
+   const slowConnection=!!connection.saveData||/2g|slow-2g/i.test(connection.effectiveType||"")||(Number(connection.downlink)>0&&Number(connection.downlink)<1.5);
    const catalogPage=async(path,page=1)=>{
     const response=await fetch("/api/movie-api/catalog?path="+encodeURIComponent(path)+"&page="+page);
     const payload=await response.json();
@@ -349,13 +355,13 @@
     const rest=await Promise.all(Array.from({length:max-1},(_,i)=>catalogPage(path,i+2).catch(()=>({items:[]}))));
     return [first,...rest].flatMap(payload=>Array.isArray(payload.items)?payload.items:[]);
    };
-   const latestJobs=discoveryPaths.slice(0,8).map(path=>fetchPages(path,latestPaths.includes(path)?8:1).then(items=>items.map(item=>({...item,_latestFeed:latestPaths.includes(path),_categoryFeed:true,_sections:[latestPaths.includes(path)?"Latest Uploads":"Category Discovery"]}))).catch(()=>[]));
-   const hindiJob=fetchPages("/language/hindi-dubbed",10).then(items=>items.map(item=>({...item,_hindiCatalog:true,_sections:[...(item._sections||[]),"Hindi Dubbed Catalog"]}))).catch(()=>[]);
-   const dramaJob=fetchPages("/drama",4).then(items=>items.map(item=>({...item,_dramaCatalog:true,_sections:[...(item._sections||[]),"Drama Catalog"]}))).catch(()=>[]);
-   const koreanJob=fetchPages("/language/korean",4).then(items=>items.map(item=>({...item,_koreanCatalog:true,_sections:[...(item._sections||[]),"Korean Catalog"]}))).catch(()=>[]);
-   const animeJob=fetchPages("/anime",4).then(items=>items.map(item=>({...item,_animeCatalog:true,_sections:[...(item._sections||[]),"Anime Catalog"]}))).catch(()=>[]);
+   const latestJobs=discoveryPaths.slice(0,(slowConnection?2:4)).map(path=>fetchPages(path,latestPaths.includes(path)?(slowConnection?1:3):1).then(items=>items.map(item=>({...item,_latestFeed:latestPaths.includes(path),_categoryFeed:true,_sections:[latestPaths.includes(path)?"Latest Uploads":"Category Discovery"]}))).catch(()=>[]));
+   const hindiJob=fetchPages("/language/hindi-dubbed",slowConnection?2:4).then(items=>items.map(item=>({...item,_hindiCatalog:true,_sections:[...(item._sections||[]),"Hindi Dubbed Catalog"]}))).catch(()=>[]);
+   const dramaJob=fetchPages("/drama",slowConnection?1:2).then(items=>items.map(item=>({...item,_dramaCatalog:true,_sections:[...(item._sections||[]),"Drama Catalog"]}))).catch(()=>[]);
+   const koreanJob=fetchPages("/language/korean",slowConnection?1:2).then(items=>items.map(item=>({...item,_koreanCatalog:true,_sections:[...(item._sections||[]),"Korean Catalog"]}))).catch(()=>[]);
+   const animeJob=fetchPages("/anime",1).then(items=>items.map(item=>({...item,_animeCatalog:true,_sections:[...(item._sections||[]),"Anime Catalog"]}))).catch(()=>[]);
    const topTenJob=fetchPages("/mostwatch/7d",1).catch(()=>[]);
-   const upcomingJob=fetchPages("/upcoming",2).catch(()=>[]);
+   const upcomingJob=fetchPages("/upcoming",1).catch(()=>[]);
    const [latestResults,hindiResults,dramaResults,koreanResults,animeResults,topTenResults,upcomingResults]=await Promise.all([
     Promise.all(latestJobs),hindiJob,dramaJob,koreanJob,animeJob,topTenJob,upcomingJob
    ]);
