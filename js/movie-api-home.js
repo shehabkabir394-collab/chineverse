@@ -51,7 +51,7 @@
   const timeOf=item=>Number(item?.uploadedAtMs)||Date.parse(item?.uploadedAt||item?.createdAt||item?.updatedAt||item?.date||"")||0;
   const slides=banners.map((item,index)=>({item,index})).filter(x=>posterOf(x.item)).sort((a,b)=>timeOf(b.item)-timeOf(a.item)||a.index-b.index).map(x=>x.item);
   if(!slides.length)return;
-  let current=0,timer=null,startX=0;
+  let current=0,timer=null,startX=0,startY=0,dragging=false;
   hero.classList.add("ms-featured-hero","ms-hero-slider");
   const renderSlide=()=>{
    const item=slides[current],image=posterOf(item),title=text(item.title)||"Featured";
@@ -66,8 +66,32 @@
   };
   const go=index=>{current=(index+slides.length)%slides.length;renderSlide();restart();};
   const restart=()=>{if(timer)clearInterval(timer);if(slides.length>1)timer=setInterval(()=>{current=(current+1)%slides.length;renderSlide();},6500);};
-  hero.addEventListener("pointerdown",e=>{if(e.pointerType!=="touch")return;startX=e.clientX;},{passive:true});
-  hero.addEventListener("pointerup",e=>{if(e.pointerType!=="touch"||!startX)return;const delta=e.clientX-startX;startX=0;if(Math.abs(delta)>55)go(current+(delta<0?1:-1));},{passive:true});
+  hero.addEventListener("pointerdown",e=>{
+   if(e.pointerType!=="touch"||e.target.closest("a,button"))return;
+   startX=e.clientX;startY=e.clientY;dragging=true;
+   hero.classList.add("is-swiping");
+   if(timer)clearInterval(timer);
+  },{passive:true});
+  hero.addEventListener("pointermove",e=>{
+   if(!dragging||e.pointerType!=="touch")return;
+   const dx=e.clientX-startX,dy=e.clientY-startY;
+   if(Math.abs(dx)>Math.abs(dy)*1.15&&Math.abs(dx)>5){
+    hero.style.setProperty("--swipe-x",dx+"px");
+    hero.classList.toggle("swipe-left",dx<0);
+    hero.classList.toggle("swipe-right",dx>0);
+   }
+  },{passive:true});
+  const finishSwipe=e=>{
+   if(!dragging)return;
+   const dx=e.clientX-startX,dy=e.clientY-startY;
+   dragging=false;startX=0;startY=0;
+   hero.classList.remove("is-swiping","swipe-left","swipe-right");
+   hero.style.removeProperty("--swipe-x");
+   if(Math.abs(dx)>65&&Math.abs(dx)>Math.abs(dy)*1.15)go(current+(dx<0?1:-1));
+   else restart();
+  };
+  hero.addEventListener("pointerup",finishSwipe,{passive:true});
+  hero.addEventListener("pointercancel",()=>{dragging=false;startX=0;startY=0;hero.classList.remove("is-swiping","swipe-left","swipe-right");hero.style.removeProperty("--swipe-x");restart();},{passive:true});
   hero.addEventListener("mouseenter",()=>{if(timer)clearInterval(timer);});
   hero.addEventListener("mouseleave",restart);
   renderSlide();restart();
