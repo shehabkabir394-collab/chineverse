@@ -48,7 +48,24 @@
   seek.addEventListener("input",()=>{if(video.duration)video.currentTime=Number(seek.value)/1000*video.duration});
   $(".cv-volume").addEventListener("input",e=>video.volume=Number(e.target.value));
   $(".cv-speed").addEventListener("change",e=>video.playbackRate=Number(e.target.value));
-  $(".cv-full").addEventListener("click",()=>{if(document.fullscreenElement)document.exitFullscreen?.();else wrap.requestFullscreen?.()});
+  async function enterFullscreen(){
+   try{
+    if(!document.fullscreenElement){
+     if(wrap.requestFullscreen)await wrap.requestFullscreen();
+     else if(video.webkitEnterFullscreen){video.webkitEnterFullscreen();return;}
+    }
+    if(screen.orientation?.lock){try{await screen.orientation.lock("landscape");}catch(e){/* Orientation lock is browser/device dependent. */}}
+   }catch(e){console.warn("Fullscreen unavailable",e);}
+  }
+  async function exitFullscreen(){
+   try{if(document.fullscreenElement)await document.exitFullscreen();}catch(e){}
+   try{screen.orientation?.unlock?.();}catch(e){}
+  }
+  $(".cv-full").addEventListener("click",()=>document.fullscreenElement?exitFullscreen():enterFullscreen());
+  document.addEventListener("fullscreenchange",()=>{
+   if(document.fullscreenElement===wrap){if(screen.orientation?.lock)screen.orientation.lock("landscape").catch(()=>{});}
+   else{try{screen.orientation?.unlock?.();}catch(e){}}
+  });
   $(".cv-pip").addEventListener("click",async()=>{try{if(document.pictureInPictureElement)await document.exitPictureInPicture();else await video.requestPictureInPicture()}catch{}});
   const trackList=[...video.querySelectorAll("track")];trackList.forEach((t,i)=>{const o=document.createElement("option");o.value=String(i);o.textContent=t.label||t.srclang||"Subtitle "+(i+1);subs.appendChild(o);});
   (subtitles||[]).forEach((t,i)=>{if(!t.url)return;const el=document.createElement("track");el.kind="subtitles";el.label=t.label||t.language||"Subtitle "+(i+1);el.srclang=t.language||"en";el.src=t.url;video.appendChild(el);const o=document.createElement("option");o.value=String(video.querySelectorAll("track").length-1);o.textContent=el.label;subs.appendChild(o);});
