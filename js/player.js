@@ -12,6 +12,7 @@
   wrap.appendChild(controls);
   const centerPlay=document.createElement("button");centerPlay.type="button";centerPlay.className="cv-center-play";centerPlay.setAttribute("aria-label","Play video");centerPlay.innerHTML="<span>▶</span>";wrap.appendChild(centerPlay);
   const skipHint=document.createElement("div");skipHint.className="cv-skip-hint";skipHint.setAttribute("aria-live","polite");wrap.appendChild(skipHint);
+  const skipControls=document.createElement("div");skipControls.className="cv-mid-skip";skipControls.innerHTML='<button type="button" class="cv-mid-back" aria-label="Rewind 10 seconds"><span>↶</span><small>10</small></button><button type="button" class="cv-mid-forward" aria-label="Forward 10 seconds"><span>↷</span><small>10</small></button>';wrap.appendChild(skipControls);
   const $=s=>controls.querySelector(s),play=$(".cv-play"),seek=$(".cv-seek"),time=$(".cv-time"),quality=$(".cv-quality"),subs=$(".cv-subtitles");
   let hideTimer=0;
   function revealControls(){wrap.classList.add("cv-ui-visible");clearTimeout(hideTimer);if(!video.paused&&!video.ended)hideTimer=setTimeout(()=>wrap.classList.remove("cv-ui-visible"),2800);}
@@ -38,8 +39,11 @@
   ["pointermove","pointerdown","touchstart"].forEach(evt=>wrap.addEventListener(evt,revealControls,{passive:true}));
   wrap.addEventListener("mouseleave",()=>{if(!video.paused)wrap.classList.remove("cv-ui-visible")});
   video.addEventListener("ended",()=>{centerPlay.classList.add("visible");wrap.classList.add("cv-ui-visible")});
-  $(".cv-back").addEventListener("click",()=>video.currentTime=Math.max(0,video.currentTime-10));
-  $(".cv-forward").addEventListener("click",()=>video.currentTime=Math.min(video.duration||Infinity,video.currentTime+10));
+  const jump=delta=>{video.currentTime=Math.max(0,Math.min(video.duration||Infinity,video.currentTime+delta));showSkip(delta);revealControls();};
+  $(".cv-back").addEventListener("click",()=>jump(-10));
+  $(".cv-forward").addEventListener("click",()=>jump(10));
+  skipControls.querySelector(".cv-mid-back").addEventListener("click",()=>jump(-10));
+  skipControls.querySelector(".cv-mid-forward").addEventListener("click",()=>jump(10));
   video.addEventListener("timeupdate",()=>{if(video.duration){seek.value=Math.round(video.currentTime/video.duration*1000);time.textContent=fmt(video.currentTime)+" / "+fmt(video.duration);}});
   seek.addEventListener("input",()=>{if(video.duration)video.currentTime=Number(seek.value)/1000*video.duration});
   $(".cv-volume").addEventListener("input",e=>video.volume=Number(e.target.value));
