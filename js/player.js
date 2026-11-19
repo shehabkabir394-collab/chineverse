@@ -2,10 +2,11 @@
  const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
  function mount({video,sources=[],storageKey="cv-player",subtitles=[],title="Now Playing",backUrl="./"}){
   if(!video||!sources.length)return;
-  const wrap=document.createElement("div");wrap.className="cv-player";video.parentNode.insertBefore(wrap,video);wrap.appendChild(video);video.controls=false;video.playsInline=true;video.muted=false;video.volume=Math.max(0,Math.min(1,savedVolume));
+  const wrap=document.createElement("div");wrap.className="cv-player";video.parentNode.insertBefore(wrap,video);wrap.appendChild(video);video.controls=false;video.playsInline=true;video.muted=false;
   let ordered=[...sources].filter(x=>x&&x.url).sort((a,b)=>Number(a.quality.replace(/p/i,""))-Number(b.quality.replace(/p/i,"")));
   const best=()=>{const c=navigator.connection||{};const down=Number(c.downlink)||0;const q=(!c.effectiveType&&!down)||c.effectiveType==="2g"||c.effectiveType==="slow-2g"||(down>0&&down<4)?"720p":"1080p";return ordered.find(x=>x.quality===q)||ordered.find(x=>x.quality==="720p")||ordered[0]};
   const initial=best(),saved=Number(localStorage.getItem(storageKey)||0),savedVolume=Number(localStorage.getItem("cv-player-volume")||1);
+  video.volume=Math.max(0,Math.min(1,savedVolume));
   const topbar=document.createElement("div");topbar.className="cv-topbar";topbar.innerHTML='<a class="cv-back-link" href="'+esc(backUrl)+'" aria-label="Back">‹</a><strong class="cv-title">'+esc(title)+'</strong><div class="cv-top-right"></div>';wrap.appendChild(topbar);
   const controls=document.createElement("div");controls.className="cv-controls";
   const qualityOptions=['<option value="auto">Auto</option>',...ordered.map(x=>'<option value="'+esc(x.quality)+'">'+esc(x.quality)+'</option>')].join("");
