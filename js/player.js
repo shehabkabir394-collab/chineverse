@@ -2,7 +2,7 @@
  const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
  function mount({video,sources=[],storageKey="cv-player",subtitles=[],title="Now Playing",backUrl="./"}){
   if(!video||!sources.length)return;
-  const wrap=document.createElement("div");wrap.className="cv-player";video.parentNode.insertBefore(wrap,video);wrap.appendChild(video);video.controls=false;video.playsInline=true;video.muted=false;
+  const wrap=document.createElement("div");wrap.className="cv-player";video.parentNode.insertBefore(wrap,video);wrap.appendChild(video);video.controls=false;video.playsInline=true;video.muted=false;video.crossOrigin="anonymous";
   let ordered=[...sources].filter(x=>x&&x.url).sort((a,b)=>Number(a.quality.replace(/p/i,""))-Number(b.quality.replace(/p/i,"")));
   const best=()=>{const c=navigator.connection||{};const down=Number(c.downlink)||0;const verySlow=!!c.saveData||/2g|slow-2g/i.test(c.effectiveType||"")||(down>0&&down<1.5);const q=verySlow?"low":((!c.effectiveType&&!down)||(down>=4)||c.effectiveType==="4g"?"1080p":"720p");return (verySlow?ordered[0]:null)||ordered.find(x=>x.quality===q)||ordered.find(x=>x.quality==="720p")||ordered[0]};
   const initial=best(),saved=Number(localStorage.getItem(storageKey)||0),savedVolume=Number(localStorage.getItem("cv-player-volume")||1);
@@ -85,12 +85,23 @@
   function setSubtitles(list=[]){
    video.querySelectorAll("track[data-cv-dynamic-subtitle]").forEach(t=>t.remove());
    subs.innerHTML='<option value="-1">Subtitles Off</option>';
-   [...video.querySelectorAll("track")].forEach((t,i)=>{const o=document.createElement("option");o.value=String(i);o.textContent=t.label||t.srclang||"Subtitle "+(i+1);subs.appendChild(o);});
-   (Array.isArray(list)?list:[]).forEach((t,i)=>{if(!t?.url)return;const el=document.createElement("track");el.kind="subtitles";el.label=t.label||t.language||"Subtitle "+(i+1);el.srclang=t.language||"und";el.src=t.url;el.dataset.cvDynamicSubtitle="1";video.appendChild(el);const o=document.createElement("option");o.value=String(video.querySelectorAll("track").length-1);o.textContent=el.label;subs.appendChild(o);});
+   const tracks=[];
+   [...video.querySelectorAll("track")].forEach((el)=>tracks.push(el));
+   (Array.isArray(list)?list:[]).forEach((t,i)=>{
+    if(!t?.url)return;
+    const el=document.createElement("track");el.kind="subtitles";el.label=t.label||t.language||"Subtitle "+(i+1);el.srclang=(t.language||"und").slice(0,2);el.src=t.url;el.dataset.cvDynamicSubtitle="1";el.crossOrigin="anonymous";video.appendChild(el);tracks.push(el);
+    el.addEventListener("error",()=>console.warn("Subtitle track failed to load:",el.src));
+    el.addEventListener("load",()=>console.info("Subtitle track loaded:",el.label));
+   });
+   tracks.forEach((el,i)=>{const o=document.createElement("option");o.value=String(i);o.textContent=el.label||el.srclang||"Subtitle "+(i+1);subs.appendChild(o);});
    [...video.textTracks].forEach(t=>t.mode="disabled");subs.value="-1";
   }
   setSubtitles(subtitles);
-  subs.addEventListener("change",()=>{[...video.textTracks].forEach((t,i)=>t.mode=String(i)===subs.value?"showing":"disabled")});
+  subs.addEventListener("change",()=>{
+   const chosen=Number(subs.value);
+   [...video.textTracks].forEach((track,i)=>{track.mode=(i===chosen?"showing":"disabled");});
+   if(chosen>=0){const track=video.textTracks[chosen];if(track){track.mode="showing";track.addEventListener("cuechange",()=>{if(track.activeCues?.length)wrap.classList.add("cv-has-subtitles")});}}
+  });
   video.addEventListener("waiting",()=>$(".cv-buffer").hidden=false);video.addEventListener("playing",()=>$(".cv-buffer").hidden=true);video.addEventListener("canplay",()=>$(".cv-buffer").hidden=true);
   video.addEventListener("loadedmetadata",()=>{if(saved>15&&saved<video.duration-20){const resume=document.createElement("button");resume.className="cv-resume";resume.textContent="▶ Resume from "+fmt(saved);wrap.appendChild(resume);resume.addEventListener("click",()=>{video.currentTime=saved;resume.remove();video.play().catch(()=>{})},{once:true});}});
   let saveAt=0;video.addEventListener("timeupdate",()=>{if(video.currentTime-saveAt>8){saveAt=video.currentTime;localStorage.setItem(storageKey,String(Math.floor(saveAt)))}});video.addEventListener("ended",()=>localStorage.removeItem(storageKey));
