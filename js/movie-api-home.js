@@ -226,7 +226,7 @@
   const inLatestFeed=item=>item?._latestFeed===true||/(latest|recent|new release|new upload|newly added|recently added)/i.test(sectionTags(item));
   const isRecentUpload=item=>item?._latestFeed===true||(uploadTime(item)>0&&uploadTime(item)>=recentCutoff);
   const latestSource=allTitles.filter(item=>item?._latestFeed===true);
-  const newReleasePool=latestSource.length?latestSource:allTitles.filter(item=>isRecentUpload(item)||inLatestFeed(item));
+  const newReleasePool=allTitles.filter(item=>item._latestFeed===true||(item._categoryFeed===true&&uploadTime(item)>=recentCutoff)||(!latestSource.length&&isRecentUpload(item)));
   const newReleases=allLatest(newReleasePool.filter(item=>(isMovie(item)||isDrama(item)||item?._latestFeed===true)&&!isAnime(item)));
   const hindiMovies=allLatest(allTitles.filter(item=>isMovie(item)&&!isAnime(item)&&isHindiDubbed(item)));
   const hindiKdramas=allLatest(allTitles.filter(item=>isKDrama(item)&&isHindiDubbed(item)));
@@ -301,7 +301,7 @@
     const rest=await Promise.all(Array.from({length:max-1},(_,i)=>catalogPage(path,i+2).catch(()=>({items:[]}))));
     return [first,...rest].flatMap(payload=>Array.isArray(payload.items)?payload.items:[]);
    };
-   const latestJobs=discoveryPaths.slice(0,14).map(path=>fetchPages(path,latestPaths.includes(path)?8:2).then(items=>items.map(item=>({...item,_latestFeed:latestPaths.includes(path),_sections:[latestPaths.includes(path)?"Latest Uploads":"Category Discovery"]}))).catch(()=>[]));
+   const latestJobs=discoveryPaths.slice(0,14).map(path=>fetchPages(path,latestPaths.includes(path)?8:2).then(items=>items.map(item=>({...item,_latestFeed:latestPaths.includes(path),_categoryFeed:true,_sections:[latestPaths.includes(path)?"Latest Uploads":"Category Discovery"]}))).catch(()=>[]));
    const hindiJob=fetchPages("/language/hindi-dubbed",10).then(items=>items.map(item=>({...item,_hindiCatalog:true,_sections:[...(item._sections||[]),"Hindi Dubbed Catalog"]}))).catch(()=>[]);
    const dramaJob=fetchPages("/drama",4).then(items=>items.map(item=>({...item,_dramaCatalog:true,_sections:[...(item._sections||[]),"Drama Catalog"]}))).catch(()=>[]);
    const koreanJob=fetchPages("/language/korean",4).then(items=>items.map(item=>({...item,_koreanCatalog:true,_sections:[...(item._sections||[]),"Korean Catalog"]}))).catch(()=>[]);
