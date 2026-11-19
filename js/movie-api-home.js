@@ -83,6 +83,22 @@
    const target=text(c.path)||text(c.slug)||label;
    return '<a class="catalog-chip" href="catalog.html?category='+encodeURIComponent(target)+'"><span class="category-emoji">'+emojiFor(label)+'</span><span>'+esc(label)+'</span></a>';
   }).join("");
+  nav.classList.remove("expanded");
+  const oldMore=nav.parentElement.querySelector(".category-see-more");
+  if(oldMore)oldMore.remove();
+  if(actualCategories.length>9){
+   const more=document.createElement("button");
+   more.type="button";
+   more.className="category-see-more";
+   more.setAttribute("aria-expanded","false");
+   more.textContent="See More";
+   more.addEventListener("click",()=>{
+    const expanded=nav.classList.toggle("expanded");
+    more.setAttribute("aria-expanded",String(expanded));
+    more.textContent=expanded?"See Less":"See More";
+   });
+   nav.insertAdjacentElement("afterend",more);
+  }
   const dubbed=sort(hindiCatalog.filter(isHindiDubbed));
   const korean=dubbed.filter(item=>/korea|south korea/i.test(String(item.country||"")));
   const otherDubbed=dubbed.filter(item=>!/korea|south korea/i.test(String(item.country||"")));
