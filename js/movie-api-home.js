@@ -276,6 +276,7 @@
   const hindiDramas=allLatest(allTitles.filter(item=>isDrama(item)&&!isKDrama(item)&&!isAnime(item)&&!isNigerian(item)&&isHindiDubbed(item)));
   const hindiAnime=allLatest(allTitles.filter(item=>isAnime(item)&&!isNigerian(item)&&isHindiDubbed(item)));
   let out="";
+  const hindiDubbedAll=allLatest(allTitles.filter(item=>isHindiDubbed(item)&&!isNigerian(item)));
   const topTen=prioritySort((Array.isArray(home._topTen)&&home._topTen.length?home._topTen:trending).filter(item=>!isNigerian(item))).slice(0,10);
   const collections=Array.isArray(home.collections)?home.collections:[];
   const upcoming=[...(Array.isArray(home.upcoming)?home.upcoming:(Array.isArray(home.upcomingReleases)?home.upcomingReleases:[]))].filter(item=>!isNigerian(item)).sort(chronologicalFirst);
@@ -287,6 +288,7 @@
   const animations=tagged(/animation|animated|cartoon/);
   const dramaSeries=allLatest(allTitles.filter(item=>isDrama(item)&&!isAnime(item)&&!isNigerian(item)));
   const movieTitles=allLatest(allTitles.filter(item=>isMovie(item)&&!isAnime(item)&&!isNigerian(item)));
+  if(hindiDubbedAll.length)out+=section("Hindi Dubbed — Movies & Dramas","🇮🇳 HINDI AUDIO · PRIORITY PICKS · NEWEST FIRST",hindiDubbedAll.slice(0,24),"/language/hindi-dubbed");
   if(topTen.length)out+=section("Trending Now","🔥 MOST WATCHED THIS WEEK · POPULAR PICKS",topTen,"/mostwatch/7d");
   out+=section("Hindi / Hindi Dubbed Movies","🇮🇳 HINDI AUDIO · NEWEST FIRST",hindiMovies.slice(0,14),"/language/hindi-dubbed");
   out+=section("Recently Updated","🆕 LATEST MOVIES, DRAMAS & EPISODES · NEWEST FIRST",newReleases.slice(0,24),"/new");
