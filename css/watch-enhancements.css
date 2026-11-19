@@ -143,3 +143,9 @@
  .ms-watch-player .cv-control-row .cv-back,
  .ms-watch-player .cv-control-row .cv-forward{font-size:10px;padding-inline:1px}
 }
+
+
+/* Keep the two 10-second buttons in the middle overlay; remove duplicates from bottom controls. */
+.ms-watch-player .cv-mid-skip{display:flex!important}
+.ms-watch-player .cv-control-row .cv-back,
+.ms-watch-player .cv-control-row .cv-forward{display:none!important}
