@@ -6,6 +6,7 @@
  let episodes=[],playerApi=null,selected=-1,currentSources=[],currentDubs=[],watchDetail=null,streamRequest=0;
  const getLang=o=>String(o?.audioLanguage||o?.dubLanguage||o?.language||o?.lang||o?.audio||o?.label||o?.name||"").trim();
  const isHindi=s=>/^(hi|hin|hindi)([-_ ]|$)/i.test(String(s||"").trim())||/hindi|हिन्दी|हिंदी/i.test(String(s||""));
+ const isHindiDubbed=item=>item?._hindiCatalog===true||[item?.language,item?.audioLanguage,item?.audioLanguages,item?.dubLanguage,item?.dubLanguages,item?.availableLanguages,item?.languages,item?.audio].some(v=>Array.isArray(v)?v.some(x=>isHindi(getLang(x)||x?.code)):isHindi(v));
  function getSources(ep){
   return (Array.isArray(ep.sources)?ep.sources:[]).filter(s=>{try{const u=new URL(s.url);return u.protocol==="https:"&&u.hostname==="hd-w0l1.onrender.com"&&Number(s.quality)>0&&isHindi(getLang(s));}catch{return false;}})
    .map(s=>({url:s.url,quality:Number(s.quality)+"p",provider:String(s.provider||"Movie API"),mime:s.type==="m3u8"?"application/vnd.apple.mpegurl":"video/mp4",audioLanguage:getLang(s)}))
@@ -81,7 +82,7 @@
    const relatedResponse=await fetch("/api/movie-api/related?title="+encodeURIComponent(detail.title||""));
    const relatedPayload=await relatedResponse.json();
    const relatedItems=Array.isArray(relatedPayload.items)?relatedPayload.items:Array.isArray(relatedPayload.related)?relatedPayload.related:Array.isArray(relatedPayload.results)?relatedPayload.results:[];
-   const usable=relatedItems.filter(x=>x&&typeof x==="object"&&String(x.path||"").startsWith("/mb/")&&x.path!==path).slice(0,12);
+   const usable=relatedItems.filter(x=>x&&typeof x==="object"&&String(x.path||"").startsWith("/mb/")&&x.path!==path&&isHindiDubbed(x)).slice(0,12);
    if(usable.length){
     title.textContent="Related to "+(detail.title||"this title");
     grid.innerHTML=usable.map(x=>'<a class="ms-suggested-card" href="watch.html?path='+encodeURIComponent(x.path)+'"><img loading="lazy" decoding="async" src="'+esc(safeImage(x.poster||x.previewImage))+'" alt="'+esc(x.title||"")+'"><span><b>'+esc(x.title||"Untitled")+'</b><small>'+esc(x.language||x.typeBadge||"")+'</small></span></a>').join("");
@@ -101,7 +102,7 @@
    const best=current._sections.find(s=>!/(trending|coming soon|featured)/i.test(s));
    if(best){group="section";label=best;}
   }
-  let list=[...map.values()].filter(x=>x.path!==path);
+  let list=[...map.values()].filter(x=>x.path!==path&&isHindiDubbed(x));
   if(group==="section")list=list.filter(x=>x._sections.includes(label));
   else if(group)list=list.filter(x=>suggestedGroup(x)[0]===group);
   if(!list.length&&current?._sections?.length)list=[...map.values()].filter(x=>x.path!==path&&x._sections.some(s=>current._sections.includes(s)));
