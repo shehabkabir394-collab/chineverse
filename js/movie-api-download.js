@@ -26,11 +26,14 @@ function updateSources(){
  const quality=$("#downloadQuality"),action=$("#downloadAction"),status=$("#downloadStatus");
  quality.innerHTML=downloadable.length?downloadable.map((s,i)=>'<option value="'+i+'">'+esc(s.quality)+(s.language?" · "+esc(s.language):"")+'</option>').join(""):'<option value="">No direct MP4 quality</option>';
  quality.disabled=!downloadable.length;
+ const links=$("#downloadLinks");
+ links.innerHTML=downloadable.map((s,i)=>'<a class="ms-download-link" href="'+esc(s.url)+'" target="_blank" rel="noopener" download><span>'+esc(s.quality)+(s.language?'<small>'+esc(s.language)+'</small>':'<small>Direct MP4</small>')+'</span><b>⬇</b></a>').join("");
  if(downloadable.length){
   action.href=downloadable[0].url;action.setAttribute("aria-disabled","false");action.textContent="⬇ Download "+downloadable[0].quality;
   action.setAttribute("download",safeName(detail?.title)+"-"+safeName(ep?.label||("Episode "+(selected+1)))+"-"+downloadable[0].quality+".mp4");
   status.textContent="Available direct download quality: "+downloadable.map(s=>s.quality).join(" · ");
  }else{
+  links.innerHTML="";
   action.href="#";action.removeAttribute("download");action.setAttribute("aria-disabled","true");action.textContent="Download unavailable";
   status.textContent="এই Episode/Version-এর জন্য সরাসরি MP4 download source পাওয়া যায়নি।";
  }
