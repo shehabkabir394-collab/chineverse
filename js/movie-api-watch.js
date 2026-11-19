@@ -8,12 +8,14 @@
  const isHindi=s=>/^(hi|hin|hindi)([-_ ]|$)/i.test(String(s||"").trim())||/hindi|हिन्दी|हिंदी/i.test(String(s||""));
  const isHindiDubbed=item=>item?._hindiCatalog===true||[item?.language,item?.audioLanguage,item?.audioLanguages,item?.dubLanguage,item?.dubLanguages,item?.availableLanguages,item?.languages,item?.audio].some(v=>Array.isArray(v)?v.some(x=>isHindi(getLang(x)||x?.code)):isHindi(v));
  function getSources(ep){
-  return (Array.isArray(ep.sources)?ep.sources:[]).filter(s=>{try{const u=new URL(s.url);return u.protocol==="https:"&&u.hostname==="hd-w0l1.onrender.com"&&Number(s.quality)>0&&isHindi(getLang(s));}catch{return false;}})
+  return (Array.isArray(ep.sources)?ep.sources:[]).filter(s=>{try{const u=new URL(s.url);return u.protocol==="https:"&&u.hostname==="hd-w0l1.onrender.com"&&Number(s.quality)>0;}catch{return false;}})
    .map(s=>({url:s.url,quality:Number(s.quality)+"p",provider:String(s.provider||"Movie API"),mime:s.type==="m3u8"?"application/vnd.apple.mpegurl":"video/mp4",audioLanguage:getLang(s)}))
    .sort((a,b)=>Number(isHindi(b.audioLanguage))-Number(isHindi(a.audioLanguage)));
  }
  function sourcesForLanguage(sources,language){
-  return sources.filter(s=>isHindi(s.audioLanguage));
+  const chosen=String(language||"").trim();
+  const matched=chosen&&chosen!=="auto"?sources.filter(s=>String(s.audioLanguage||"").trim()===chosen):[];
+  return matched.length?matched:sources;
  }
  function audioOptions(sources){
   const langs=[...new Set(sources.map(s=>s.audioLanguage).filter(Boolean))];
@@ -39,7 +41,7 @@
    if(requestId!==streamRequest)return;
    const streamRoot=payload.stream||payload.data||payload.result||payload;
    const streamItems=Array.isArray(streamRoot.sources)?streamRoot.sources:Array.isArray(streamRoot.streams)?streamRoot.streams:Array.isArray(streamRoot.urls)?streamRoot.urls:[];
-   const normalized=streamItems.map(s=>({url:s.url||s.playUrl||s.src||s.file,quality:s.quality||s.resolution||s.label||"720p",provider:s.provider||s.name||"Movie API",type:s.type||s.format||"",audioLanguage:getLang(s)})).filter(s=>{try{const u=new URL(s.url);return u.protocol==="https:"&&u.hostname==="hd-w0l1.onrender.com"&&isHindi(s.audioLanguage);}catch{return false;}});
+   const normalized=streamItems.map(s=>({url:s.url||s.playUrl||s.src||s.file,quality:s.quality||s.resolution||s.label||"720p",provider:s.provider||s.name||"Movie API",type:s.type||s.format||"",audioLanguage:getLang(s)})).filter(s=>{try{const u=new URL(s.url);return u.protocol==="https:"&&u.hostname==="hd-w0l1.onrender.com";}catch{return false;}});
    if(normalized.length)sources=normalized.map(s=>({url:s.url,quality:/^\\d+$/.test(String(s.quality))?String(s.quality)+"p":String(s.quality),provider:s.provider,mime:/m3u8|hls/i.test(s.type)?"application/vnd.apple.mpegurl":"video/mp4",audioLanguage:s.audioLanguage}));
   }catch(err){console.warn("Stream endpoint unavailable; using detail sources",err);}
   if(requestId!==streamRequest)return;
@@ -49,9 +51,9 @@
   $("#movieWatchNow").textContent=ep.label||("Episode "+(ep.number||index+1));
   root.querySelectorAll("[data-watch-episode]").forEach((b,i)=>b.classList.toggle("active",i===index));
   const languageOptions=audioOptions(sources),audioBox=$("#movieWatchAudioBox");
-  if(audioBox)audioBox.innerHTML=languageOptions||'<span class="muted">Hindi audio is preferred when the source provides it. Audio selection is unavailable for this source.</span>';
+  if(audioBox)audioBox.innerHTML=languageOptions||'<span class="muted">Hindi audio is preferred when available; otherwise other available audio is used.</span>';
   message.textContent="Available quality: "+sources.map(s=>s.quality).join(" · ")+(sources.some(s=>isHindi(s.audioLanguage))?" · Hindi audio available":"");
-  const selectedLang=sources.find(s=>isHindi(s.audioLanguage))?.audioLanguage||"auto";
+  const selectedLang=sources.find(s=>isHindi(s.audioLanguage))?.audioLanguage||sources.find(s=>s.audioLanguage)?.audioLanguage||"auto";
   const activeSources=sourcesForLanguage(sources,selectedLang);
   if(!playerApi){
    playerApi=window.CineVersePlayer?.mount({video,sources:activeSources,storageKey:"msbd-"+encodeURIComponent(path)+"-"+encodeURIComponent(ep.id||index),title:document.querySelector("#movieWatchRoot .ms-title-copy h1")?.textContent||"Now Playing",backUrl:"./"});
