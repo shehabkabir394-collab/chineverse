@@ -216,8 +216,8 @@
    return /k[- ]?drama|korean drama/.test(tags)||(korean&&(/^(drama|series|tv show|tv series|show)$/i.test(type)||/drama|series/.test(tags)||Array.isArray(item.episodes)||item._dramaCatalog===true));
   };
   const isNigerian=item=>{
-   const values=[item?.country,item?.originCountry,item?.productionCountry,item?.originalCountry,item?.nationality,item?.region,item?.title,item?.language,...(Array.isArray(item?._sections)?item._sections:[])];
-   return values.some(value=>/nigeria|nigerian|nollywood/i.test(String(value||"")));
+   const values=[item?.country,item?.originCountry,item?.productionCountry,item?.originalCountry,item?.nationality,item?.region,item?.title,item?.language,item?.originalLanguage,item?.productionCountries,item?.countries,item?.description,...(Array.isArray(item?._sections)?item._sections:[])];
+   return values.some(value=>Array.isArray(value)?value.some(v=>/nigeria|nigerian|nollywood|naija/i.test(String(v?.name||v?.code||v||""))):/nigeria|nigerian|nollywood|naija/i.test(String(value||"")));
   };
   const isAnime=item=>{
    const tags=sectionTags(item);
@@ -289,7 +289,7 @@
   sections.forEach(s=>{
    const title=text(s.title)||"Discover";
    if(used.has(title.toLowerCase())||/collection|marvel|universe|south indian|horror|thriller|romance|bangla dubbed|korean drama|family|animation/i.test(title))return;
-   const items=(Array.isArray(s.items)?s.items:[]).map(item=>({...item,_sections:[...(item._sections||[]),title]}));
+   const items=(Array.isArray(s.items)?s.items:[]).filter(item=>!isNigerian(item)).map(item=>({...item,_sections:[...(item._sections||[]),title]}));
    out+=section(title,text(s.badge)||"COLLECTION",sort(items).slice(0,14),text(s.categoryPath)||"/type/movies");
   });
   root.innerHTML=out||'<p class="muted">No titles available.</p>';
