@@ -336,3 +336,28 @@
  .ms-hero-slider .ms-featured-copy,.ms-hero-slider .ms-featured-poster,
  .ms-hero-slider .ms-hero-backdrop,.ms-hero-slider .ms-hero-video-layer{transition:none!important;}
 }
+
+
+/* Frame-smooth hero carousel: animate the outgoing slide while the next enters. */
+.ms-hero-slider{contain:layout paint;transform:translateZ(0);}
+.ms-hero-slider .ms-hero-outgoing{
+ position:absolute;inset:0;z-index:3;display:flex;align-items:center;gap:inherit;
+ padding:inherit;pointer-events:none;overflow:hidden;
+ animation:msHeroSlideOut .42s cubic-bezier(.22,.72,.24,1) both;
+ will-change:transform,opacity;backface-visibility:hidden;
+}
+.ms-hero-slider .ms-hero-outgoing>*{pointer-events:none;}
+@keyframes msHeroSlideOut{
+ from{transform:translate3d(0,0,0);opacity:1}
+ to{transform:translate3d(calc(var(--hero-out-x, -1) * 100%),0,0);opacity:.15}
+}
+.ms-hero-slider .ms-featured-copy,
+.ms-hero-slider .ms-featured-poster{
+ backface-visibility:hidden;transform:translate3d(0,0,0);
+}
+@media(max-width:760px){
+ .ms-hero-slider .ms-hero-outgoing{gap:12px}
+}
+@media(prefers-reduced-motion:reduce){
+ .ms-hero-slider .ms-hero-outgoing{animation:none!important;display:none}
+}
