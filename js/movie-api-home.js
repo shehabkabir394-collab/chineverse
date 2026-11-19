@@ -334,8 +334,9 @@
    const d=await r.json();
    if(!r.ok||d.ok!==true)throw new Error(d.error||"Catalog unavailable");
    home=d;
-   // Paint the API homepage immediately; enrichment feeds load in the background.
-   render();
+   // Build the complete homepage snapshot first, then render once.
+   // This prevents the initial API response from being replaced a few seconds later
+   // when the Hindi/K-Drama/Latest enrichment feeds finish loading.
    const connection=navigator.connection||{};
    const slowConnection=!!connection.saveData||/2g|slow-2g/i.test(connection.effectiveType||"")||(Number(connection.downlink)>0&&Number(connection.downlink)<1.5);
    const catalogPage=async(path,page=1)=>{
@@ -389,6 +390,7 @@
     keys.add(key);
     return true;
    });
+   // Single final render: keep the visible homepage stable after it appears.
    render();
   }catch(e){status.textContent="Catalog could not load: "+(e.message||"Unknown error");}
  }
