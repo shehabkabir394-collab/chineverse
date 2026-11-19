@@ -37,7 +37,6 @@
   const selectedLang=sources.find(s=>isHindi(s.audioLanguage))?.audioLanguage||"auto";
   const activeSources=sourcesForLanguage(sources,selectedLang);
   if(!playerApi){
-   video.muted=true;
    playerApi=window.CineVersePlayer?.mount({video,sources:activeSources,storageKey:"msbd-"+encodeURIComponent(path)+"-"+encodeURIComponent(ep.id||index),title:document.querySelector("#movieWatchRoot .ms-title-copy h1")?.textContent||"Now Playing",backUrl:"./"});
    const audioSelect=$("#movieWatchAudio");if(audioSelect&&playerApi?.wrap){const audioLabel=audioSelect.closest("label")||audioSelect;audioLabel.classList.add("cv-audio-choice");playerApi.wrap.querySelector(".cv-top-right")?.appendChild(audioLabel);}
    if(!playerApi){video.controls=true;video.src=activeSources[0].url;video.load();video.play().catch(()=>{message.textContent="Tap the video to start playback.";});}
