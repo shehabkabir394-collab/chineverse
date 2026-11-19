@@ -119,7 +119,7 @@
 @media(max-width:760px){#movieApiCatalog .category-see-more{margin:8px 0 22px auto}}
 
 /* Mobile performance: avoid GPU-heavy glass blur and defer off-screen shelves */
-.movie-api-row{content-visibility:auto;contain-intrinsic-size:420px;contain:layout style paint}
+.movie-api-row{content-visibility:auto;contain-intrinsic-size:420px}
 .movie-api-shelf{overscroll-behavior-x:contain;scrollbar-width:thin}
 .movie-api-card{content-visibility:auto;contain-intrinsic-size:160px 270px}
 .movie-api-card img{display:block;width:100%;height:100%;object-fit:cover}
