@@ -139,3 +139,25 @@
 @media(prefers-reduced-motion:reduce){
  *,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
 }
+
+/* MovieBox-style swipeable poster shelves for Trending and latest uploads */
+.movie-api-row .movie-api-shelf{
+ display:flex;overflow-x:auto;overflow-y:hidden;scroll-behavior:smooth;
+ scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;
+ touch-action:pan-x pan-y;cursor:grab;overscroll-behavior-x:contain;
+ scrollbar-width:none;padding:5px 2px 15px;
+}
+.movie-api-row .movie-api-shelf:active{cursor:grabbing}
+.movie-api-row .movie-api-shelf::-webkit-scrollbar{display:none}
+.movie-api-row .movie-api-shelf>.movie-api-card{
+ flex:0 0 clamp(138px,15vw,190px);width:clamp(138px,15vw,190px);
+ scroll-snap-align:start;
+}
+@media(max-width:760px){
+ .movie-api-row .movie-api-shelf>.movie-api-card{flex-basis:clamp(128px,38vw,158px);width:clamp(128px,38vw,158px)}
+ .movie-api-row .movie-api-shelf{gap:11px;scroll-snap-type:x mandatory}
+}
+.movie-api-row .section-head:after{
+ content:"SWIPE  ← →";font-size:10px;letter-spacing:1px;color:#b9c6d8;
+ margin-left:auto;white-space:nowrap;opacity:.8
+}
