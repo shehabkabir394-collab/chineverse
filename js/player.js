@@ -4,7 +4,7 @@
   if(!video||!sources.length)return;
   const wrap=document.createElement("div");wrap.className="cv-player";video.parentNode.insertBefore(wrap,video);wrap.appendChild(video);video.controls=false;video.playsInline=true;video.muted=false;
   let ordered=[...sources].filter(x=>x&&x.url).sort((a,b)=>Number(a.quality.replace(/p/i,""))-Number(b.quality.replace(/p/i,"")));
-  const best=()=>{const c=navigator.connection||{};const down=Number(c.downlink)||0;const q=(!c.effectiveType&&!down)||c.effectiveType==="2g"||c.effectiveType==="slow-2g"||(down>0&&down<4)?"720p":"1080p";return ordered.find(x=>x.quality===q)||ordered.find(x=>x.quality==="720p")||ordered[0]};
+  const best=()=>{const c=navigator.connection||{};const down=Number(c.downlink)||0;const verySlow=!!c.saveData||/2g|slow-2g/i.test(c.effectiveType||"")||(down>0&&down<1.5);const q=verySlow?"low":((!c.effectiveType&&!down)||(down>=4)||c.effectiveType==="4g"?"1080p":"720p");return (verySlow?ordered[0]:null)||ordered.find(x=>x.quality===q)||ordered.find(x=>x.quality==="720p")||ordered[0]};
   const initial=best(),saved=Number(localStorage.getItem(storageKey)||0),savedVolume=Number(localStorage.getItem("cv-player-volume")||1);
   video.volume=Math.max(0,Math.min(1,savedVolume));
   const topbar=document.createElement("div");topbar.className="cv-topbar";topbar.innerHTML='<a class="cv-back-link" href="'+esc(backUrl)+'" aria-label="Back">‹</a><strong class="cv-title">'+esc(title)+'</strong><div class="cv-top-right"></div>';wrap.appendChild(topbar);
