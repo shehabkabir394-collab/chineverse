@@ -301,7 +301,7 @@
     const rest=await Promise.all(Array.from({length:max-1},(_,i)=>catalogPage(path,i+2).catch(()=>({items:[]}))));
     return [first,...rest].flatMap(payload=>Array.isArray(payload.items)?payload.items:[]);
    };
-   const latestJobs=discoveryPaths.slice(0,14).map(path=>fetchPages(path,latestPaths.includes(path)?8:2).then(items=>items.map(item=>({...item,_latestFeed:true,_sections:["Latest Uploads"]}))).catch(()=>[]));
+   const latestJobs=discoveryPaths.slice(0,14).map(path=>fetchPages(path,latestPaths.includes(path)?8:2).then(items=>items.map(item=>({...item,_latestFeed:latestPaths.includes(path),_sections:[latestPaths.includes(path)?"Latest Uploads":"Category Discovery"]}))).catch(()=>[]));
    const hindiJob=fetchPages("/language/hindi-dubbed",10).then(items=>items.map(item=>({...item,_hindiCatalog:true,_sections:[...(item._sections||[]),"Hindi Dubbed Catalog"]}))).catch(()=>[]);
    const dramaJob=fetchPages("/drama",4).then(items=>items.map(item=>({...item,_dramaCatalog:true,_sections:[...(item._sections||[]),"Drama Catalog"]}))).catch(()=>[]);
    const koreanJob=fetchPages("/language/korean",4).then(items=>items.map(item=>({...item,_koreanCatalog:true,_sections:[...(item._sections||[]),"Korean Catalog"]}))).catch(()=>[]);
