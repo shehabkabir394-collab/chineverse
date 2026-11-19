@@ -33,13 +33,18 @@
   return "";
  };
  const uploadTime=item=>{
-  const fields=[item?.uploadedAtMs,item?.uploadTimestamp,item?.uploadedAt,item?.uploadTime,item?.uploadDate,item?.upload_date,item?.uploaded_on,item?.dateAdded,item?.addedAt];
+  const fields=[
+   item?.uploadedAtMs,item?.uploadTimestamp,item?.uploadedAt,item?.uploadTime,item?.uploadDate,item?.upload_date,item?.uploaded_on,
+   item?.createdAtMs,item?.created_at,item?.createdAt,item?.dateAdded,item?.addedAt,item?.added_at,item?.publishedAt,item?.published_at,
+   item?.lastUpdated,item?.updatedAt,item?.updated_at,item?.modifiedAt,item?.date
+  ];
   for(const value of fields){
    if(value==null||value==="")continue;
-   if(typeof value==="number"||(typeof value==="string"&&/^\d{9,16}$/.test(value.trim()))){
-    const n=Number(value);if(Number.isFinite(n)&&n>0)return n<1000000000000?n*1000:n;
+   const raw=typeof value==="object"?(value.timestamp||value.date||value.value||""):value;
+   if(typeof raw==="number"||(typeof raw==="string"&&/^\d{9,16}$/.test(raw.trim()))){
+    const n=Number(raw);if(Number.isFinite(n)&&n>0)return n<1000000000000?n*1000:n;
    }
-   const parsed=Date.parse(String(value));if(Number.isFinite(parsed))return parsed;
+   const parsed=Date.parse(String(raw));if(Number.isFinite(parsed)&&parsed>0)return parsed;
   }
   return 0;
  };
@@ -222,23 +227,28 @@
    return item?._dramaCatalog===true||/^(drama|series|tv show|tv series|show|web series|serial)$/i.test(type)||/drama|series|tv show|k drama|korean drama|tv show/.test(tags)||item.isSeries===true||item.isDrama===true||Array.isArray(item.episodes)||Number(item.episodeCount)>0||Number(item.totalEpisodes)>0;
   };
   const allLatest=items=>[...new Map(items.map(item=>[pathOf(item)||String(item.id||item.title||""),item])).values()].sort(newestFirst);
-  const recentCutoff=Date.now()-180*24*60*60*1000;
-  const inLatestFeed=item=>item?._latestFeed===true||/(latest|recent|new release|new upload|newly added|recently added)/i.test(sectionTags(item));
-  const isRecentUpload=item=>item?._latestFeed===true||(uploadTime(item)>0&&uploadTime(item)>=recentCutoff);
+  const recentCutoff=Date.now()-365*24*60*60*1000;
+  const hasRecentTimestamp=item=>uploadTime(item)>0&&uploadTime(item)<=Date.now()+24*60*60*1000&&uploadTime(item)>=recentCutoff;
   const latestSource=allTitles.filter(item=>item?._latestFeed===true);
-  const newReleasePool=allTitles.filter(item=>item._latestFeed===true||(item._categoryFeed===true&&uploadTime(item)>=recentCutoff)||(!latestSource.length&&isRecentUpload(item)));
-  const newReleases=allLatest(newReleasePool.filter(item=>(isMovie(item)||isDrama(item)||item?._latestFeed===true)&&!isAnime(item)));
-  const hindiMovies=allLatest(allTitles.filter(item=>isMovie(item)&&!isAnime(item)&&isHindiDubbed(item)));
-  const hindiKdramas=allLatest(allTitles.filter(item=>isKDrama(item)&&isHindiDubbed(item)));
-  const hindiDramas=allLatest(allTitles.filter(item=>isDrama(item)&&!isKDrama(item)&&!isAnime(item)&&isHindiDubbed(item)));
-  const hindiAnime=allLatest(allTitles.filter(item=>isAnime(item)&&isHindiDubbed(item)));
+  const newReleasePool=allTitles.filter(item=>{
+   if(isNigerian(item)||isAnime(item))return false;
+   if(!(isMovie(item)||isDrama(item)))return false;
+   if(item._latestFeed===true)return true;
+   if(item._categoryFeed===true&&hasRecentTimestamp(item))return true;
+   return !latestSource.length&&hasRecentTimestamp(item);
+  });
+  const newReleases=allLatest(newReleasePool);
+  const hindiMovies=allLatest(allTitles.filter(item=>isMovie(item)&&!isAnime(item)&&!isNigerian(item)&&isHindiDubbed(item)));
+  const allKdramas=allLatest(allTitles.filter(item=>isKDrama(item)&&isDrama(item)&&!isNigerian(item))).sort((a,b)=>Number(isHindiDubbed(b))-Number(isHindiDubbed(a))||newestFirst(a,b));
+  const hindiDramas=allLatest(allTitles.filter(item=>isDrama(item)&&!isKDrama(item)&&!isAnime(item)&&!isNigerian(item)&&isHindiDubbed(item)));
+  const hindiAnime=allLatest(allTitles.filter(item=>isAnime(item)&&!isNigerian(item)&&isHindiDubbed(item)));
   let out="";
-  out+=section("New Release Movies & Dramas","🆕 VERIFIED RECENT UPLOADS · NEWEST FIRST",newReleases.slice(0,14),"/type/movies");
+  out+=section("New Release Movies & Dramas","🆕 NEW MOVIE & DRAMA UPLOADS · NEWEST FIRST",newReleases.slice(0,24),"/type/movies");
   out+=section("Hindi / Hindi Dubbed Movies","🇮🇳 HINDI AUDIO · NEWEST FIRST",hindiMovies.slice(0,14),"/language/hindi-dubbed");
-  out+=section("Hindi Dubbed K-Dramas","🇰🇷 KOREAN DRAMA · HINDI AUDIO ONLY",hindiKdramas.slice(0,14),"/language/hindi-dubbed");
+  out+=section("K-Dramas","🇰🇷 HINDI DUBBED FIRST · ALL KOREAN DRAMAS",allKdramas.slice(0,18),"/language/korean");
   out+=section("Hindi Dubbed Dramas","🇮🇳 VERIFIED HINDI AUDIO · NEWEST FIRST",hindiDramas.slice(0,14),"/language/hindi-dubbed");
   out+=section("Hindi Dubbed Anime","🎌 VERIFIED HINDI AUDIO · NEWEST FIRST",hindiAnime.slice(0,14),"/language/hindi-dubbed");
-  const shownKeys=new Set([...newReleases,...hindiMovies,...hindiKdramas,...hindiAnime].map(item=>pathOf(item)||String(item.id||item.title||"")));
+  const shownKeys=new Set([...newReleases,...hindiMovies,...allKdramas,...hindiAnime].map(item=>pathOf(item)||String(item.id||item.title||"")));
   if(trending.length)out+=section("Trending Now","🔥 HINDI DUBBED FIRST · POPULAR RIGHT NOW",prioritySort(trending).slice(0,14),"/mostwatch/7d");
   const used=new Set(["trending bengali movies","south indian & hindi dubbed","anime in hindi"]);
   sections.forEach(s=>{
