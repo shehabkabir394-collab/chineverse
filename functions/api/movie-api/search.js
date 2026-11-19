@@ -11,40 +11,36 @@ const json = (data, status = 200) =>
   });
 
 export async function onRequestGet({ request, env }) {
-  if (!env.MOVIE_API_KEY) {
-    return json({ error: "Movie API key is not configured." }, 503);
-  }
-
+  if (!env.MOVIE_API_KEY) return json({ error: "Movie API key is not configured." }, 503);
   const incoming = new URL(request.url);
+  const cacheKey = new Request(incoming.toString(), { method: "GET" });
+  try {
+    const cached = await caches.default.match(cacheKey);
+    if (cached) return cached;
+  } catch {}
   const q = (incoming.searchParams.get("q") || "").trim().slice(0, 150);
   const page = Math.max(1, Math.floor(Number(incoming.searchParams.get("page")) || 1));
-
   if (!q) return json({ error: "Search keyword is required." }, 400);
-
   const upstream = new URL(API);
   upstream.searchParams.set("q", q);
   upstream.searchParams.set("page", String(page));
-
   try {
     const response = await fetch(upstream, {
-      headers: {
-        "X-API-Key": env.MOVIE_API_KEY,
-        "Accept": "application/json"
-      },
+      headers: { "X-API-Key": env.MOVIE_API_KEY, "Accept": "application/json" },
       signal: AbortSignal.timeout(20000)
     });
-
     const body = await response.text();
-
-    return new Response(body, {
-      status: response.status,
-      headers: {
-        "Content-Type": response.headers.get("Content-Type") || "application/json; charset=utf-8",
-        "Cache-Control": "no-store",
-        "X-Content-Type-Options": "nosniff"
-      }
+    const headers = new Headers({
+      "Content-Type": response.headers.get("Content-Type") || "application/json; charset=utf-8",
+      "Cache-Control": "public, max-age=60, s-maxage=90",
+      "X-Content-Type-Options": "nosniff"
     });
+    const result = new Response(body, { status: response.status, headers });
+    if (response.ok) {
+      try { await caches.default.put(cacheKey, result.clone()); } catch {}
+    }
+    return result;
   } catch {
-    return json({ error: "Movie Search API is temporarily unavailable." }, 502);
+    return json({ error: "search is temporarily unavailable." }, 502);
   }
 }
