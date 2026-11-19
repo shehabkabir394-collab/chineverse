@@ -195,3 +195,14 @@
 .ms-hero-counter{position:absolute;right:clamp(18px,4vw,54px);bottom:31px;color:#ffffffc9;font-size:11px;letter-spacing:1px;z-index:4;}
 @media(max-width:760px){.ms-hero-slider{min-height:390px;padding:26px 17px 76px;gap:12px;background-position:center!important;}.ms-hero-slider .ms-featured-copy{max-width:68%;}.ms-hero-slider .ms-featured-copy h1{font-size:clamp(24px,7vw,38px);}.ms-hero-slider .ms-featured-poster{flex:0 0 30%;}.ms-hero-slider .ms-featured-poster img{height:clamp(180px,54vw,250px);object-fit:contain;}.ms-hero-slider .ms-featured-description{font-size:11px;line-height:1.45;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;}.ms-hero-controls{left:16px;bottom:16px;gap:10px;}.ms-hero-arrow{width:34px;height:34px;}.ms-hero-counter{right:17px;bottom:27px;}}
 @media(max-width:390px){.ms-hero-slider{min-height:360px;}.ms-hero-slider .ms-featured-copy{max-width:66%;}.ms-hero-slider .ms-featured-poster{flex-basis:32%;}.ms-hero-slider .ms-featured-poster img{height:175px;}}
+
+
+/* Smooth, directional MovieBox hero slide transitions */
+.ms-hero-slider{overflow:hidden;}
+.ms-hero-slider .ms-featured-copy,.ms-hero-slider .ms-featured-poster,.ms-hero-slider .ms-hero-backdrop{opacity:0;transform:translateX(22px);transition:opacity .48s cubic-bezier(.22,.61,.36,1),transform .58s cubic-bezier(.22,.61,.36,1);will-change:opacity,transform;}
+.ms-hero-slider.slide-enter .ms-featured-copy,.ms-hero-slider.slide-enter .ms-featured-poster,.ms-hero-slider.slide-enter .ms-hero-backdrop{opacity:1;transform:translateX(0);}
+.ms-hero-slider .ms-featured-poster img{transition:transform .65s cubic-bezier(.22,.61,.36,1),filter .45s ease;}
+.ms-hero-slider.slide-enter .ms-featured-poster img{transform:scale(1);}
+.ms-hero-slider:not(.slide-enter) .ms-featured-poster img{transform:scale(.97);}
+.ms-hero-slider .ms-hero-dot{transition:width .32s ease,background-color .32s ease,opacity .32s ease;}
+@media(prefers-reduced-motion:reduce){.ms-hero-slider .ms-featured-copy,.ms-hero-slider .ms-featured-poster,.ms-hero-slider .ms-hero-backdrop,.ms-hero-slider .ms-featured-poster img{transition:none!important;transform:none!important;opacity:1!important}}
