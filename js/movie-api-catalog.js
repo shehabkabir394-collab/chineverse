@@ -14,7 +14,7 @@
   return fields.some(v=>Array.isArray(v)?v.some(x=>/nigeria|nigerian|nollywood|naija/i.test(String(x?.name||x?.code||x||""))):/nigeria|nigerian|nollywood|naija/i.test(String(v||"")));
  };
  const releaseTime=item=>{
-  const fields=[item?.releaseTimestamp,item?.releaseDate,item?.release_date,item?.firstAirDate,item?.first_air_date,item?.year,item?.uploadedAtMs,item?.uploadTimestamp,item?.uploadedAt,item?.uploadDate,item?.createdAt,item?.created_at,item?.publishedAt,item?.updatedAt];
+  const fields=[item?.uploadedAtMs,item?.uploadTimestamp,item?.uploadedAt,item?.uploadTime,item?.uploadDate,item?.upload_date,item?.uploaded_on,item?.createdAtMs,item?.created_at,item?.createdAt,item?.dateAdded,item?.addedAt,item?.added_at,item?.publishedAt,item?.published_at,item?.lastUpdated,item?.updatedAt,item?.updated_at,item?.modifiedAt,item?.releaseTimestamp,item?.releaseDate,item?.release_date,item?.firstAirDate,item?.first_air_date,item?.year];
   for(const v of fields){if(v==null||v==="")continue;const raw=typeof v==="object"?(v.timestamp||v.date||v.value||""):v;if(typeof raw==="number"||(typeof raw==="string"&&/^\d{9,16}$/.test(raw.trim()))){const n=Number(raw);if(Number.isFinite(n)&&n>0)return n<1e12?n*1000:n;}const d=Date.parse(String(raw));if(Number.isFinite(d))return d;}
   return 0;
  };
@@ -65,7 +65,7 @@
   (Array.isArray(d.trending)?d.trending:[]).forEach(x=>add(x,"Trending Now","trending"));
   (Array.isArray(d.comingSoon)?d.comingSoon:[]).forEach(x=>add(x,"Coming Soon","comingSoon"));
   (Array.isArray(d.banners)?d.banners:[]).forEach(x=>add(x,"Featured","banner"));
-  return [...map.values()].filter(item=>!isNigerian(item)).sort((a,b)=>Number(isHindiDubbed(b))-Number(isHindiDubbed(a))||latestFirst(a,b));
+  return [...map.values()].filter(item=>!isNigerian(item)).sort((a,b)=>latestFirst(a,b)||Number(isHindiDubbed(b))-Number(isHindiDubbed(a)));
  }
  const customLabels={"cv:movie":"Movie","cv:anime":"Anime","cv:drama":"Drama","cv:kdrama":"K-Drama","cv:cdrama":"C-Drama","cv:south":"South Movies","cv:bollywood":"Bollywood","cv:hollywood":"Hollywood"};
  function groupOf(item){
@@ -203,11 +203,27 @@
 
     if(apiPath&&apiPath!=="/"){
      status.textContent="Loading "+(category?.label||customLabels[selected]||"Category")+" · Page "+page+"…";
-     const cr=await fetch("/api/movie-api/catalog?path="+encodeURIComponent(apiPath)+"&page="+page);
+     const cr=await fetch("/api/movie-api/catalog?path="+encodeURIComponent(apiPath)+"&page=1");
      const cd=await cr.json();
      if(!cr.ok||cd.ok!==true)throw new Error(cd.error||"Movie Catalog API unavailable");
-     all=(Array.isArray(cd.items)?cd.items:[]).filter(item=>!isNigerian(item)).map(item=>({...item,_sections:[],_sources:["catalog"]}));
-     apiCatalogMode=true;
+     const maxPage=Math.max(1,Math.min(100,Number(cd.maxPage)||1));
+     const pages=[cd];
+     for(let start=2;start<=maxPage;start+=6){
+      const batch=await Promise.all(Array.from({length:Math.min(6,maxPage-start+1)},(_,i)=>start+i).map(async p=>{
+       const response=await fetch("/api/movie-api/catalog?path="+encodeURIComponent(apiPath)+"&page="+p);
+       const payload=await response.json();
+       if(!response.ok||payload.ok!==true)throw new Error(payload.error||"Movie Catalog API page "+p+" unavailable");
+       return payload;
+      }));
+      pages.push(...batch);
+     }
+     const unique=new Map();
+     pages.forEach(payload=>(Array.isArray(payload.items)?payload.items:[]).forEach(item=>{
+      const key=pathOf(item)||norm(item.title);
+      if(key&&!unique.has(key))unique.set(key,{...item,_sections:[],_sources:["catalog"]});
+     }));
+     all=[...unique.values()].filter(item=>!isNigerian(item));
+     apiCatalogMode=false;
      apiMeta=cd;
     }else{
      all=flatten(d);
