@@ -124,7 +124,8 @@
   const kdramas=prioritySort(allTitles.filter(isKDrama));
   const recentMovies=prioritySort(allTitles.filter(isMovie));
   const koreanDubbed=dubbed.filter(item=>isKDrama(item));
-  const otherDubbed=dubbed.filter(item=>!isKDrama(item));
+  const recentVisibleKeys=new Set(recentMovies.slice(0,14).map(item=>pathOf(item)||String(item.id||item.title||"")));
+  const otherDubbed=dubbed.filter(item=>!isKDrama(item)&&!recentVisibleKeys.has(pathOf(item)||String(item.id||item.title||"")));
   let out="";
   out+=section("Hindi Dubbed K-Dramas · Latest First","🇰🇷 HINDI DUBBED K-DRAMA FIRST",kdramas.slice(0,14),"/language/korean");
   out+=section("Recently Uploaded Movies","🆕 HINDI DUBBED FIRST · LATEST UPLOADS",recentMovies.slice(0,14),"/type/movies");
@@ -139,9 +140,25 @@
    out+=section(title,text(s.badge)||"COLLECTION",sort(items).slice(0,14),text(s.categoryPath)||"/type/movies");
   });
   root.innerHTML=out||'<p class="muted">No titles available.</p>';
-  status.textContent=koreanDubbed.length+" Korean Hindi Dubbed · "+otherDubbed.length+" other Hindi Dubbed · "+trending.length+" trending · "+sections.length+" collections.";
+  status.textContent="";
+  status.hidden=true;
   renderHero();
  }
+ root.addEventListener("pointerdown",e=>{
+  const shelf=e.target.closest(".movie-api-shelf");
+  if(!shelf||e.pointerType!=="mouse")return;
+  shelf.dataset.dragging="1";shelf.dataset.dragStartX=String(e.clientX);shelf.dataset.dragStartScroll=String(shelf.scrollLeft);
+  shelf.classList.add("is-dragging");
+ });
+ root.addEventListener("pointermove",e=>{
+  const shelf=e.target.closest(".movie-api-shelf");
+  if(!shelf||shelf.dataset.dragging!=="1")return;
+  shelf.scrollLeft=Number(shelf.dataset.dragStartScroll)-(e.clientX-Number(shelf.dataset.dragStartX));
+ });
+ const stopShelfDrag=()=>root.querySelectorAll(".movie-api-shelf.is-dragging").forEach(shelf=>{delete shelf.dataset.dragging;shelf.classList.remove("is-dragging");});
+ root.addEventListener("pointerup",stopShelfDrag);
+ root.addEventListener("pointercancel",stopShelfDrag);
+ root.addEventListener("pointerleave",stopShelfDrag);
  root.addEventListener("click",e=>{
   const b=e.target.closest("[data-path]");
   if(b?.dataset.path)location.href="watch.html?path="+encodeURIComponent(b.dataset.path);
