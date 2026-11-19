@@ -17,3 +17,21 @@
 .topbar .home-global-search #movieApiSearch{width:100%;min-width:0;box-sizing:border-box}
 .topbar .home-search-submit{flex:0 0 40px;height:40px;border:1px solid #ffffff2b;border-radius:11px;background:linear-gradient(135deg,#ff526d,#b91e43);color:#fff;font-size:22px;cursor:pointer}
 @media(max-width:760px){.topbar .actions{display:flex!important}.topbar .home-global-search{width:100%;flex:1 1 auto}.topbar .home-global-search #movieApiSearch{width:100%}.topbar .home-search-submit{height:42px;flex-basis:44px}}
+
+/* Wider homepage search field and in-field hot-search dropdown */
+.topbar .home-global-search{width:clamp(280px,42vw,520px)!important;flex:0 1 520px;min-width:250px;gap:8px}
+.topbar .home-global-search .cv-search-wrap{flex:1 1 auto;min-width:0}
+.topbar .home-global-search #movieApiSearch{width:100%!important;min-width:0;height:46px;padding:0 16px;border:1px solid rgba(255,255,255,.24);border-radius:13px;background:rgba(255,255,255,.09);color:#fff;font-size:14px;box-sizing:border-box}
+.topbar .home-global-search #movieApiSearch:focus{outline:none;border-color:#ff647d;box-shadow:0 0 0 3px rgba(255,82,109,.16)}
+.topbar .home-search-submit{height:46px;flex-basis:48px}
+.cv-search-panel-heading{padding:8px 10px 10px;color:#ff9eaf;font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
+.cv-search-hot-list{display:flex;flex-wrap:wrap;gap:7px;padding:0 5px 5px}
+.cv-search-panel a.cv-search-hot-chip{display:inline-flex;align-items:center;padding:8px 11px;border:1px solid #ffffff20;border-radius:999px;background:rgba(255,255,255,.07);font-size:11px}
+.cv-search-panel a.cv-search-hot-chip:hover{border-color:#ff526d;background:#ff526d20}
+.cv-search-panel a.cv-search-suggestion{padding:11px 12px;border-top:1px solid #ffffff0c;font-size:12px}
+@media(max-width:760px){
+ .topbar .actions{width:100%;flex:1 0 100%;gap:8px}
+ .topbar .home-global-search{width:100%!important;min-width:0;flex:1 1 100%}
+ .topbar .home-global-search #movieApiSearch{height:48px;font-size:14px}
+ .topbar .home-search-submit{height:48px;flex-basis:48px}
+}
