@@ -52,7 +52,7 @@
  const newestFirst=(a,b)=>uploadTime(b)-uploadTime(a);
  const isPinned=item=>item?.pinned===true||item?.isPinned===true||item?.featured===true||item?.is_featured===true||/^(1|true|yes)$/i.test(String(item?.pin||item?.is_pinned||""));
  const popularity=item=>["views","viewCount","view_count","totalViews","total_views","downloads","downloadCount","popularity","watchCount","watch_count","visits","hits"].reduce((best,key)=>Math.max(best,Number(item?.[key])||0),0);
- const recentFirst=(a,b)=>Number(isPinned(b))-Number(isPinned(a))||newestFirst(a,b)||Number(isHindiDubbed(b))-Number(isHindiDubbed(a));
+ const recentFirst=(a,b)=>Number(isPinned(b))-Number(isPinned(a))||Number(isHindiDubbed(b))-Number(isHindiDubbed(a))||newestFirst(a,b);
  const popularFirst=(a,b)=>Number(isPinned(b))-Number(isPinned(a))||popularity(b)-popularity(a)||newestFirst(a,b)||Number(isHindiDubbed(b))-Number(isHindiDubbed(a));
  const sort=items=>[...items].sort(recentFirst);
  const prioritySort=items=>[...items].sort(popularFirst);
