@@ -2,14 +2,14 @@
  const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
  function mount({video,sources=[],storageKey="cv-player",subtitles=[],title="Now Playing",backUrl="./"}){
   if(!video||!sources.length)return;
-  const wrap=document.createElement("div");wrap.className="cv-player";video.parentNode.insertBefore(wrap,video);wrap.appendChild(video);video.controls=false;video.playsInline=true;
+  const wrap=document.createElement("div");wrap.className="cv-player";video.parentNode.insertBefore(wrap,video);wrap.appendChild(video);video.controls=false;video.playsInline=true;video.muted=false;video.volume=Math.max(0,Math.min(1,savedVolume));
   let ordered=[...sources].filter(x=>x&&x.url).sort((a,b)=>Number(a.quality.replace(/p/i,""))-Number(b.quality.replace(/p/i,"")));
   const best=()=>{const c=navigator.connection||{};const down=Number(c.downlink)||0;const q=(!c.effectiveType&&!down)||c.effectiveType==="2g"||c.effectiveType==="slow-2g"||(down>0&&down<4)?"720p":"1080p";return ordered.find(x=>x.quality===q)||ordered.find(x=>x.quality==="720p")||ordered[0]};
-  const initial=best(),saved=Number(localStorage.getItem(storageKey)||0);
+  const initial=best(),saved=Number(localStorage.getItem(storageKey)||0),savedVolume=Number(localStorage.getItem("cv-player-volume")||1);
   const topbar=document.createElement("div");topbar.className="cv-topbar";topbar.innerHTML='<a class="cv-back-link" href="'+esc(backUrl)+'" aria-label="Back">‹</a><strong class="cv-title">'+esc(title)+'</strong><div class="cv-top-right"></div>';wrap.appendChild(topbar);
   const controls=document.createElement("div");controls.className="cv-controls";
   const qualityOptions=['<option value="auto">Auto</option>',...ordered.map(x=>'<option value="'+esc(x.quality)+'">'+esc(x.quality)+'</option>')].join("");
-  controls.innerHTML='<div class="cv-progress"><input class="cv-seek" type="range" min="0" max="1000" value="0" aria-label="Seek"></div><div class="cv-control-row"><button type="button" class="cv-play" aria-label="Play">▶</button><button type="button" class="cv-back" aria-label="Back 10 seconds">↶10</button><button type="button" class="cv-forward" aria-label="Forward 10 seconds">10↷</button><span class="cv-time">0:00 / 0:00</span><input class="cv-volume" type="range" min="0" max="1" step=".05" value="1" aria-label="Volume"><select class="cv-quality" aria-label="Quality">'+qualityOptions+'</select><select class="cv-speed" aria-label="Playback speed"><option>0.25</option><option>0.5</option><option>0.75</option><option selected>1</option><option>1.25</option><option>1.5</option><option>1.75</option><option>2</option></select><select class="cv-subtitles" aria-label="Subtitles"><option value="-1">Subtitles Off</option></select><button type="button" class="cv-pip" title="Picture in Picture">▣</button><button type="button" class="cv-full" title="Fullscreen">⛶</button></div><div class="cv-buffer" hidden>Buffering…</div>';
+  controls.innerHTML='<div class="cv-progress"><input class="cv-seek" type="range" min="0" max="1000" value="0" aria-label="Seek"></div><div class="cv-control-row"><button type="button" class="cv-play" aria-label="Play">▶</button><button type="button" class="cv-back" aria-label="Back 10 seconds">↶10</button><button type="button" class="cv-forward" aria-label="Forward 10 seconds">10↷</button><span class="cv-time">0:00 / 0:00</span><button type="button" class="cv-mute" aria-label="Mute sound" title="Mute / Unmute">🔊</button><input class="cv-volume" type="range" min="0" max="1" step=".05" value="1" aria-label="Volume"><select class="cv-quality" aria-label="Quality">'+qualityOptions+'</select><select class="cv-speed" aria-label="Playback speed"><option>0.25</option><option>0.5</option><option>0.75</option><option selected>1</option><option>1.25</option><option>1.5</option><option>1.75</option><option>2</option></select><select class="cv-subtitles" aria-label="Subtitles"><option value="-1">Subtitles Off</option></select><button type="button" class="cv-pip" title="Picture in Picture">▣</button><button type="button" class="cv-full" title="Fullscreen">⛶</button></div><div class="cv-buffer" hidden>Buffering…</div>';
   wrap.appendChild(controls);
   const topRight=topbar.querySelector(".cv-top-right");
   const lockButton=document.createElement("button");lockButton.type="button";lockButton.className="cv-lock";lockButton.textContent="🔒";lockButton.setAttribute("aria-label","Lock controls");wrap.appendChild(lockButton);
@@ -20,7 +20,10 @@
   const centerPlay=document.createElement("button");centerPlay.type="button";centerPlay.className="cv-center-play";centerPlay.setAttribute("aria-label","Play video");centerPlay.innerHTML="<span>▶</span>";wrap.appendChild(centerPlay);
   const skipHint=document.createElement("div");skipHint.className="cv-skip-hint";skipHint.setAttribute("aria-live","polite");wrap.appendChild(skipHint);
   const skipControls=document.createElement("div");skipControls.className="cv-mid-skip";skipControls.innerHTML='<button type="button" class="cv-mid-back" aria-label="Rewind 10 seconds"><span>↶</span><small>10</small></button><button type="button" class="cv-mid-forward" aria-label="Forward 10 seconds"><span>↷</span><small>10</small></button>';wrap.appendChild(skipControls);
-  const $=s=>controls.querySelector(s),play=$(".cv-play"),seek=$(".cv-seek"),time=$(".cv-time"),quality=controls.querySelector(".cv-quality"),subs=controls.querySelector(".cv-subtitles");
+  const $=s=>controls.querySelector(s),play=$(".cv-play"),seek=$(".cv-seek"),time=$(".cv-time"),quality=controls.querySelector(".cv-quality"),subs=controls.querySelector(".cv-subtitles"),volume=$(".cv-volume"),mute=$(".cv-mute");
+  volume.value=String(video.volume);
+  function syncSound(){const silent=video.muted||video.volume===0;mute.textContent=silent?"🔇":"🔊";mute.setAttribute("aria-label",silent?"Turn sound on":"Mute sound");mute.title=silent?"Turn sound on":"Mute sound";}
+  syncSound();
   topRight.append(quality,subs);
   let hideTimer=0;
   function revealControls(){wrap.classList.add("cv-ui-visible");clearTimeout(hideTimer);if(!video.paused&&!video.ended)hideTimer=setTimeout(()=>wrap.classList.remove("cv-ui-visible"),2800);}
@@ -54,7 +57,9 @@
   skipControls.querySelector(".cv-mid-forward").addEventListener("click",()=>jump(10));
   video.addEventListener("timeupdate",()=>{if(video.duration){seek.value=Math.round(video.currentTime/video.duration*1000);time.textContent=fmt(video.currentTime)+" / "+fmt(video.duration);}});
   seek.addEventListener("input",()=>{if(video.duration)video.currentTime=Number(seek.value)/1000*video.duration});
-  $(".cv-volume").addEventListener("input",e=>video.volume=Number(e.target.value));
+  volume.addEventListener("input",e=>{video.volume=Number(e.target.value);video.muted=false;localStorage.setItem("cv-player-volume",String(video.volume));syncSound();});
+  mute.addEventListener("click",()=>{if(video.muted||video.volume===0){video.muted=false;if(video.volume===0){video.volume=Math.max(.5,Number(localStorage.getItem("cv-player-volume")||1));volume.value=String(video.volume);}}else{video.muted=true;}syncSound();revealControls();});
+  video.addEventListener("volumechange",syncSound);
   settingsPanel.querySelector(".cv-speed").addEventListener("change",e=>video.playbackRate=Number(e.target.value));
   async function enterFullscreen(){
    try{
