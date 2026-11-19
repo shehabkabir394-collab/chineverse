@@ -5,7 +5,7 @@ const json = (data, status = 200) =>
     status,
     headers: {
       "Content-Type": "application/json; charset=utf-8",
-      "Cache-Control": "public, max-age=300",
+      "Cache-Control": "no-store",
       "X-Content-Type-Options": "nosniff"
     }
   });
@@ -15,21 +15,7 @@ export async function onRequestGet({ request, env }) {
     return json({ error: "Movie API key is not configured." }, 503);
   }
 
-  const cacheKey = new Request(new URL(request.url).toString(), {
-    method: "GET"
-  });
-
-  // Serve cached API data when available.
-  try {
-    const cached = await caches.default.match(cacheKey);
-    if (cached) {
-      return cached;
-    }
-  } catch {
-    // Continue with the origin request if cache lookup fails.
-  }
-
-  try {
+try {
     const response = await fetch(API, {
       headers: {
         "X-API-Key": env.MOVIE_API_KEY,
@@ -52,15 +38,7 @@ export async function onRequestGet({ request, env }) {
     delete data.trial;
 
     const result = json(data);
-
-    // Store successful responses at this Cloudflare data center for 5 minutes.
-    try {
-      await caches.default.put(cacheKey, result.clone());
-    } catch {
-      // API still works even if cache storage fails.
-    }
-
-    return result;
+return result;
   } catch {
     return json({ error: "Movie API is temporarily unavailable." }, 502);
   }
