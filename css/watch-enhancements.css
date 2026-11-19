@@ -165,3 +165,56 @@
 .ms-watch-player .ms-download-entry small{font-size:11px;color:#a9c5dc}
 .ms-watch-player .ms-download-arrow{font-size:25px;color:#6bdcff}
 @media(max-width:600px){.ms-watch-player .ms-download-entry{margin-top:10px;padding:11px 12px}.ms-watch-player .ms-download-entry>span:first-child{width:38px;height:38px;flex-basis:38px}}
+
+
+/* MovieBox-style immersive player layout */
+.ms-watch-player .cv-player{border:0;border-radius:0;background:#000;box-shadow:0 14px 48px #0009;overflow:hidden;aspect-ratio:16/9}
+.ms-watch-player .cv-player video{width:100%;height:100%;max-height:none;aspect-ratio:16/9;object-fit:contain;border-radius:0}
+.ms-watch-player .cv-topbar{position:absolute;z-index:7;left:0;right:0;top:0;display:flex;align-items:center;gap:14px;min-height:76px;padding:12px 22px;background:linear-gradient(#000b,transparent);color:#fff;opacity:0;pointer-events:none;transition:opacity .2s}
+.ms-watch-player .cv-player.cv-ui-visible .cv-topbar,.ms-watch-player .cv-player:focus-within .cv-topbar{opacity:1;pointer-events:auto}
+.ms-watch-player .cv-back-link{width:48px;height:48px;flex:0 0 48px;border:1px solid #ffffff50;border-radius:50%;display:grid;place-items:center;color:#fff;text-decoration:none;font-size:38px;line-height:1;background:#0005}
+.ms-watch-player .cv-title{font-size:clamp(15px,2vw,25px);font-weight:750;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:36%}
+.ms-watch-player .cv-top-right{margin-left:auto;display:flex;align-items:center;gap:clamp(8px,2vw,26px);min-width:0}
+.ms-watch-player .cv-top-right select,.ms-watch-player .cv-audio-choice select{max-width:clamp(82px,15vw,170px);min-width:0;border:0;background:#0005;color:#fff;padding:9px 8px;font-size:clamp(11px,1.5vw,18px);letter-spacing:.04em}
+.ms-watch-player .cv-top-right option{background:#111;color:#fff}
+.ms-watch-player .cv-audio-choice{display:flex;align-items:center;gap:6px;color:#fff;font-size:0}
+.ms-watch-player .cv-audio-choice select{font-size:clamp(11px,1.5vw,18px)}
+.ms-watch-player .cv-controls{opacity:0;transform:none;left:0;right:0;bottom:0;padding:48px 22px 18px;background:linear-gradient(transparent,#000c 40%,#000e);z-index:7}
+.ms-watch-player .cv-player.cv-ui-visible .cv-controls{opacity:1}
+.ms-watch-player .cv-progress{height:24px}
+.ms-watch-player .cv-seek{height:6px;accent-color:#24d5e6}
+.ms-watch-player .cv-control-row{display:flex;align-items:center;gap:clamp(10px,2vw,28px)}
+.ms-watch-player .cv-control-row button,.ms-watch-player .cv-control-row select{border:0;background:transparent;color:#fff;min-height:34px;padding:4px 8px;font-size:20px}
+.ms-watch-player .cv-control-row .cv-quality,.ms-watch-player .cv-control-row .cv-subtitles{display:none}
+.ms-watch-player .cv-control-row .cv-speed{display:none}
+.ms-watch-player .cv-control-row .cv-time{font-size:clamp(11px,1.4vw,18px);letter-spacing:.12em}
+.ms-watch-player .cv-control-row .cv-volume{width:clamp(65px,10vw,120px);accent-color:#24d5e6}
+.ms-watch-player .cv-settings{position:absolute;z-index:9;right:clamp(20px,8vw,110px);bottom:18px;border:0;background:transparent;color:#fff;font-size:27px;cursor:pointer;opacity:0;pointer-events:none}
+.ms-watch-player .cv-player.cv-ui-visible .cv-settings{opacity:1;pointer-events:auto}
+.ms-watch-player .cv-settings-panel{display:none;position:absolute;z-index:10;right:20px;bottom:65px;padding:14px;border-radius:10px;background:#111e;color:#fff;backdrop-filter:blur(14px);gap:10px;align-items:center}
+.ms-watch-player .cv-settings-panel.open{display:flex}
+.ms-watch-player .cv-settings-panel select{background:#222;color:#fff;border:1px solid #ffffff33;padding:8px;border-radius:7px}
+.ms-watch-player .cv-lock{position:absolute;z-index:9;left:18px;top:48%;width:54px;height:54px;border:0;border-radius:50%;background:#0008;color:#fff;font-size:24px;opacity:0;pointer-events:none}
+.ms-watch-player .cv-player.cv-ui-visible .cv-lock{opacity:1;pointer-events:auto}
+.ms-watch-player .cv-player.cv-locked .cv-topbar,.ms-watch-player .cv-player.cv-locked .cv-controls,.ms-watch-player .cv-player.cv-locked .cv-settings{opacity:0!important;pointer-events:none!important}
+.ms-watch-player .cv-player.cv-locked .cv-lock{opacity:1!important;pointer-events:auto!important}
+.ms-watch-player .cv-center-play{width:82px;height:82px;background:#0006;border-color:#ffffff45}
+.ms-watch-player .cv-mid-skip{padding:0 clamp(25px,14%,180px)}
+.ms-watch-player .cv-mid-skip button{width:58px;height:58px;border:0;background:#0006;box-shadow:none}
+@media(max-width:700px){
+ .ms-watch-player .cv-topbar{min-height:52px;padding:7px 9px;gap:7px}
+ .ms-watch-player .cv-back-link{width:34px;height:34px;flex-basis:34px;font-size:29px}
+ .ms-watch-player .cv-title{font-size:13px;max-width:30%}
+ .ms-watch-player .cv-top-right{gap:4px}
+ .ms-watch-player .cv-top-right select,.ms-watch-player .cv-audio-choice select{padding:5px 3px;font-size:10px;max-width:76px}
+ .ms-watch-player .cv-controls{padding:34px 8px 8px}
+ .ms-watch-player .cv-control-row{display:flex;flex-wrap:wrap;gap:5px}
+ .ms-watch-player .cv-control-row button{font-size:17px;min-height:28px;padding:2px 5px}
+ .ms-watch-player .cv-control-row .cv-time{font-size:10px}
+ .ms-watch-player .cv-control-row .cv-volume{width:48px}
+ .ms-watch-player .cv-lock{left:8px;width:40px;height:40px;font-size:19px}
+ .ms-watch-player .cv-center-play{width:54px;height:54px}
+ .ms-watch-player .cv-mid-skip{padding:0 10%}
+ .ms-watch-player .cv-mid-skip button{width:42px;height:42px}
+ .ms-watch-player .cv-settings{right:10px;bottom:8px;font-size:22px}
+}
