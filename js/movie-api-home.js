@@ -9,21 +9,22 @@
  let home=null,hindiCatalog=[];
  const isHindiDubbed=item=>{
   const norm=value=>String(value??"").trim().toLowerCase().replace(/[_-]+/g," ").replace(/\s+/g," ");
-  const language=norm(item?.language);
+  const exactHindi=value=>{
+   const v=norm(value);
+   return /^(hindi|hindi dubbed|hindi dub|hindi audio|हिंदी|हिन्दी)$/.test(v);
+  };
   const fields=[
    item?.audioLanguage,item?.audioLanguages,item?.dubLanguage,item?.dubLanguages,
    item?.dubbedLanguages,item?.availableAudio,item?.availableLanguages,item?.languages,
    item?.audio,item?.audioTrack,item?.audioTracks,item?.dubbed,item?.dubbing,
   ];
-  const values=fields.flatMap(value=>Array.isArray(value)?value:[value]).map(value=>{
-   if(value&&typeof value==="object")return [value.language,value.name,value.label,value.code].map(norm).join(" ");
-   return norm(value);
+  const values=fields.flatMap(value=>Array.isArray(value)?value:[value]).flatMap(value=>{
+   if(value&&typeof value==="object")return [value.language,value.name,value.label,value.code].filter(Boolean);
+   return [value];
   });
-  const audioHindi=values.some(value=>/\bhindi\b|हिंदी/.test(value));
-  const sectionHindiDub=Array.isArray(item?._sections)&&item._sections.some(value=>
-   /(?:hindi|हिंदी).*(?:dub|dubbing|audio)|(?:dub|dubbing|audio).*(?:hindi|हिंदी)/i.test(String(value||""))
-  );
-  return language==="hindi dubbed"||language==="hindi audio"||audioHindi||sectionHindiDub;
+  // Only explicit Hindi audio metadata qualifies. A Hindi category/section alone
+  // must never turn a Korean- or English-audio title into a Hindi-dubbed title.
+  return exactHindi(item?.language)||values.some(exactHindi);
  };
  const pathOf=item=>{
   if(typeof item.path==="string"&&item.path.startsWith("/mb/"))return item.path;
@@ -155,7 +156,20 @@
    const type=String(item.typeBadge||item.type||"").toLowerCase();
    return type==="movie"||type==="movies"||/movie|movies|film|cinema/.test(tags);
   };
-  const latest=(a,b)=>(Number(b.uploadedAtMs)||Date.parse(b.uploadedAt||b.createdAt||b.updatedAt||"")||0)-(Number(a.uploadedAtMs)||Date.parse(a.uploadedAt||a.createdAt||a.updatedAt||"")||0);
+  const uploadTime=item=>{
+   const fields=[item?.uploadedAtMs,item?.uploadTimestamp,item?.uploadedAt,item?.uploadTime,item?.createdAt,item?.addedAt,item?.dateAdded,item?.publishedAt,item?.updatedAt];
+   for(const value of fields){
+    if(value==null||value==="")continue;
+    if(typeof value==="number"||(typeof value==="string"&&/^\\d{9,16}$/.test(value.trim()))){
+     const n=Number(value);
+     if(Number.isFinite(n)&&n>0)return n<1000000000000?n*1000:n;
+    }
+    const parsed=Date.parse(String(value));
+    if(Number.isFinite(parsed))return parsed;
+   }
+   return 0;
+  };
+  const latest=(a,b)=>uploadTime(b)-uploadTime(a);
   const prioritySort=items=>[...items].sort((a,b)=>latest(a,b)||Number(isHindiDubbed(b))-Number(isHindiDubbed(a)));
   const kdramas=prioritySort(allTitles.filter(isKDrama));
   const recentMovies=prioritySort(allTitles.filter(isMovie));
@@ -165,9 +179,9 @@
   let out="";
   out+=section("Latest Movie Uploads","🆕 NEWEST MOVIES · FIRST ROW",recentMovies.slice(0,8),"/type/movies");
   out+=section("More New Movies","🎬 NEXT RECENT MOVIE UPLOADS",recentMovies.slice(8,16),"/type/movies");
-  out+=section("Latest K-Dramas","🇰🇷 KOREAN DRAMAS · LATEST UPLOADS",kdramas.slice(0,14),"/language/korean");
-  out+=section("Hindi Dubbed K-Dramas","🇰🇷 VERIFIED HINDI AUDIO",koreanDubbed.slice(0,14),"/language/hindi-dubbed");
-  out+=section("Hindi Dubbed Movies & Series","HINDI DUBBED",otherDubbed.slice(0,14),"/language/hindi-dubbed");
+  out+=section("Hindi Dubbed K-Dramas","🇰🇷 VERIFIED HINDI AUDIO ONLY",prioritySort(koreanDubbed).slice(0,14),"/language/hindi-dubbed");
+  out+=section("Latest K-Dramas","🇰🇷 KOREAN DRAMAS · ALL AUDIO",kdramas.slice(0,14),"/language/korean");
+  out+=section("Hindi Dubbed Movies & Series","HINDI AUDIO ONLY",otherDubbed.slice(0,14),"/language/hindi-dubbed");
   if(trending.length)out+=section("Trending Now","🔥 HINDI DUBBED FIRST · POPULAR RIGHT NOW",prioritySort(trending).slice(0,14),"/mostwatch/7d");
   const used=new Set(["trending bengali movies","south indian & hindi dubbed","anime in hindi"]);
   sections.forEach(s=>{
