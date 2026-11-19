@@ -65,3 +65,9 @@
 .ms-episode-info{flex:1;min-width:0;display:grid;gap:3px}.ms-episode-info b{font-size:13px}.ms-episode-info small{font-size:11px}
 .ms-episode-quality{font-size:10px;color:#a9c5dc;white-space:nowrap}.ms-episode-action{font-size:16px;color:#45ceff}
 @media(max-width:600px){.ms-watch-player .cv-mid-skip{padding:0 13px}.ms-watch-player .cv-mid-skip button{width:43px;height:43px}.ms-episode-section{margin:14px 0 20px;padding:10px}.ms-season-heading{padding:13px 12px}.ms-episode-section .ms-episode-button{gap:8px;padding:9px 8px}.ms-episode-number{flex-basis:30px;height:30px}.ms-episode-quality{font-size:9px}}
+
+/* Auto-hide all playback navigation, including the center 10-second skip buttons. */
+.ms-watch-player .cv-mid-skip{opacity:0;transition:opacity .22s ease;pointer-events:none}
+.ms-watch-player .cv-player.cv-ui-visible .cv-mid-skip{opacity:1;pointer-events:none}
+.ms-watch-player .cv-mid-skip button{pointer-events:auto}
+.ms-watch-player .cv-player:not(.cv-ui-visible) .cv-mid-skip button{pointer-events:none}
