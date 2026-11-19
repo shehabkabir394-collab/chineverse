@@ -53,7 +53,7 @@ $("#downloadZip").addEventListener("click",async()=>{
  const zip=new JSZip(),folder=zip.folder(safeName(detail.title||"Drama")),failed=[];
  try{
   for(let i=0;i<episodes.length;i++){
-   const item=episodes[i],se=Math.max(0,Number(item.se??item.seasonNumber??0)),ep=Math.max(0,Number(item.ep??item.episodeNumber??i));
+   const item=episodes[i],se=Math.max(0,Number(item.se??0)),ep=Math.max(0,Number(item.ep??i));
    label.textContent="Episode "+(i+1)+" / "+episodes.length+" ডাউনলোড হচ্ছে…";
    const url="/api/movie-api/download-file?subjectId="+encodeURIComponent(subjectId)+"&se="+encodeURIComponent(se)+"&ep="+encodeURIComponent(ep)+"&quality="+encodeURIComponent(quality);
    try{const response=await fetch(url);if(!response.ok)throw new Error("HTTP "+response.status);const blob=await response.blob();if(!blob.size)throw new Error("Empty file");
