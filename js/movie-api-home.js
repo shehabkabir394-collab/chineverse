@@ -88,7 +88,7 @@
   });
   if(!items.length)return "";
   const mobile=window.matchMedia("(max-width:760px)").matches;
-  const visible=items.slice(0,mobile?8:9);
+  const visible=items.slice(0,mobile?6:8);
   visible.forEach(item=>homeRenderedKeys.add(pathOf(item)||String(item.id||item.title||"").trim().toLowerCase()));
   return '<section class="movie-api-row"><div class="section-head"><div><p class="eyebrow">'+esc(badgeText)+'</p><h2>'+esc(title)+'</h2></div><a class="btn ghost" href="catalog.html?category='+encodeURIComponent(target||"/type/movies")+'">View all →</a></div><div class="movie-api-shelf">'+visible.map(card).join("")+'</div></section>';
  }
@@ -101,9 +101,9 @@
   const uniqueSlides=new Map();
   bannerPool.forEach(item=>{const key=pathOf(item)||String(item.id||item.title||"");if(key&&!uniqueSlides.has(key))uniqueSlides.set(key,item);});
   const allSlides=[...uniqueSlides.values()].filter(item=>!isNigerianItem(item)&&posterOf(item));
-  const slides=allSlides.filter(item=>!item.mediaType&&!item.contentType&&!item.type&&!item.typeBadge||/movie|film/i.test(String(item.mediaType||item.contentType||item.type||item.typeBadge))).sort(chronologicalFirst).slice(0,10);
+  const slides=allSlides.filter(item=>!item.mediaType&&!item.contentType&&!item.type&&!item.typeBadge||/movie|film/i.test(String(item.mediaType||item.contentType||item.type||item.typeBadge))).sort(chronologicalFirst).slice(0,6);
   if(!slides.length){hero.classList.remove("ms-featured-hero","ms-hero-slider");hero.innerHTML='<div class="hero-copy"><p class="eyebrow">MOVIESTREAM BD · MOVIES & DRAMAS</p><h1>Your next <em>favorite</em><br>story starts here.</h1><p>Explore the latest movies and dramas from our catalog.</p><a class="btn primary" href="#movieApiCatalog">▶ Explore Collection</a></div>';return;}
-  let current=0,timer=null,startX=0,startY=0,startAt=0,dragging=false,slideDirection=1;
+  let current=0,timer=null,startX=0,startY=0,startAt=0,dragging=false,slideDirection=1,heroVisible=true;
   hero.classList.add("ms-featured-hero","ms-hero-slider");
   const renderSlide=()=>{
    const item=slides[current],image=posterOf(item),title=text(item.title)||"Featured";
@@ -121,7 +121,9 @@
    hero.querySelectorAll("[data-slide]").forEach(button=>button.addEventListener("click",()=>go(Number(button.dataset.slide))));
   };
   const go=index=>{slideDirection=index>=current?1:-1;current=(index+slides.length)%slides.length;hero.style.setProperty("--hero-enter-x",(slideDirection*42)+"px");hero.style.setProperty("--hero-out-x",(-slideDirection*100)+"%");renderSlide();restart();};
-  const restart=()=>{if(timer){clearInterval(timer);timer=null;}if(slides.length>1&&!matchMedia("(prefers-reduced-motion: reduce)").matches)timer=setInterval(()=>go(current+1),6500);};
+  const restart=()=>{if(timer){clearInterval(timer);timer=null;}if(slides.length>1&&heroVisible&&!document.hidden&&!matchMedia("(prefers-reduced-motion: reduce)").matches)timer=setInterval(()=>go(current+1),8000);};
+  document.addEventListener("visibilitychange",restart,{passive:true});
+  if("IntersectionObserver" in window){const heroObserver=new IntersectionObserver(entries=>{heroVisible=!!entries[0]?.isIntersecting;restart();},{threshold:0.05});heroObserver.observe(hero); }
   hero.addEventListener("pointerdown",e=>{
    if(e.pointerType!=="touch"||e.target.closest("a,button"))return;
    startX=e.clientX;startY=e.clientY;startAt=performance.now();dragging=true;
