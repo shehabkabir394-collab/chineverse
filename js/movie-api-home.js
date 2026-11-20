@@ -21,7 +21,9 @@
    return exactHindi(value)||/(^|[,;|/])\s*(hindi|hi|hin|हिंदी|हिन्दी)\s*($|[,;|/])/.test(norm(value));
   };
   const audioFields=[item?.audioLanguage,item?.audioLanguages,item?.dubLanguage,item?.dubLanguages,item?.dubbedLanguages,item?.availableAudio,item?.availableLanguages,item?.languages,item?.audio,item?.audioTrack,item?.audioTracks,item?.dubbing,item?.audioInfo,item?.audioOptions];
-  return exactHindi(item?.language)||audioFields.some(containsHindi);
+  const explicitShelf=Array.isArray(item?._sections)&&item._sections.some(value=>/hindi dubbed|hindi dub|south indian & hindi dubbed|anime in hindi/i.test(String(value||"")));
+  const explicitDubFlag=item?.isHindiDubbed===true||item?.hindiDubbed===true||item?.is_hindi_dubbed===true||item?.dubbed===true&&containsHindi(item?.dubLanguage||item?.dubLanguages||item?.audioLanguage||item?.audioLanguages);
+  return explicitShelf||explicitDubFlag||audioFields.some(containsHindi);
  };
  const pathOf=item=>{
   if(typeof item.path==="string"&&item.path.startsWith("/mb/"))return item.path;
