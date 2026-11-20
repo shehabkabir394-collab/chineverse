@@ -66,8 +66,8 @@
  const recentFirst=(a,b)=>chronologicalFirst(a,b)||Number(isHindiDubbed(b))-Number(isHindiDubbed(a));
  const isKDrama=item=>/k[- ]?drama|korean drama|south korea/i.test([item?.title,item?.type,item?.typeBadge,item?.category,item?.categoryName,item?.genre,item?.genres,item?.country,...(Array.isArray(item?._sections)?item._sections:[])].flat().map(v=>typeof v==="object"?[v?.name,v?.label,v?.title].filter(Boolean).join(" "):String(v||"")).join(" "));
  const popularFirst=(a,b)=>chronologicalFirst(a,b)||Number(isHindiDubbed(b))-Number(isHindiDubbed(a))||Number(isPinned(b))-Number(isPinned(a))||popularity(b)-popularity(a);
- const sort=items=>[...items].sort((a,b)=>Number(isHindiDubbed(b))-Number(isHindiDubbed(a))||chronologicalFirst(a,b));
- const prioritySort=items=>[...items].sort((a,b)=>Number(isHindiDubbed(b))-Number(isHindiDubbed(a))||chronologicalFirst(a,b));
+ const sort=items=>[...items].sort((a,b)=>chronologicalFirst(a,b)||Number(isHindiDubbed(b))-Number(isHindiDubbed(a)));
+ const prioritySort=items=>[...items].sort((a,b)=>chronologicalFirst(a,b)||Number(isHindiDubbed(b))-Number(isHindiDubbed(a)));
  function card(item){
   const title=item.title||"Untitled",poster=posterOf(item),path=pathOf(item);
   return '<article class="movie-card movie-api-card"><button class="movie-api-poster" type="button" data-path="'+esc(path)+'" '+(!path?"disabled":"")+' aria-label="Open '+esc(title)+'">'+(poster?'<img loading="lazy" decoding="async" src="'+esc(poster)+'" alt="'+esc(title)+' poster">':'<span class="movie-api-placeholder">MOVIESTREAM BD</span>')+'<span class="quality">'+esc(item.quality||item.typeBadge||"HD")+'</span>'+(isHindiDubbed(item)?'<span class="movie-api-language-badge">HINDI DUBBED</span>':"")+'<span class="overlay">▶<small>View details &amp; watch</small></span></button><div class="movie-info"><h3>'+esc(title)+'</h3><p>'+esc(item.language||item.country||item.typeBadge||"")+'</p></div></article>';
