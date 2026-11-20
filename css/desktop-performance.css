@@ -1,0 +1,26 @@
+/* Desktop performance profile: preserve layout while reducing GPU/compositing work. */
+@media (min-width: 761px) {
+  html { scroll-behavior: auto !important; }
+  .ms-featured-hero { box-shadow: 0 8px 24px #0006 !important; }
+  .ms-featured-hero *, .movie-api-row *, .cv-extra-section * {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+  .catalog-category-nav .catalog-chip {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+    transition: border-color .12s ease, background-color .12s ease !important;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.15), 0 2px 8px rgba(0,0,0,.16) !important;
+  }
+  .catalog-category-nav .catalog-chip:hover,
+  .movie-api-card:hover,
+  .cv-extra-card:hover,
+  .ms-suggested-card:hover { transform: none !important; }
+  .movie-api-card, .cv-extra-card, .ms-suggested-card {
+    transition: none !important;
+    box-shadow: none !important;
+  }
+  .movie-api-shelf { scroll-behavior: auto !important; }
+  .cv-search-panel { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+  .cv-extra-card { background: #111722 !important; }
+}
