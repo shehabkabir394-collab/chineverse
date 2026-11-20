@@ -66,20 +66,46 @@
   const downloadLink=$("#movieWatchDownload");if(downloadLink)downloadLink.href="download.html?path="+encodeURIComponent(path)+"&episode="+index;
   $("#movieWatchNow").textContent=ep.label||("Episode "+(ep.number||index+1));
   root.querySelectorAll("[data-watch-episode]").forEach((b,i)=>b.classList.toggle("active",i===index));
-  const languageOptions=audioOptions(sources),audioBox=$("#movieWatchAudioBox");
-  if(audioBox)audioBox.innerHTML=languageOptions||'<span class="muted">Hindi audio is preferred when available; otherwise other available audio is used.</span>';
-  message.textContent="Available quality: "+sources.map(s=>s.quality).join(" · ")+(sources.some(s=>isHindi(s.audioLanguage))?" · Hindi audio available":"");
-  const selectedLang=sources.find(s=>isHindi(s.audioLanguage))?.audioLanguage||sources.find(s=>s.audioLanguage)?.audioLanguage||"auto";
-  const activeSources=sourcesForLanguage(sources,selectedLang);
+  const audioBox=$("#movieWatchAudioBox");
+  const serverGroups=[...new Map(sources.map(s=>[String(s.provider||"Server").trim()||"Server",sources.filter(x=>(String(x.provider||"Server").trim()||"Server")===(String(s.provider||"Server").trim()||"Server"))])).entries()];
+  serverGroups.sort((a,b)=>Number(b[1].some(s=>isHindi(s.audioLanguage)))-Number(a[1].some(s=>isHindi(s.audioLanguage))));
+  let activeProvider=serverGroups[0]?.[0]||"Server";
+  message.textContent=serverGroups.length+" server"+(serverGroups.length===1?"":"s")+" available · Quality: "+sources.map(s=>s.quality).join(" · ")+(sources.some(s=>isHindi(s.audioLanguage))?" · Hindi audio available":"");
+  const renderServerControls=()=>{
+   const group=serverGroups.find(([name])=>name===activeProvider)?.[1]||sources;
+   if(audioBox){
+    const serverHtml='<div class="ms-server-picker"><span class="ms-server-label">STREAM SERVERS</span><div class="ms-server-buttons">'+serverGroups.map(([name,items],i)=>'<button type="button" class="ms-server-button '+(name===activeProvider?'active':'')+'" data-server="'+esc(name)+'"><small>SERVER '+(i+1)+'</small><b>'+esc(name)+'</b><em>'+items.length+' source'+(items.length===1?'':'s')+'</em></button>').join("")+'</div></div>';
+    audioBox.innerHTML=serverHtml+(audioOptions(group)||'<span class="muted">Audio track information not supplied by provider.</span>');
+   }
+   const audioSelect=$("#movieWatchAudio");
+   const chosenLang=group.find(s=>isHindi(s.audioLanguage))?.audioLanguage||group.find(s=>s.audioLanguage)?.audioLanguage||"auto";
+   if(audioSelect&&chosenLang!=="auto")audioSelect.value=chosenLang;
+   const active=sourcesForLanguage(group,audioSelect?.value||chosenLang);
+   if(playerApi)playerApi.setSources(active);
+   if(audioSelect&&playerApi?.wrap){
+    const topRight=playerApi.wrap.querySelector(".cv-top-right");
+    topRight?.querySelector(".cv-audio-choice")?.remove();
+    const label=audioSelect.closest("label")||audioSelect;label.classList.add("cv-audio-choice");topRight?.appendChild(label);
+    audioSelect.addEventListener("change",()=>playerApi?.setSources(sourcesForLanguage(group,audioSelect.value)));
+   }
+  };
+  if(audioBox&&!audioBox.dataset.serverBound){
+   audioBox.dataset.serverBound="1";
+   audioBox.addEventListener("click",event=>{
+    const button=event.target.closest("[data-server]");if(!button)return;
+    activeProvider=button.dataset.server;renderServerControls();
+   });
+  }
+  const initialGroup=serverGroups.find(([name])=>name===activeProvider)?.[1]||sources;
+  const selectedLang=initialGroup.find(s=>isHindi(s.audioLanguage))?.audioLanguage||initialGroup.find(s=>s.audioLanguage)?.audioLanguage||"auto";
+  const activeSources=sourcesForLanguage(initialGroup,selectedLang);
   if(!playerApi){
    playerApi=window.CineVersePlayer?.mount({video,sources:activeSources,subtitles:currentSubtitles,storageKey:"msbd-"+encodeURIComponent(path)+"-"+encodeURIComponent(ep.id||index),title:document.querySelector("#movieWatchRoot .ms-title-copy h1")?.textContent||"Now Playing",backUrl:"./"});
-   const audioSelect=$("#movieWatchAudio");if(audioSelect&&playerApi?.wrap){const audioLabel=audioSelect.closest("label")||audioSelect;audioLabel.classList.add("cv-audio-choice");playerApi.wrap.querySelector(".cv-top-right")?.appendChild(audioLabel);}
    if(!playerApi){video.controls=true;video.src=activeSources[0].url;video.load();video.play().catch(()=>{message.textContent="Tap the video to start playback.";});}
   }else playerApi.setSources(activeSources);
+  renderServerControls();
   playerApi?.setSubtitles?.(currentSubtitles);
   playerApi?.setSuggestions?.(currentSuggestedMarkup);
-  const audioSelect=$("#movieWatchAudio");if(audioSelect&&playerApi?.wrap){const audioLabel=audioSelect.closest("label")||audioSelect;audioLabel.classList.add("cv-audio-choice");playerApi.wrap.querySelector(".cv-top-right")?.appendChild(audioLabel);}
-  if(audioSelect)audioSelect.addEventListener("change",()=>{const chosen=sourcesForLanguage(currentSources,audioSelect.value);playerApi?.setSources(chosen);});
   $("#movieWatchUnmute").hidden=false;
  }
  const clean=s=>String(s||"").toLowerCase().replace(/[_-]+/g," ").replace(/\s+/g," ").trim();
