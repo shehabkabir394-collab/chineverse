@@ -5,7 +5,7 @@ const json = (data, status = 200) =>
     status,
     headers: {
       "Content-Type": "application/json; charset=utf-8",
-      "Cache-Control": "no-store",
+      "Cache-Control": "private, max-age=60, stale-while-revalidate=120",
       "X-Content-Type-Options": "nosniff"
     }
   });
