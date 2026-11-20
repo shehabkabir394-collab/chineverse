@@ -276,6 +276,13 @@
   const allAnime=allLatest(allTitles.filter(item=>isAnime(item)&&!isNigerian(item)));
   let out="";
   const hindiDubbedAll=allLatest(allTitles.filter(item=>isHindiDubbed(item)&&!isNigerian(item)));
+  // Put country/language-specific official shelves before mixed global feeds.
+  const regionalSections=sections.filter(s=>/trending bengali movies|bengali movies|bangla movies|bollywood|south indian|k[- ]?drama|korean drama|anime in hindi|into animeverse|trending c[- ]?drama|thai[- ]?drama|trending india|trending filipino|trending tagalog|western tv|trending western|girls' love|patok na shorttv/i.test(text(s.title)));
+  regionalSections.sort((a,b)=>{
+   const rank=s=>/trending bengali movies|bengali movies|bangla movies/i.test(text(s.title))?0:/bollywood|south indian/i.test(text(s.title))?1:/k[- ]?drama|korean drama/i.test(text(s.title))?2:/anime in hindi/i.test(text(s.title))?3:/trending india/i.test(text(s.title))?4:5;
+   return rank(a)-rank(b);
+  });
+  regionalSections.forEach(s=>out+=section(text(s.title)||"Regional Picks",text(s.badge)||"🌏 COUNTRY & LANGUAGE COLLECTION",sort(s.items||[]).slice(0,18),text(s.categoryPath)||"/type/movies"));
   const topTen=prioritySort((Array.isArray(home._topTen)&&home._topTen.length?home._topTen:trending).filter(item=>!isNigerian(item))).slice(0,10);
   const collections=Array.isArray(home.collections)?home.collections:[];
   const upcoming=[...(Array.isArray(home.upcoming)?home.upcoming:(Array.isArray(home.upcomingReleases)?home.upcomingReleases:[]))].filter(item=>!isNigerian(item)).sort((a,b)=>Number(isHindiDubbed(b))-Number(isHindiDubbed(a))||chronologicalFirst(a,b));
