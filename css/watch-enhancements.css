@@ -348,3 +348,16 @@
 .ms-watch-player .cv-end-grid .ms-suggested-card b{font-size:11px}
 .ms-watch-player .cv-end-replay{margin-top:12px;border:1px solid #ffffff55;border-radius:22px;padding:8px 16px;background:#ffffff18;color:#fff;font-weight:700}
 @media(max-width:600px){.ms-watch-player .cv-end-suggestions{padding:10px}.ms-watch-player .cv-end-heading{font-size:15px;margin-bottom:8px}.ms-watch-player .cv-end-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}.ms-watch-player .cv-end-grid .ms-suggested-card img{max-height:100px}.ms-watch-player .cv-end-grid .ms-suggested-card span{padding:4px}.ms-watch-player .cv-end-grid .ms-suggested-card b{font-size:9px}.ms-watch-player .cv-end-grid .ms-suggested-card small{font-size:8px}}
+
+
+/* Multi-provider stream server picker */
+.ms-audio-box .ms-server-picker{display:grid;gap:9px;margin:10px 0 14px}
+.ms-server-label{font-size:10px;letter-spacing:.16em;font-weight:850;color:#8ebbd2}
+.ms-server-buttons{display:flex;flex-wrap:wrap;gap:9px}
+.ms-server-button{display:grid;gap:3px;min-width:132px;padding:10px 13px;border:1px solid #ffffff20;border-radius:11px;background:linear-gradient(145deg,#111d2d,#0b1422);color:#eef8ff;text-align:left;cursor:pointer;transition:border-color .18s,background .18s,transform .18s}
+.ms-server-button small{font-size:9px;letter-spacing:.12em;color:#8faec4;font-weight:800}
+.ms-server-button b{font-size:13px;overflow-wrap:anywhere}
+.ms-server-button em{font-size:10px;color:#9db5c8;font-style:normal}
+.ms-server-button:hover{transform:translateY(-1px);border-color:#42cfff88}
+.ms-server-button.active{border-color:#25c8ff;background:linear-gradient(145deg,#123b55,#10243a);box-shadow:0 0 0 1px #25c8ff24,0 8px 24px #0004}
+@media(max-width:600px){.ms-server-buttons{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.ms-server-button{min-width:0;padding:9px}.ms-server-button b{font-size:12px}}
