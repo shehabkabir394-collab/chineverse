@@ -24,3 +24,10 @@
   .cv-search-panel { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
   .cv-extra-card { background: #111722 !important; }
 }
+
+/* Desktop: avoid painting the same hero poster twice (background + overlay layer). */
+@media (min-width: 761px) and (pointer: fine) {
+  .ms-hero-slider .ms-hero-backdrop { display: none !important; }
+  .ms-hero-slider, .ms-hero-slider * { animation: none !important; transition: none !important; }
+  .ms-hero-slider .ms-hero-controls button { transition: none !important; }
+}
