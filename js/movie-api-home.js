@@ -55,7 +55,9 @@
  };
  const chronologicalFirst=(a,b)=>{
   const now=Date.now(),ta=releaseTime(a),tb=releaseTime(b),aFuture=ta>now,bFuture=tb>now;
-  if(aFuture!==bFuture)return aFuture?-1:1;
+  // Already released titles come first, newest release first.
+  // Future titles follow in soonest-release order; unknown dates stay last.
+  if(aFuture!==bFuture)return aFuture?1:-1;
   if(aFuture&&bFuture)return ta-tb;
   return tb-ta;
  };
