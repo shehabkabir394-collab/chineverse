@@ -114,14 +114,24 @@
    hero.style.setProperty("--hero-image",'url("'+image.replace(/["\\\\]/g,"")+'")');
    hero.classList.remove("slide-enter");
    hero.innerHTML=(video?'<div class="ms-hero-video-layer" aria-hidden="true"><video class="ms-hero-video" autoplay muted loop playsinline preload="metadata" poster="'+esc(image)+'"><source src="'+esc(video)+'"></video></div>':'<div class="ms-hero-backdrop" aria-hidden="true"></div>')+'<div class="ms-featured-copy"><p class="eyebrow">MOVIESTREAM BD · FEATURED</p><span class="ms-featured-tag">'+esc(item.quality||"HD")+'</span><h1>'+esc(title)+'</h1><p class="ms-featured-meta">'+esc([item.country,item.year,item.sportGenre,item.language].filter(Boolean).join(" · "))+'</p><p class="ms-featured-description">'+esc(text(item.description)||"Discover this featured movie and explore more titles in our collection.")+'</p>'+(path?'<a class="btn primary" href="watch.html?path='+encodeURIComponent(path)+'">▶ Watch now</a>':'<a class="btn primary" href="#movieApiCatalog">Explore collection</a>')+'<a class="ms-featured-more" href="catalog.html">Browse all titles →</a></div><div class="ms-featured-poster"><img src="'+esc(image)+'" fetchpriority="high" decoding="async" alt="'+esc(title)+' poster"></div><div class="ms-hero-controls"><button type="button" class="ms-hero-arrow ms-hero-prev" aria-label="Previous featured movie">‹</button><div class="ms-hero-dots">'+slides.map((_,i)=>'<button type="button" class="ms-hero-dot '+(i===current?'active':'')+'" data-slide="'+i+'" aria-label="Show featured movie '+(i+1)+'"></button>').join("")+'</div><button type="button" class="ms-hero-arrow ms-hero-next" aria-label="Next featured movie">›</button></div><span class="ms-hero-counter">'+(current+1)+' / '+slides.length+'</span>';
-   hero.style.setProperty("--hero-enter-x",(slideDirection*38)+"px");
-   requestAnimationFrame(()=>hero.classList.add("slide-enter"));
+   // Desktop browsers use a static hero to avoid repeated image compositing and layout work.
+   // Keep the swipe/slide animation only on touch-first devices.
+   if(matchMedia("(pointer: coarse)").matches&&!matchMedia("(prefers-reduced-motion: reduce)").matches){
+    hero.style.setProperty("--hero-enter-x",(slideDirection*38)+"px");
+    requestAnimationFrame(()=>hero.classList.add("slide-enter"));
+   }else{
+    hero.classList.remove("slide-enter");
+   }
    hero.querySelector(".ms-hero-prev")?.addEventListener("click",()=>go(current-1));
    hero.querySelector(".ms-hero-next")?.addEventListener("click",()=>go(current+1));
    hero.querySelectorAll("[data-slide]").forEach(button=>button.addEventListener("click",()=>go(Number(button.dataset.slide))));
   };
   const go=index=>{slideDirection=index>=current?1:-1;current=(index+slides.length)%slides.length;hero.style.setProperty("--hero-enter-x",(slideDirection*42)+"px");hero.style.setProperty("--hero-out-x",(-slideDirection*100)+"%");renderSlide();restart();};
-  const restart=()=>{if(timer){clearInterval(timer);timer=null;}if(slides.length>1&&heroVisible&&!document.hidden&&!matchMedia("(prefers-reduced-motion: reduce)").matches)timer=setInterval(()=>go(current+1),8000);};
+  const restart=()=>{
+   if(timer){clearInterval(timer);timer=null;}
+   const touchFirst=matchMedia("(pointer: coarse)").matches;
+   if(touchFirst&&slides.length>1&&heroVisible&&!document.hidden&&!matchMedia("(prefers-reduced-motion: reduce)").matches)timer=setInterval(()=>go(current+1),10000);
+  };
   document.addEventListener("visibilitychange",restart,{passive:true});
   if("IntersectionObserver" in window){const heroObserver=new IntersectionObserver(entries=>{heroVisible=!!entries[0]?.isIntersecting;restart();},{threshold:0.05});heroObserver.observe(hero); }
   hero.addEventListener("pointerdown",e=>{
