@@ -13,12 +13,32 @@
   const fields=[item?.country,item?.originCountry,item?.productionCountry,item?.originalCountry,item?.nationality,item?.region,item?.title,item?.language,item?.originalLanguage,item?.productionCountries,item?.countries,item?.description,...(Array.isArray(item?._sections)?item._sections:[])];
   return fields.some(v=>Array.isArray(v)?v.some(x=>/nigeria|nigerian|nollywood|naija/i.test(String(x?.name||x?.code||x||""))):/nigeria|nigerian|nollywood|naija/i.test(String(v||"")));
  };
- const releaseTime=item=>{
-  const fields=[item?.uploadedAtMs,item?.uploadTimestamp,item?.uploadedAt,item?.uploadTime,item?.uploadDate,item?.upload_date,item?.uploaded_on,item?.createdAtMs,item?.created_at,item?.createdAt,item?.dateAdded,item?.addedAt,item?.added_at,item?.publishedAt,item?.published_at,item?.lastUpdated,item?.updatedAt,item?.updated_at,item?.modifiedAt,item?.releaseTimestamp,item?.releaseDate,item?.release_date,item?.firstAirDate,item?.first_air_date,item?.year];
-  for(const v of fields){if(v==null||v==="")continue;const raw=typeof v==="object"?(v.timestamp||v.date||v.value||""):v;if(typeof raw==="number"||(typeof raw==="string"&&/^\d{9,16}$/.test(raw.trim()))){const n=Number(raw);if(Number.isFinite(n)&&n>0)return n<1e12?n*1000:n;}const d=Date.parse(String(raw));if(Number.isFinite(d))return d;}
+ const dateValue=value=>{
+  if(value==null||value==="")return 0;
+  const raw=typeof value==="object"?(value.timestamp||value.date||value.value||""):value;
+  if(typeof raw==="number"||(typeof raw==="string"&&/^\d{9,16}$/.test(raw.trim()))){
+   const n=Number(raw);
+   if(Number.isFinite(n)&&n>0)return n<1e12?n*1000:n;
+  }
+  const parsed=Date.parse(String(raw));
+  return Number.isFinite(parsed)&&parsed>0?parsed:0;
+ };
+ const uploadTime=item=>{
+  const fields=[item?.uploadedAtMs,item?.uploadTimestamp,item?.uploadedAt,item?.uploadTime,item?.uploadDate,item?.upload_date,item?.uploaded_on,item?.createdAtMs,item?.created_at,item?.createdAt,item?.dateAdded,item?.addedAt,item?.added_at,item?.publishedAt,item?.published_at,item?.lastUpdated,item?.updatedAt,item?.updated_at,item?.modifiedAt];
+  for(const value of fields){const time=dateValue(value);if(time)return time;}
   return 0;
  };
- const latestFirst=(a,b)=>releaseTime(b)-releaseTime(a)||popularity(b)-popularity(a);
+ const releaseTime=item=>{
+  const fields=[item?.releaseTimestamp,item?.releaseTime,item?.release_time,item?.releaseDate,item?.release_date,item?.releaseAt,item?.release_at,item?.firstAirDate,item?.first_air_date,item?.airDate,item?.air_date,item?.premiereDate,item?.premiere_date,item?.theatricalReleaseDate,item?.theatrical_release_date,item?.publishDate,item?.publish_date,item?.date];
+  for(const value of fields){const time=dateValue(value);if(time)return time;}
+  return uploadTime(item);
+ };
+ const latestFirst=(a,b)=>{
+  const now=Date.now(),ta=releaseTime(a),tb=releaseTime(b),aFuture=ta>now,bFuture=tb>now;
+  if(aFuture!==bFuture)return aFuture?1:-1;
+  if(aFuture&&bFuture)return ta-tb;
+  return tb-ta||popularity(b)-popularity(a);
+ };
  const popularity=item=>["views","viewCount","view_count","totalViews","total_views","downloads","downloadCount","popularity","watchCount","watch_count","visits","hits","playCount","play_count","view","watchers"].reduce((best,key)=>Math.max(best,Number(item?.[key])||0),0);
  const isKDramaItem=item=>{
   const textValue=[item?.title,item?.type,item?.typeBadge,item?.category,item?.categoryName,item?.categoryLabel,item?.categoryPath,item?.genre,item?.genres,item?.country,item?.language,...(Array.isArray(item?._sections)?item._sections:[])].flat().map(v=>typeof v==="object"?[v?.name,v?.label,v?.title,v?.path].filter(Boolean).join(" "):String(v||"")).join(" ").toLowerCase();
