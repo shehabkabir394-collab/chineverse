@@ -1,6 +1,9 @@
 const BASE="https://hd-w0l1.onrender.com/api/trial/stream";
 const json=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{"Content-Type":"application/json; charset=utf-8","Cache-Control":"no-store","X-Content-Type-Options":"nosniff"}});
-const getItems=data=>[...(Array.isArray(data?.sources)?data.sources:[]),...(Array.isArray(data?.downloadButtons)?data.downloadButtons:[])];
+const getItems=data=>{
+ const roots=[data,data?.stream,data?.data,data?.result,data?.episode].filter(x=>x&&typeof x==="object");
+ return roots.flatMap(x=>[...(Array.isArray(x.sources)?x.sources:[]),...(Array.isArray(x.downloadButtons)?x.downloadButtons:[]),...(Array.isArray(x.downloads)?x.downloads:[])]);
+};
 const sourceUrl=s=>s?.downloadUrl||s?.download_url||s?.url||s?.link||s?.fileUrl||s?.file_url||s?.downloadLink||s?.download_link||s?.src||"";
 const qualityOf=s=>String(s.quality||s.resolution||s.label||s.name||s.title||"").match(/\d{3,4}/)?.[0]||"";
 export async function onRequestGet({request,env}){
