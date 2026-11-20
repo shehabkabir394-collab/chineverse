@@ -100,7 +100,7 @@
    const item=slides[current],image=posterOf(item),title=text(item.title)||"Featured";
    const path=pathOf(item);
    const connection=navigator.connection||{};
-   const allowHeroVideo=!connection.saveData&&!/2g|slow-2g/i.test(connection.effectiveType||"")&&(!Number(connection.downlink)||Number(connection.downlink)>=3)&&!matchMedia("(max-width:760px)").matches;
+   const allowHeroVideo=false;
    const video=allowHeroVideo?[item.trailerUrl,item.trailer_url,item.teaserUrl,item.teaser_url,item.previewVideoUrl,item.preview_video_url,item.bannerVideoUrl,item.banner_video_url].find(value=>typeof value==="string"&&value.startsWith("https://")):"";
    hero.style.setProperty("--hero-image",'url("'+image.replace(/["\\\\]/g,"")+'")');
    hero.classList.remove("slide-enter");
