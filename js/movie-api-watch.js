@@ -71,7 +71,7 @@
   serverGroups.sort((a,b)=>Number(b[1].some(s=>isHindi(s.audioLanguage)))-Number(a[1].some(s=>isHindi(s.audioLanguage))));
   let activeProvider=serverGroups[0]?.[0]||"Server";
   message.textContent=serverGroups.length+" server"+(serverGroups.length===1?"":"s")+" available · Quality: "+sources.map(s=>s.quality).join(" · ")+(sources.some(s=>isHindi(s.audioLanguage))?" · Hindi audio available":"");
-  const renderServerControls=()=>{
+  const renderServerControls=(applySource=true)=>{
    const group=serverGroups.find(([name])=>name===activeProvider)?.[1]||sources;
    if(audioBox){
     const serverHtml='<div class="ms-server-picker"><span class="ms-server-label">STREAM SERVERS</span><div class="ms-server-buttons">'+serverGroups.map(([name,items],i)=>'<button type="button" class="ms-server-button '+(name===activeProvider?'active':'')+'" data-server="'+esc(name)+'"><small>SERVER '+(i+1)+'</small><b>'+esc(name)+'</b><em>'+items.length+' source'+(items.length===1?'':'s')+'</em></button>').join("")+'</div></div>';
@@ -81,7 +81,7 @@
    const chosenLang=group.find(s=>isHindi(s.audioLanguage))?.audioLanguage||group.find(s=>s.audioLanguage)?.audioLanguage||"auto";
    if(audioSelect&&chosenLang!=="auto")audioSelect.value=chosenLang;
    const active=sourcesForLanguage(group,audioSelect?.value||chosenLang);
-   if(playerApi)playerApi.setSources(active);
+   if(playerApi&&applySource)playerApi.setSources(active);
    if(audioSelect&&playerApi?.wrap){
     const topRight=playerApi.wrap.querySelector(".cv-top-right");
     topRight?.querySelector(".cv-audio-choice")?.remove();
@@ -103,7 +103,7 @@
    playerApi=window.CineVersePlayer?.mount({video,sources:activeSources,subtitles:currentSubtitles,storageKey:"msbd-"+encodeURIComponent(path)+"-"+encodeURIComponent(ep.id||index),title:document.querySelector("#movieWatchRoot .ms-title-copy h1")?.textContent||"Now Playing",backUrl:"./"});
    if(!playerApi){video.controls=true;video.src=activeSources[0].url;video.load();video.play().catch(()=>{message.textContent="Tap the video to start playback.";});}
   }else playerApi.setSources(activeSources);
-  renderServerControls();
+  renderServerControls(false);
   playerApi?.setSubtitles?.(currentSubtitles);
   playerApi?.setSuggestions?.(currentSuggestedMarkup);
   $("#movieWatchUnmute").hidden=false;
