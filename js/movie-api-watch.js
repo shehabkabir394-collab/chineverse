@@ -160,6 +160,44 @@
   grid.innerHTML=list.map(x=>'<a class="ms-suggested-card" href="watch.html?path='+encodeURIComponent(x.path)+'"><img loading="lazy" decoding="async" src="'+esc(safeImage(x.poster||x.previewImage))+'" alt="'+esc(x.title||"")+'"><span><b>'+esc(x.title||"Untitled")+'</b><small>'+esc(x.language||x.typeBadge||"")+'</small></span></a>').join("");
   box.hidden=false;currentSuggestedMarkup=grid.innerHTML;playerApi?.setSuggestions?.(currentSuggestedMarkup);
  }
+
+ async function downloadSeasonZip(items,seasonName){
+  const progress=root.querySelector("#msZipProgress");
+  const setProgress=label=>{if(progress)progress.textContent=label;};
+  if(!items?.length)return;
+  const entries=[],failures=[],safeName=s=>String(s||"").replace(/[\\/:*?"<>|]/g," ").replace(/\s+/g," ").trim().slice(0,100)||"Episode";
+  const folder=safeName(seasonName),seasonFallback=items[0]?.ep?.seasonNumber??items[0]?.ep?.season??1;
+  for(let n=0;n<items.length;n++){
+   const {ep,index}=items[n],number=String(ep.number||ep.episodeNumber||index+1).padStart(2,"0");
+   setProgress("Downloading "+(n+1)+"/"+items.length+" episodes…");
+   try{
+    const query=new URLSearchParams({se:String(Number(ep.seasonNumber??ep.season??seasonFallback)||0),ep:String(Number(ep.number??ep.episodeNumber??(index+1))||index+1),quality:"best"});
+    const sid=watchDetail?.subjectId||watchDetail?.subject_id||watchDetail?.commentSubjectId||watchDetail?.comment_subject_id||watchDetail?.contentId||watchDetail?.id||watchDetail?._id;
+    if(sid!=null)query.set("subjectId",String(sid));if(watchDetail?.title)query.set("title",String(watchDetail.title));
+    const response=await fetch("/api/movie-api/download-file?"+query.toString(),{cache:"no-store"});
+    if(!response.ok)throw new Error("HTTP "+response.status);
+    const blob=await response.blob();if(!blob.size)throw new Error("Empty file");
+    entries.push({name:folder+"/E"+number+" - "+safeName(ep.title||ep.label||("Episode "+number))+".mp4",data:new Uint8Array(await blob.arrayBuffer())});
+   }catch(error){failures.push("Episode "+number+": "+(error.message||"Unavailable"));}
+  }
+  if(!entries.length){setProgress("No downloadable MP4 files were available for this season.");return;}
+  const table=downloadSeasonZip.crcTable||(downloadSeasonZip.crcTable=(()=>{const t=new Uint32Array(256);for(let n=0;n<256;n++){let x=n;for(let k=0;k<8;k++)x=(x&1)?(0xedb88320^(x>>>1)):(x>>>1);t[n]=x>>>0;}return t;})());
+  const crc32=data=>{let x=0xffffffff;for(const b of data)x=table[(x^b)&255]^(x>>>8);return (x^0xffffffff)>>>0;};
+  const enc=new TextEncoder(),locals=[],centrals=[];let offset=0;
+  for(const entry of entries){
+   const name=enc.encode(entry.name),data=entry.data,crc=crc32(data),local=new Uint8Array(30+name.length),lv=new DataView(local.buffer);
+   lv.setUint32(0,0x04034b50,true);lv.setUint16(4,20,true);lv.setUint16(6,0x0800,true);lv.setUint32(14,crc,true);lv.setUint32(18,data.length,true);lv.setUint32(22,data.length,true);lv.setUint16(26,name.length,true);local.set(name,30);locals.push(local,data);
+   const central=new Uint8Array(46+name.length),cv=new DataView(central.buffer);
+   cv.setUint32(0,0x02014b50,true);cv.setUint16(4,20,true);cv.setUint16(6,20,true);cv.setUint16(8,0x0800,true);cv.setUint32(16,crc,true);cv.setUint32(20,data.length,true);cv.setUint32(24,data.length,true);cv.setUint16(28,name.length,true);cv.setUint32(42,offset,true);central.set(name,46);centrals.push(central);offset+=local.length+data.length;
+  }
+  const centralSize=centrals.reduce((n,x)=>n+x.length,0),end=new Uint8Array(22),ev=new DataView(end.buffer);
+  ev.setUint32(0,0x06054b50,true);ev.setUint16(8,entries.length,true);ev.setUint16(10,entries.length,true);ev.setUint32(12,centralSize,true);ev.setUint32(16,offset,true);
+  const zip=new Blob([...locals,...centrals,end],{type:"application/zip"}),url=URL.createObjectURL(zip),a=document.createElement("a");
+  a.href=url;a.download=safeName((watchDetail?.title||"Series")+" - "+folder)+".zip";document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);
+  setProgress("ZIP ready: "+entries.length+" episode(s)"+(failures.length?" · "+failures.length+" unavailable":"")+".");
+  if(failures.length)alert("ZIP তৈরি হয়েছে, তবে কিছু Episode পাওয়া যায়নি:\n"+failures.join("\n"));
+ }
+
  async function load(){
   if(!/^\/mb\/[a-zA-Z0-9_./-]{1,300}$/.test(path)){status.textContent="Invalid title link.";return;}
   try{
@@ -171,7 +209,7 @@
    const listTitle=isDrama?"Episodes":"Available Versions";
    const seasonKey=ep=>String(ep.seasonName||ep.seasonTitle||(ep.seasonNumber!=null?"Season "+ep.seasonNumber:(ep.season!=null?(typeof ep.season==="number"?"Season "+ep.season:String(ep.season)):"Season 1")));
    const seasonMap=new Map();episodes.forEach((ep,i)=>{const key=seasonKey(ep);if(!seasonMap.has(key))seasonMap.set(key,[]);seasonMap.get(key).push({ep,i});});
-   const episodeRows=[...seasonMap.entries()].map(([season,items],si)=>'<section class="ms-season-card"><button class="ms-season-heading" type="button" aria-expanded="'+(si===0?"true":"false")+'"><span class="ms-season-name">'+esc(season)+'</span><small>'+items.length+' Episodes</small><b class="ms-season-chevron">⌄</b></button><div class="ms-season-episodes ms-episode-strip" '+(si===0?"":"hidden")+'>'+items.map(({ep,i})=>{const number=String(ep.number||i+1).padStart(2,"0"),image=safeImage(ep.thumbnail||ep.image||ep.poster||ep.cover||poster),label=ep.label||("Episode "+(ep.number||i+1)),quality=getSources(ep).map(s=>s.quality).join(" · ");return '<button class="movie-api-episode ms-episode-button" type="button" data-watch-episode="'+i+'" aria-label="Play '+esc(label)+'"><span class="ms-episode-thumb">'+(image?'<img loading="lazy" decoding="async" src="'+esc(image)+'" alt="">':'<span class="ms-episode-thumb-fallback">EP</span>')+'<span class="ms-episode-play">▶</span><span class="ms-episode-number">EP '+number+'</span></span><span class="ms-episode-info"><b>'+esc(label)+'</b><small>'+(quality?esc(quality):esc(ep.kind||"Episode "+number))+'</small></span></button>';}).join("")+'</div></section>').join("")||'<p class="muted">No episodes or video versions were returned.</p>';
+   const episodeRows=[...seasonMap.entries()].map(([season,items],si)=>'<section class="ms-season-card"><button class="ms-season-heading" type="button" aria-expanded="'+(si===0?"true":"false")+'"><span class="ms-season-name">'+esc(season)+'</span><small>'+items.length+' Episodes</small><button type="button" class="ms-season-download" data-download-season="'+si+'">⬇ Download Season ZIP</button><b class="ms-season-chevron">⌄</b></button><div class="ms-season-episodes ms-episode-strip" '+(si===0?"":"hidden")+'>'+items.map(({ep,i})=>{const number=String(ep.number||i+1).padStart(2,"0"),image=safeImage(ep.thumbnail||ep.image||ep.poster||ep.cover||poster),label=ep.label||("Episode "+(ep.number||i+1)),quality=getSources(ep).map(s=>s.quality).join(" · ");return '<button class="movie-api-episode ms-episode-button" type="button" data-watch-episode="'+i+'" aria-label="Play '+esc(label)+'"><span class="ms-episode-thumb">'+(image?'<img loading="lazy" decoding="async" src="'+esc(image)+'" alt="">':'<span class="ms-episode-thumb-fallback">EP</span>')+'<span class="ms-episode-play">▶</span><span class="ms-episode-number">EP '+number+'</span></span><span class="ms-episode-info"><b>'+esc(label)+'</b><small>'+(quality?esc(quality):esc(ep.kind||"Episode "+number))+'</small></span></button>';}).join("")+'</div></section>').join("")||'<p class="muted">No episodes or video versions were returned.</p>';
    const dubLabels=currentDubs.map(x=>getLang(x)).filter(Boolean);
    const hindiDub=dubLabels.some(isHindi)||episodes.some(e=>isHindi(getLang(e))||getSources(e).some(s=>isHindi(s.audioLanguage)));
    document.title=(d.title||"Watch")+" — MovieStream BD";
@@ -194,7 +232,7 @@
    }else $("#cvCast").innerHTML='<h2>Cast &amp; Crew</h2><p class="muted">No cast details supplied for this title.</p>';
 
    loadSuggested(d).catch(e=>console.warn("Suggested titles unavailable",e));
-   root.addEventListener("click",e=>{const season=e.target.closest(".ms-season-heading");if(season){const panel=season.nextElementSibling,open=season.getAttribute("aria-expanded")==="true";season.setAttribute("aria-expanded",String(!open));panel.hidden=open;return;}const b=e.target.closest("[data-watch-episode]");if(b)start(Number(b.dataset.watchEpisode));});
+   root.addEventListener("click",e=>{const zipButton=e.target.closest("[data-download-season]");if(zipButton){e.preventDefault();e.stopPropagation();const group=[...seasonMap.values()][Number(zipButton.dataset.downloadSeason)];if(group?.length){zipButton.disabled=true;zipButton.textContent="Preparing ZIP…";downloadSeasonZip(group,seasonKey(group[0].ep)).finally(()=>{zipButton.disabled=false;zipButton.textContent="⬇ Download Season ZIP";});}return;}const season=e.target.closest(".ms-season-heading");if(season){const panel=season.nextElementSibling,open=season.getAttribute("aria-expanded")==="true";season.setAttribute("aria-expanded",String(!open));panel.hidden=open;return;}const b=e.target.closest("[data-watch-episode]");if(b)start(Number(b.dataset.watchEpisode));});
    $("#movieWatchUnmute").addEventListener("click",()=>{const v=$("#movieWatchVideo");v.muted=false;v.volume=1;$("#movieWatchUnmute").textContent="Sound On";});
    if(episodes.length){
     const hindiIndex=episodes.findIndex(ep=>isHindi(getLang(ep))||getSources(ep).some(s=>isHindi(s.audioLanguage)));
