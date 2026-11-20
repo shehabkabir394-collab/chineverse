@@ -282,7 +282,6 @@
    const rank=s=>/trending bengali movies|bengali movies|bangla movies/i.test(text(s.title))?0:/bollywood|south indian/i.test(text(s.title))?1:/k[- ]?drama|korean drama/i.test(text(s.title))?2:/anime in hindi/i.test(text(s.title))?3:/trending india/i.test(text(s.title))?4:5;
    return rank(a)-rank(b);
   });
-  regionalSections.forEach(s=>out+=section(text(s.title)||"Regional Picks",text(s.badge)||"🌏 COUNTRY & LANGUAGE COLLECTION",sort(s.items||[]).slice(0,18),text(s.categoryPath)||"/type/movies"));
   const topTen=prioritySort((Array.isArray(home._topTen)&&home._topTen.length?home._topTen:trending).filter(item=>!isNigerian(item))).slice(0,10);
   const collections=Array.isArray(home.collections)?home.collections:[];
   const upcoming=[...(Array.isArray(home.upcoming)?home.upcoming:(Array.isArray(home.upcomingReleases)?home.upcomingReleases:[]))].filter(item=>!isNigerian(item)).sort((a,b)=>Number(isHindiDubbed(b))-Number(isHindiDubbed(a))||chronologicalFirst(a,b));
@@ -295,9 +294,15 @@
   const dramaSeries=allLatest(allTitles.filter(item=>isDrama(item)&&!isAnime(item)&&!isNigerian(item)));
   const movieTitles=allLatest(allTitles.filter(item=>isMovie(item)&&!isAnime(item)&&!isNigerian(item)));
   if(hindiDubbedAll.length)out+=section("Hindi Dubbed — Movies & Dramas","🇮🇳 HINDI AUDIO · PRIORITY PICKS · NEWEST FIRST",hindiDubbedAll.slice(0,24),"/language/hindi-dubbed");
-  if(topTen.length)out+=section("Trending Now","🔥 MOST WATCHED THIS WEEK · POPULAR PICKS",topTen,"/mostwatch/7d");
+  // Keep all trending movies and dramas together; Hindi audio is always ranked first,
+  // then release/upload timestamp determines the order (newest first).
+  const trendingMoviesDramas=prioritySort([...new Map([...trending,...(Array.isArray(home._topTen)?home._topTen:[]),...allTitles].filter(item=>!isNigerian(item)&&(isMovie(item)||isDrama(item))).map(item=>[pathOf(item)||String(item.id||item.title||""),item]).filter(([key])=>key)).values()]).slice(0,24);
+  if(newReleases.length)out+=section("New Releases — Movies & Dramas","🆕 HINDI DUBBED FIRST · RELEASE / UPLOAD TIME · NEWEST FIRST",newReleases.slice(0,24),"/new");
+  if(trendingMoviesDramas.length)out+=section("Trending Movies & Dramas","🔥 HINDI DUBBED FIRST · THEN NEWEST RELEASES",trendingMoviesDramas,"/mostwatch/7d");
+  if(topTen.length)out+=section("Trending Now","🔥 MOST WATCHED THIS WEEK · HINDI DUBBED FIRST",topTen,"/mostwatch/7d");
   out+=section("All Movies","🎬 HINDI DUBBED FIRST · ALL LANGUAGES · NEWEST FIRST",allMovies.slice(0,24),"/type/movies");
   out+=section("Recently Updated","🆕 LATEST MOVIES, DRAMAS & EPISODES · NEWEST FIRST",newReleases.slice(0,24),"/new");
+  regionalSections.forEach(s=>out+=section(text(s.title)||"Regional Picks",text(s.badge)||"🌏 COUNTRY & LANGUAGE COLLECTION",sort(s.items||[]).slice(0,18),text(s.categoryPath)||"/type/movies"));
   const hindiDubbedKdramas=allLatest(allKdramas);
   out+=section("K-Drama Hindi Dubbed","🇰🇷 HINDI DUBBED K-DRAMAS · LATEST UPDATES FIRST",hindiDubbedKdramas.slice(0,24),"/language/korean");
   if(upcoming.length)out+=section("Upcoming / Release Soon","🎬 COMING SOON",upcoming.slice(0,12),"/upcoming");
