@@ -79,7 +79,7 @@
   });
   if(!items.length)return "";
   const mobile=window.matchMedia("(max-width:760px)").matches;
-  const visible=items.slice(0,mobile?8:12);
+  const visible=items.slice(0,mobile?8:9);
   visible.forEach(item=>homeRenderedKeys.add(pathOf(item)||String(item.id||item.title||"").trim().toLowerCase()));
   return '<section class="movie-api-row"><div class="section-head"><div><p class="eyebrow">'+esc(badgeText)+'</p><h2>'+esc(title)+'</h2></div><a class="btn ghost" href="catalog.html?category='+encodeURIComponent(target||"/type/movies")+'">View all →</a></div><div class="movie-api-shelf">'+visible.map(card).join("")+'</div></section>';
  }
@@ -348,25 +348,33 @@
  $("#movieApiRefresh")?.addEventListener("click",load);
  async function load(){
   status.textContent="Loading MovieStream BD…";
-  root.innerHTML="";
+  if(!home)root.innerHTML="";
+  const hindiUrl="/api/movie-api/catalog?path="+encodeURIComponent("/language/hindi-dubbed")+"&page=1";
   try{
-   const r=await fetch("/api/movie-api/home");
+   // Fetch both feeds together, but render the main homepage as soon as home data arrives.
+   const homeRequest=fetch("/api/movie-api/home",{cache:"default"});
+   const hindiRequest=fetch(hindiUrl,{cache:"default"}).then(async hr=>{
+    if(!hr.ok)return null;
+    const hd=await hr.json();
+    return hd.ok===true&&Array.isArray(hd.items)?hd.items.map(item=>({...item,_hindiCatalog:true,_sections:[...(item._sections||[]),"Hindi Dubbed Catalog"]})):null;
+   }).catch(()=>null);
+   const r=await homeRequest;
    const d=await r.json();
    if(!r.ok||d.ok!==true)throw new Error(d.error||"Catalog unavailable");
    home=d;
-   // Keep one homepage snapshot and make only one dedicated Hindi-dubbed request.
-   // Parallel category feeds could return different geo-selected catalogs and cause
-   // the visible region/content to appear to switch after the first paint.
-   try{
-    const hr=await fetch("/api/movie-api/catalog?path="+encodeURIComponent("/language/hindi-dubbed")+"&page=1");
-    const hd=await hr.json();
-    if(hr.ok&&hd.ok===true&&Array.isArray(hd.items))home._extraHindi=hd.items.map(item=>({...item,_hindiCatalog:true,_sections:[...(item._sections||[]),"Hindi Dubbed Catalog"]}));
-   }catch{}
-   const basePool=[...(Array.isArray(home.sections)?home.sections.flatMap(section=>(Array.isArray(section.items)?section.items:[])):[]),...(Array.isArray(home.trending)?home.trending:[]),...(Array.isArray(home._extraHindi)?home._extraHindi:[])];
+   const basePool=[...(Array.isArray(home.sections)?home.sections.flatMap(section=>(Array.isArray(section.items)?section.items:[])):[]),...(Array.isArray(home.trending)?home.trending:[])];
    const keys=new Set();
    hindiCatalog=basePool.filter(item=>{const key=String(item.id||item.path||item.title||"").trim();if(!key||keys.has(key))return false;keys.add(key);return true;});
    render();
-  }catch(e){status.textContent="Catalog could not load: "+(e.message||"Unknown error");}
+   // Add the Hindi-dubbed feed after the primary catalog is visible.
+   const hindiItems=await hindiRequest;
+   if(hindiItems?.length){
+    home._extraHindi=hindiItems;
+    const enriched=[...basePool,...hindiItems],enrichedKeys=new Set();
+    hindiCatalog=enriched.filter(item=>{const key=String(item.id||item.path||item.title||"").trim();if(!key||enrichedKeys.has(key))return false;enrichedKeys.add(key);return true;});
+    render();
+   }
+  }catch(e){if(!home)status.textContent="Catalog could not load: "+(e.message||"Unknown error");}
  }
  load();
 })();
