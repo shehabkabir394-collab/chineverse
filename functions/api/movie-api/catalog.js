@@ -5,7 +5,7 @@ const json = (data, status = 200) =>
     status,
     headers: {
       "Content-Type": "application/json; charset=utf-8",
-      "Cache-Control": "no-store",
+      "Cache-Control": "private, max-age=60, stale-while-revalidate=120",
       "X-Content-Type-Options": "nosniff"
     }
   });
@@ -27,7 +27,7 @@ const path = (incoming.searchParams.get("path") || "").trim().slice(0, 300);
     const body = await response.text();
     const headers = new Headers({
       "Content-Type": response.headers.get("Content-Type") || "application/json; charset=utf-8",
-      "Cache-Control": "no-store",
+      "Cache-Control": "private, max-age=60, stale-while-revalidate=120",
       "X-Content-Type-Options": "nosniff"
     });
     const result = new Response(body, { status: response.status, headers });
