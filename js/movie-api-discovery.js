@@ -85,5 +85,5 @@
    cats.forEach(c=>{const label=titleOf(c),path=String(c.path||c.categoryPath||c.slug||"");if(!label||existing.has(label.toLowerCase()))return;const a=document.createElement("a");a.className="catalog-chip";a.textContent=label;a.href="catalog.html?category="+encodeURIComponent(path.startsWith("/")?path:"/"+path);nav.appendChild(a);});
   }catch{}
  };
- loadExtras();loadCategories();
+ // Defer optional discovery feeds; the homepage already has its own category data.
 })();
