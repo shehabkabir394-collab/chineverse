@@ -63,7 +63,12 @@
  };
  const isPinned=item=>item?.pinned===true||item?.isPinned===true||item?.featured===true||item?.is_featured===true||/^(1|true|yes)$/i.test(String(item?.pin||item?.is_pinned||""));
  const popularity=item=>["views","viewCount","view_count","totalViews","total_views","downloads","downloadCount","popularity","watchCount","watch_count","visits","hits"].reduce((best,key)=>Math.max(best,Number(item?.[key])||0),0);
- const recentFirst=(a,b)=>chronologicalFirst(a,b)||Number(isHindiDubbed(b))-Number(isHindiDubbed(a));
+ const recentFirst=(a,b)=>{
+  // Latest Upload shelves must follow actual upload timestamps, not original release dates.
+  const ta=uploadTime(a)||releaseTime(a),tb=uploadTime(b)||releaseTime(b);
+  if(ta!==tb)return tb-ta;
+  return Number(isHindiDubbed(b))-Number(isHindiDubbed(a));
+ };
  const isKDrama=item=>/k[- ]?drama|korean drama|south korea/i.test([item?.title,item?.type,item?.typeBadge,item?.category,item?.categoryName,item?.genre,item?.genres,item?.country,...(Array.isArray(item?._sections)?item._sections:[])].flat().map(v=>typeof v==="object"?[v?.name,v?.label,v?.title].filter(Boolean).join(" "):String(v||"")).join(" "));
  const popularFirst=(a,b)=>chronologicalFirst(a,b)||Number(isHindiDubbed(b))-Number(isHindiDubbed(a))||Number(isPinned(b))-Number(isPinned(a))||popularity(b)-popularity(a);
  const sort=items=>[...items].sort((a,b)=>chronologicalFirst(a,b)||Number(isHindiDubbed(b))-Number(isHindiDubbed(a)));
