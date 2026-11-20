@@ -98,7 +98,7 @@
   const allSlides=[...uniqueSlides.values()].filter(item=>!isNigerianItem(item)&&posterOf(item));
   const slides=allSlides.filter(item=>!item.mediaType&&!item.contentType&&!item.type&&!item.typeBadge||/movie|film/i.test(String(item.mediaType||item.contentType||item.type||item.typeBadge))).sort(chronologicalFirst).slice(0,10);
   if(!slides.length){hero.classList.remove("ms-featured-hero","ms-hero-slider");hero.innerHTML='<div class="hero-copy"><p class="eyebrow">MOVIESTREAM BD · MOVIES & DRAMAS</p><h1>Your next <em>favorite</em><br>story starts here.</h1><p>Explore the latest movies and dramas from our catalog.</p><a class="btn primary" href="#movieApiCatalog">▶ Explore Collection</a></div>';return;}
-  let current=0,timer=null,startX=0,startY=0,dragging=false,slideDirection=1;
+  let current=0,timer=null,startX=0,startY=0,startAt=0,dragging=false,slideDirection=1;
   hero.classList.add("ms-featured-hero","ms-hero-slider");
   const renderSlide=()=>{
    const item=slides[current],image=posterOf(item),title=text(item.title)||"Featured";
@@ -109,6 +109,7 @@
    hero.style.setProperty("--hero-image",'url("'+image.replace(/["\\\\]/g,"")+'")');
    hero.classList.remove("slide-enter");
    hero.innerHTML=(video?'<div class="ms-hero-video-layer" aria-hidden="true"><video class="ms-hero-video" autoplay muted loop playsinline preload="metadata" poster="'+esc(image)+'"><source src="'+esc(video)+'"></video></div>':'<div class="ms-hero-backdrop" aria-hidden="true"></div>')+'<div class="ms-featured-copy"><p class="eyebrow">MOVIESTREAM BD · FEATURED</p><span class="ms-featured-tag">'+esc(item.quality||"HD")+'</span><h1>'+esc(title)+'</h1><p class="ms-featured-meta">'+esc([item.country,item.year,item.sportGenre,item.language].filter(Boolean).join(" · "))+'</p><p class="ms-featured-description">'+esc(text(item.description)||"Discover this featured movie and explore more titles in our collection.")+'</p>'+(path?'<a class="btn primary" href="watch.html?path='+encodeURIComponent(path)+'">▶ Watch now</a>':'<a class="btn primary" href="#movieApiCatalog">Explore collection</a>')+'<a class="ms-featured-more" href="catalog.html">Browse all titles →</a></div><div class="ms-featured-poster"><img src="'+esc(image)+'" fetchpriority="high" decoding="async" alt="'+esc(title)+' poster"></div><div class="ms-hero-controls"><button type="button" class="ms-hero-arrow ms-hero-prev" aria-label="Previous featured movie">‹</button><div class="ms-hero-dots">'+slides.map((_,i)=>'<button type="button" class="ms-hero-dot '+(i===current?'active':'')+'" data-slide="'+i+'" aria-label="Show featured movie '+(i+1)+'"></button>').join("")+'</div><button type="button" class="ms-hero-arrow ms-hero-next" aria-label="Next featured movie">›</button></div><span class="ms-hero-counter">'+(current+1)+' / '+slides.length+'</span>';
+   hero.style.setProperty("--hero-enter-x",(slideDirection*38)+"px");
    requestAnimationFrame(()=>hero.classList.add("slide-enter"));
    hero.querySelector(".ms-hero-prev")?.addEventListener("click",()=>go(current-1));
    hero.querySelector(".ms-hero-next")?.addEventListener("click",()=>go(current+1));
@@ -118,16 +119,19 @@
   const restart=()=>{if(timer){clearInterval(timer);timer=null;}if(slides.length>1&&!matchMedia("(prefers-reduced-motion: reduce)").matches)timer=setInterval(()=>go(current+1),6500);};
   hero.addEventListener("pointerdown",e=>{
    if(e.pointerType!=="touch"||e.target.closest("a,button"))return;
-   startX=e.clientX;startY=e.clientY;dragging=true;
+   startX=e.clientX;startY=e.clientY;startAt=performance.now();dragging=true;
    try{hero.setPointerCapture(e.pointerId);}catch{}
    hero.classList.add("is-swiping");
-   if(timer)clearInterval(timer);
+   if(timer){clearInterval(timer);timer=null;}
   },{passive:true});
   hero.addEventListener("pointermove",e=>{
    if(!dragging||e.pointerType!=="touch")return;
    const dx=e.clientX-startX,dy=e.clientY-startY;
    if(Math.abs(dx)>Math.abs(dy)*1.15&&Math.abs(dx)>5){
+    const progress=Math.min(1,Math.abs(dx)/Math.max(180,hero.clientWidth*.72));
     hero.style.setProperty("--swipe-x",dx+"px");
+    hero.style.setProperty("--swipe-tilt",(Math.sign(dx)*progress*9)+"deg");
+    hero.style.setProperty("--swipe-depth",(progress*18)+"px");
     hero.classList.toggle("swipe-left",dx<0);
     hero.classList.toggle("swipe-right",dx>0);
    }
@@ -135,14 +139,16 @@
   const finishSwipe=e=>{
    if(!dragging)return;
    const dx=e.clientX-startX,dy=e.clientY-startY;
-   dragging=false;startX=0;startY=0;
+   const elapsed=Math.max(1,performance.now()-startAt),velocity=Math.abs(dx)/elapsed;
+   const shouldChange=Math.abs(dx)>65||Math.abs(dx)>34&&velocity>.48;
+   dragging=false;startX=0;startY=0;startAt=0;
    hero.classList.remove("is-swiping","swipe-left","swipe-right");
-   hero.style.removeProperty("--swipe-x");
-   if(Math.abs(dx)>65&&Math.abs(dx)>Math.abs(dy)*1.15)go(current+(dx<0?1:-1));
+   hero.style.removeProperty("--swipe-x");hero.style.removeProperty("--swipe-tilt");hero.style.removeProperty("--swipe-depth");
+   if(shouldChange&&Math.abs(dx)>Math.abs(dy)*1.12)go(current+(dx<0?1:-1));
    else restart();
   };
   hero.addEventListener("pointerup",finishSwipe,{passive:true});
-  hero.addEventListener("pointercancel",()=>{dragging=false;startX=0;startY=0;hero.classList.remove("is-swiping","swipe-left","swipe-right");hero.style.removeProperty("--swipe-x");restart();},{passive:true});
+  hero.addEventListener("pointercancel",()=>{dragging=false;startX=0;startY=0;hero.classList.remove("is-swiping","swipe-left","swipe-right");hero.style.removeProperty("--swipe-x");hero.style.removeProperty("--swipe-tilt");hero.style.removeProperty("--swipe-depth");restart();},{passive:true});
   hero.addEventListener("mouseenter",()=>{if(timer)clearInterval(timer);});
   hero.addEventListener("mouseleave",restart);
   renderSlide();restart();
