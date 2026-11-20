@@ -18,13 +18,13 @@
   for(const v of fields){if(v==null||v==="")continue;const raw=typeof v==="object"?(v.timestamp||v.date||v.value||""):v;if(typeof raw==="number"||(typeof raw==="string"&&/^\d{9,16}$/.test(raw.trim()))){const n=Number(raw);if(Number.isFinite(n)&&n>0)return n<1e12?n*1000:n;}const d=Date.parse(String(raw));if(Number.isFinite(d))return d;}
   return 0;
  };
- const latestFirst=(a,b)=>releaseTime(b)-releaseTime(a);
+ const latestFirst=(a,b)=>releaseTime(b)-releaseTime(a)||popularity(b)-popularity(a);
  const popularity=item=>["views","viewCount","view_count","totalViews","total_views","downloads","downloadCount","popularity","watchCount","watch_count","visits","hits","playCount","play_count","view","watchers"].reduce((best,key)=>Math.max(best,Number(item?.[key])||0),0);
  const isKDramaItem=item=>{
   const textValue=[item?.title,item?.type,item?.typeBadge,item?.category,item?.categoryName,item?.categoryLabel,item?.categoryPath,item?.genre,item?.genres,item?.country,item?.language,...(Array.isArray(item?._sections)?item._sections:[])].flat().map(v=>typeof v==="object"?[v?.name,v?.label,v?.title,v?.path].filter(Boolean).join(" "):String(v||"")).join(" ").toLowerCase();
   return /k[- ]?drama|korean drama|south korea|korea drama/.test(textValue);
  };
- const categoryPriority=(a,b)=>Number(isHindiDubbed(b))-Number(isHindiDubbed(a))||latestFirst(a,b)||popularity(b)-popularity(a)||Number(isKDramaItem(b))-Number(isKDramaItem(a));
+ const categoryPriority=(a,b)=>latestFirst(a,b)||Number(isHindiDubbed(b))-Number(isHindiDubbed(a))||Number(isKDramaItem(b))-Number(isKDramaItem(a));
  const vals=item=>{
   const out=[];
   ["categoryPath","category","categoryName","categoryLabel","categorySlug","type","typeBadge","genre","language","country"].forEach(k=>{
@@ -47,7 +47,8 @@
   };
   const audioFields=[item?.audioLanguage,item?.audioLanguages,item?.dubLanguage,item?.dubLanguages,item?.dubbedLanguages,item?.availableAudio,item?.availableLanguages,item?.languages,item?.audio,item?.audioTrack,item?.audioTracks,item?.dubbing,item?.audioInfo,item?.audioOptions];
   const sections=(item?._sections||[]).map(norm);
-  return exact(item?.language)||audioFields.some(hasHindi)||sections.some(s=>s.includes("hindi dubbed")||s==="south indian & hindi dubbed"||s==="anime in hindi");
+  const explicitFlag=item?.isHindiDubbed===true||item?.hindiDubbed===true||item?.is_hindi_dubbed===true||item?.dubbed===true&&audioFields.some(hasHindi);
+  return explicitFlag||audioFields.some(hasHindi)||sections.some(s=>s.includes("hindi dubbed")||s==="south indian & hindi dubbed"||s==="anime in hindi");
  };
  const badge=item=>isHindiDubbed(item)?"HINDI DUBBED":"";
  const pathOf=item=>{
