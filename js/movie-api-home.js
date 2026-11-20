@@ -49,7 +49,7 @@
   return 0;
  };
  const releaseTime=item=>{
-  const fields=[item?.releaseTimestamp,item?.releaseDate,item?.release_date,item?.releaseAt,item?.release_at,item?.firstAirDate,item?.first_air_date,item?.airDate,item?.air_date,item?.premiereDate,item?.premiere_date,item?.theatricalReleaseDate,item?.theatrical_release_date,item?.publishDate,item?.publish_date,item?.date];
+  const fields=[item?.releaseTimestamp,item?.releaseTime,item?.release_time,item?.releaseDate,item?.release_date,item?.releaseAt,item?.release_at,item?.firstAirDate,item?.first_air_date,item?.airDate,item?.air_date,item?.premiereDate,item?.premiere_date,item?.theatricalReleaseDate,item?.theatrical_release_date,item?.publishDate,item?.publish_date,item?.date];
   for(const value of fields){const time=dateValue(value);if(time)return time;}
   return uploadTime(item);
  };
