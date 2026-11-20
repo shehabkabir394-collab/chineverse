@@ -1,0 +1,89 @@
+/* CineVerse universal performance layer — preserve layout, reduce paint/compositing cost. */
+:root { scroll-behavior: auto; }
+html { scroll-behavior: auto !important; }
+.movie-api-row,
+.cv-extra-section,
+#ftpDramas,
+#catalog,
+#movieCatalog {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 440px;
+}
+.movie-api-card,
+.cv-extra-card {
+  contain: layout style;
+}
+.movie-api-card img,
+.cv-extra-card img,
+.ms-suggested-card img {
+  display: block;
+  aspect-ratio: 2 / 3;
+  object-fit: cover;
+}
+.movie-api-shelf {
+  scroll-behavior: auto !important;
+  -webkit-overflow-scrolling: touch;
+}
+.ms-hero-slider {
+  contain: layout paint;
+}
+.ms-hero-slider .ms-hero-backdrop {
+  filter: none !important;
+  transform: none !important;
+}
+.ms-hero-slider .ms-featured-poster img {
+  box-shadow: 0 8px 22px #0008 !important;
+}
+.ms-hero-slider .ms-featured-copy,
+.ms-hero-slider .ms-featured-poster,
+.ms-hero-slider .ms-hero-backdrop {
+  will-change: auto !important;
+}
+@media (max-width: 900px), (pointer: coarse) {
+  .topbar,
+  .topbar .actions,
+  .ms-hero-arrow,
+  .ms-hero-counter,
+  .cv-search-panel {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+  .movie-api-card,
+  .cv-extra-card,
+  .ms-suggested-card,
+  .catalog-category-nav .catalog-chip {
+    transition: none !important;
+    box-shadow: none !important;
+  }
+  .movie-api-card:hover,
+  .cv-extra-card:hover,
+  .ms-suggested-card:hover,
+  .movie-api-card:hover img {
+    transform: none !important;
+  }
+  .ms-hero-slider .ms-hero-backdrop {
+    background-attachment: scroll !important;
+  }
+}
+@media (max-width: 760px) {
+  .movie-api-row,
+  .cv-extra-section,
+  #ftpDramas,
+  #catalog,
+  #movieCatalog {
+    contain-intrinsic-size: auto 360px;
+  }
+  .movie-api-card,
+  .cv-extra-card {
+    content-visibility: auto;
+    contain-intrinsic-size: 150px 260px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}
