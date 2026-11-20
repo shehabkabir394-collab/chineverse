@@ -1,0 +1,16 @@
+/* Gallery-like hero swipe: fluid finger tracking, depth and directional transitions */
+.ms-hero-slider{--swipe-x:0px;--swipe-tilt:0deg;--swipe-depth:0px;perspective:1200px;transform-style:preserve-3d;-webkit-user-select:none;user-select:none}
+.ms-hero-slider .ms-featured-copy,.ms-hero-slider .ms-featured-poster,.ms-hero-slider .ms-hero-backdrop{transition:transform .62s cubic-bezier(.2,.8,.2,1),opacity .42s ease!important;will-change:transform,opacity}
+.ms-hero-slider:not(.slide-enter) .ms-featured-copy,.ms-hero-slider:not(.slide-enter) .ms-featured-poster{transform:translate3d(var(--hero-enter-x,34px),0,-24px) scale(.975)!important}
+.ms-hero-slider.slide-enter .ms-featured-copy,.ms-hero-slider.slide-enter .ms-featured-poster{transform:translate3d(0,0,0) scale(1)!important}
+.ms-hero-slider.is-swiping .ms-featured-copy{transition:none!important;transform:translate3d(var(--swipe-x),0,0)!important}
+.ms-hero-slider.is-swiping .ms-featured-poster{transition:none!important;transform:translate3d(var(--swipe-x),0,calc(var(--swipe-depth) * -1)) rotateY(calc(var(--swipe-tilt) * -1)) scale(calc(1 - var(--swipe-depth) / 900))!important}
+.ms-hero-slider.is-swiping .ms-hero-backdrop{transition:none!important;transform:translate3d(calc(var(--swipe-x) * .16),0,0) scale(1.06)!important}
+.ms-hero-slider .ms-featured-poster img{transition:transform .65s cubic-bezier(.2,.8,.2,1),filter .4s ease,box-shadow .4s ease!important;backface-visibility:hidden}
+.ms-hero-slider.slide-enter .ms-featured-poster img{transform:scale(1.025)!important;box-shadow:0 24px 58px rgba(0,0,0,.58),0 0 26px rgba(94,154,255,.16)!important}
+.ms-hero-slider.is-swiping .ms-featured-poster img{transform:scale(.985)!important}
+.ms-hero-slider .ms-hero-dot.active{box-shadow:0 0 12px rgba(255,202,40,.75)}
+.ms-hero-slider .ms-hero-arrow{transition:transform .2s ease,background .2s ease,box-shadow .2s ease}
+.ms-hero-slider .ms-hero-arrow:active{transform:scale(.9);box-shadow:0 0 20px rgba(255,202,40,.35)}
+@media(max-width:760px){.ms-hero-slider{touch-action:pan-y pinch-zoom;overscroll-behavior-x:contain}.ms-hero-slider .ms-featured-poster{transform-origin:center center}.ms-hero-slider.is-swiping .ms-featured-copy,.ms-hero-slider.is-swiping .ms-featured-poster{filter:drop-shadow(0 12px 20px rgba(0,0,0,.22))}}
+@media(prefers-reduced-motion:reduce){.ms-hero-slider,.ms-hero-slider *{transition:none!important;animation:none!important}.ms-hero-slider:not(.slide-enter) .ms-featured-copy,.ms-hero-slider:not(.slide-enter) .ms-featured-poster{transform:none!important}}
