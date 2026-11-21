@@ -30,10 +30,22 @@
   function revealControls(){wrap.classList.add("cv-ui-visible");clearTimeout(hideTimer);if(!video.paused&&!video.ended)hideTimer=setTimeout(()=>wrap.classList.remove("cv-ui-visible"),2800);}
   function showSkip(delta){skipHint.textContent=delta<0?"−10 seconds":"＋10 seconds";skipHint.classList.add("show");clearTimeout(showSkip.timer);showSkip.timer=setTimeout(()=>skipHint.classList.remove("show"),650);}
   const fmt=t=>{if(!Number.isFinite(t))return"0:00";const h=Math.floor(t/3600),m=Math.floor(t%3600/60),s=Math.floor(t%60);return h?h+":"+String(m).padStart(2,"0")+":"+String(s).padStart(2,"0"):m+":"+String(s).padStart(2,"0")};
-  let activeHls=null,sourceToken=0;
+  let activeHls=null,sourceToken=0,activeSource=null,failedSources=new Set();
+  const errorNotice=document.createElement("div");errorNotice.className="cv-player-error";errorNotice.hidden=true;errorNotice.setAttribute("role","status");wrap.appendChild(errorNotice);
+  function handleMediaError(){
+   const failed=activeSource;if(!failed||failedSources.has(failed.url))return;
+   failedSources.add(failed.url);
+   const next=ordered.find(x=>x&&x.url&&!failedSources.has(x.url));
+   if(next){console.warn("Video source failed; trying another source", {quality:failed.quality,code:video.error?.code});setSource(next,false,true);return;}
+   const code=video.error?.code||0;
+   errorNotice.textContent=code===4?"এই ভিডিও ফরম্যাটটি ব্রাউজারে চালানো যাচ্ছে না। অন্য সার্ভারও চেষ্টা করা হয়েছে।":"ভিডিও লোড করা যায়নি। অন্য সার্ভারও চেষ্টা করা হয়েছে।";
+   errorNotice.hidden=false;
+   console.error("All video sources failed", {code,message:video.error?.message,networkState:video.networkState,readyState:video.readyState});
+  }
+  video.addEventListener("error",handleMediaError);
   function loadHlsLibrary(){if(window.Hls)return Promise.resolve(window.Hls);if(window.__odHlsPromise)return window.__odHlsPromise;window.__odHlsPromise=new Promise((resolve,reject)=>{const script=document.createElement("script");script.src="https://cdn.jsdelivr.net/npm/hls.js@1.6.15/dist/hls.min.js";script.onload=()=>resolve(window.Hls);script.onerror=reject;document.head.appendChild(script);});return window.__odHlsPromise;}
-  async function setSource(src,keep=true,autoplay=false){const token=++sourceToken,t=keep?video.currentTime:0,was=!video.paused; if(activeHls){activeHls.destroy();activeHls=null;} video.pause();video.removeAttribute("src");video.load();quality.value=src.quality||"auto";
-   const isHls=/\.m3u8(?:$|[?#])/i.test(src.url);
+  async function setSource(src,keep=true,autoplay=false){const token=++sourceToken,t=keep?video.currentTime:0,was=!video.paused;activeSource=src;errorNotice.hidden=true;if(activeHls){activeHls.destroy();activeHls=null;} video.pause();video.removeAttribute("src");video.load();quality.value=src.quality||"auto";
+   const isHls=/\.m3u8(?:$|[?#])/i.test(src.url)||/mpegurl|m3u8|hls/i.test(String(src.mime||src.type||""));
    const ready=()=>{if(token!==sourceToken)return;if(t>0&&Number.isFinite(video.duration))video.currentTime=Math.min(t,Math.max(0,video.duration-2));if(was||autoplay)video.play().catch(()=>{});};
    if(isHls&&!video.canPlayType("application/vnd.apple.mpegurl")){
     try{const Hls=await loadHlsLibrary();if(token!==sourceToken)return;if(Hls&&Hls.isSupported()){activeHls=new Hls({enableWorker:true});activeHls.loadSource(src.url);activeHls.attachMedia(video);activeHls.on(Hls.Events.MANIFEST_PARSED,ready);activeHls.on(Hls.Events.ERROR,(_,data)=>{if(data.fatal){$(".cv-buffer").hidden=true;video.dispatchEvent(new Event("error"));}});return;}}
@@ -122,7 +134,7 @@
    panel.querySelector(".cv-end-replay").addEventListener("click",()=>{video.currentTime=0;video.play().catch(()=>{});});
    if(video.ended)wrap.classList.add("cv-ended");
   }
-  function setSources(next){ordered=[...next].filter(x=>x&&x.url).sort((a,b)=>Number(a.quality.replace(/p/i,""))-Number(b.quality.replace(/p/i,"")));quality.innerHTML="<option value=\"auto\">Auto</option>"+ordered.map(x=>"<option value=\""+esc(x.quality)+"\">"+esc(x.quality)+"</option>").join("");if(ordered.length){const preferred=ordered.find(x=>x.quality==="720p")||ordered[0];setSource(preferred,false,true);quality.value=preferred.quality;}}return {video,wrap,setSource,setSources,setSubtitles,setSuggestions};
+  function setSources(next){ordered=[...next].filter(x=>x&&x.url).sort((a,b)=>Number(a.quality.replace(/p/i,""))-Number(b.quality.replace(/p/i,"")));failedSources.clear();activeSource=null;errorNotice.hidden=true;quality.innerHTML="<option value=\"auto\">Auto</option>"+ordered.map(x=>"<option value=\""+esc(x.quality)+"\">"+esc(x.quality)+"</option>").join("");if(ordered.length){const preferred=ordered.find(x=>x.quality==="720p")||ordered[0];setSource(preferred,false,true);quality.value=preferred.quality;}}return {video,wrap,setSource,setSources,setSubtitles,setSuggestions};
  }
  window.CineVersePlayer={mount};
 })();
