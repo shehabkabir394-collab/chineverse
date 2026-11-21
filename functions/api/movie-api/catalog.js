@@ -11,7 +11,7 @@ const json = (data, status = 200) =>
   });
 
 export async function onRequestGet({ request, env }) {
-  if (!(env.MOVIEBOX_API_KEY || env.MOVIE_API_KEY || env.MOVIE_API_KOY || env.MOVIE_API_KOY)) return json({ error: "Movie API key is not configured." }, 503);
+  if (!(env.MOVIEBOX_API_KEY || env.MOVIE_API_KEY || env.MOVIE_API_KOY || env.MOVIE_API_KOY || env.MOVIE_API_KOY)) return json({ error: "Movie API key is not configured." }, 503);
   const incoming = new URL(request.url);
 const path = (incoming.searchParams.get("path") || "").trim().slice(0, 300);
   const page = Math.max(1, Math.floor(Number(incoming.searchParams.get("page")) || 1));
@@ -23,7 +23,7 @@ const path = (incoming.searchParams.get("path") || "").trim().slice(0, 300);
   upstream.searchParams.set("page", String(page));
   try {
     const response = await fetch(upstream, {
-      headers: { "X-API-Key": (env.MOVIEBOX_API_KEY || env.MOVIE_API_KEY || env.MOVIE_API_KOY || env.MOVIE_API_KOY), "Accept": "application/json" },
+      headers: { "X-API-Key": (env.MOVIEBOX_API_KEY || env.MOVIE_API_KEY || env.MOVIE_API_KOY || env.MOVIE_API_KOY || env.MOVIE_API_KOY), "Accept": "application/json" },
       signal: AbortSignal.timeout(20000)
     });
     const body = await response.text();
