@@ -42,9 +42,13 @@
  const isHindi=s=>/^(hi|hin|hindi)([-_ ]|$)/i.test(String(s||"").trim())||/hindi|हिन्दी|हिंदी/i.test(String(s||""));
  const isHindiDubbed=item=>item?._hindiCatalog===true||[item?.language,item?.audioLanguage,item?.audioLanguages,item?.dubLanguage,item?.dubLanguages,item?.availableLanguages,item?.languages,item?.audio].some(v=>Array.isArray(v)?v.some(x=>isHindi(getLang(x)||x?.code)):isHindi(v));
  function getSources(ep){
-  return (Array.isArray(ep.sources)?ep.sources:[]).filter(s=>{try{const u=new URL(s.url);return u.protocol==="https:"&&(u.hostname==="hd-w0l1.onrender.com"||u.hostname==="hd-hcfs.onrender.com"||u.hostname==="mb-stream.rahamanabduar2.workers.dev")&&Number(s.quality)>0;}catch{return false;}})
-   .map(s=>({url:s.url,quality:Number(s.quality)+"p",provider:String(s.provider||"Movie API"),mime:s.type==="m3u8"?"application/vnd.apple.mpegurl":"video/mp4",audioLanguage:getLang(s)}))
-   .sort((a,b)=>Number(isHindi(b.audioLanguage))-Number(isHindi(a.audioLanguage)));
+  return (Array.isArray(ep.sources)?ep.sources:[]).map(s=>{
+   try{const u=new URL(s.url||s.playUrl||s.play_url);if(u.protocol!=="https:"||u.username||u.password)return null;
+    const raw=String(s.quality||s.resolution||s.resolutions?.[0]||"");const q=raw.match(/\d{3,4}/)?.[0]||"";
+    const type=String(s.type||s.format||"");if(!q&&!/m3u8|mpegurl|hls/i.test(type))return null;
+    return {url:u.href,quality:q?(q+"p"):"Auto",provider:String(s.provider||"MovieBox"),mime:/m3u8|mpegurl|hls/i.test(type)?"application/vnd.apple.mpegurl":"video/mp4",audioLanguage:getLang(s)};
+   }catch{return null;}
+  }).filter(Boolean).sort((a,b)=>Number(isHindi(b.audioLanguage))-Number(isHindi(a.audioLanguage)));
  }
  function sourcesForLanguage(sources,language){
   const chosen=String(language||"").trim();
@@ -107,7 +111,7 @@
    const normalized=streamItems.map(s=>({url:s.url||s.playUrl||s.play_url||s.src||s.file||s.streamUrl||s.stream_url,quality:s.quality||s.resolution||s.label||"720p",provider:s.provider||s.name||"Movie API",type:s.type||s.format||s.mimeType||"",audioLanguage:getLang(s)})).filter(s=>{try{const u=new URL(s.url);const kind=String(s.type||"").toLowerCase();return u.protocol==="https:"&&(u.hostname==="hd-w0l1.onrender.com"||u.hostname==="hd-hcfs.onrender.com"||u.hostname==="mb-stream.rahamanabduar2.workers.dev")&&(kind==="mp4"||kind==="m3u8"||kind.includes("mpegurl")||/\/api\/mb-stream\.mp4|\.m3u8(?:$|[?#])/i.test(u.pathname+u.search));}catch{return false;}});
    if(normalized.length)sources=normalized.map(s=>({url:s.url,quality:(String(s.quality).match(/\d+/)?.[0]||"720")+"p",provider:s.provider,mime:/m3u8|hls/i.test(s.type+" "+s.url)?"application/vnd.apple.mpegurl":"video/mp4",audioLanguage:s.audioLanguage}));
    // Direct sources are not used while the provider embed is available.
-   if(false&&sources.length){
+   if(sources.length){
     currentSources=sources;
     currentSubtitles=getSubtitles(streamRoot,payload,ep,detail);
     hideEmbedPlayer();
