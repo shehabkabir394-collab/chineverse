@@ -84,7 +84,7 @@
   const detail=watchDetail||{};
   currentSubtitles=getSubtitles(ep,detail);
   const season=Number(ep.seasonNumber??ep.season??0)||0;
-  const episodeNumber=Number(ep.number??ep.episodeNumber??(index+1))||index+1;
+  const episodeNumber=ep.isMovie?0:Number(ep.number??ep.episodeNumber??(index+1));
   try{
    const query=new URLSearchParams({title:String(detail.title||""),se:String(season),ep:String(episodeNumber)});
    if(detail.subjectId||detail.id)query.set("subjectId",String(detail.subjectId||detail.id));
@@ -299,7 +299,7 @@
    // top-level {ok:true, subjectId, embedPlayerUrl, ...} response.
    const d=data.detail||data.data?.detail||data.data||data.result||data;
    if(!d||typeof d!=="object"||(!d.title&&!d.subjectId&&!d.embedPlayerUrl&&!d.episodes&&!d.totalEpisodes))throw new Error(data.error||"Details API returned no usable title data.");
-   watchDetail=d;episodes=Array.isArray(d.episodes)?d.episodes:[];if(!episodes.length&&findEmbedUrl(d))episodes=[{label:"Play Movie",number:1,seasonNumber:0}];currentDubs=Array.isArray(d.dubs)?d.dubs:[];
+   watchDetail=d;episodes=Array.isArray(d.episodes)?d.episodes:[];if(!episodes.length)episodes=[{label:"Play Movie",number:0,episodeNumber:0,seasonNumber:0,isMovie:true,kind:"movie"}];currentDubs=Array.isArray(d.dubs)?d.dubs:[];
    const poster=safeImage(d.poster),typeHint=[d.type,d.mediaType,d.typeBadge,d.category,d.categoryPath].join(" ").toLowerCase();
    const isDrama=/series|tv|drama|show|serial|web\s*series/.test(typeHint)||episodes.some(e=>/episode|season|ep\s*\d|s\d+\s*e\d+/i.test(String(e.kind||e.label||"")));
    const listTitle=isDrama?"Episodes":"Available Versions";
