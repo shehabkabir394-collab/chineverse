@@ -1,27 +1,20 @@
-const BASE="https://hd-w0l1.onrender.com/api/trial/stream";
-const json=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{"Content-Type":"application/json; charset=utf-8","Cache-Control":"no-store","X-Content-Type-Options":"nosniff"}});
-const getItems=data=>{
- const roots=[data,data?.stream,data?.data,data?.result,data?.episode].filter(x=>x&&typeof x==="object");
- return roots.flatMap(x=>[...(Array.isArray(x.sources)?x.sources:[]),...(Array.isArray(x.downloadButtons)?x.downloadButtons:[]),...(Array.isArray(x.downloads)?x.downloads:[])]);
-};
-const sourceUrl=s=>s?.downloadUrl||s?.download_url||s?.url||s?.link||s?.fileUrl||s?.file_url||s?.downloadLink||s?.download_link||s?.src||"";
-const qualityOf=s=>String(s.quality||s.resolution||s.label||s.name||s.title||"").match(/\d{3,4}/)?.[0]||"";
-export async function onRequestGet({request,env}){
- const apiKey = env.MOVIEBOX_API_KEY || env.MOVIE_API_KEY || env.MOVIE_API_KOY || env.MOVIE_API_KOY; if(!apiKey)return json({error:"Movie API key is not configured."},503);
- const u=new URL(request.url),subjectId=(u.searchParams.get("subjectId")||"").trim(),title=(u.searchParams.get("title")||"").trim(),se=Math.max(0,Math.floor(Number(u.searchParams.get("se"))||0)),ep=Math.max(0,Math.floor(Number(u.searchParams.get("ep"))||0)),requestedQuality=String(u.searchParams.get("quality")||"").toLowerCase(),quality=requestedQuality==="best"?"best":requestedQuality.replace(/[^0-9]/g,"");
- if(!/^[a-zA-Z0-9_-]{1,160}$/.test(subjectId)||!(quality==="best"||/^\d{3,4}$/.test(quality)))return json({error:"Invalid episode or quality."},400);
- const api=new URL(BASE);if(subjectId)api.searchParams.set("subjectId",subjectId);else api.searchParams.set("title",title);api.searchParams.set("se",String(se));api.searchParams.set("ep",String(ep));api.searchParams.set("apiKey",apiKey);
+import {upstream,rootData,parseEncodedPath,response} from "../../_shared/moviebox.js";
+export async function onRequestGet({request}){
+ const u=new URL(request.url),subjectId=(u.searchParams.get("subjectId")||"").trim(),detailPath=(u.searchParams.get("detailPath")||"").trim(),title=(u.searchParams.get("title")||"").trim();
+ const se=Math.max(0,Number(u.searchParams.get("se"))||0),ep=Math.max(0,Number(u.searchParams.get("ep"))||0),quality=String(u.searchParams.get("quality")||"best").replace(/[^0-9]/g,"");
+ if(!subjectId||!detailPath)return response({ok:false,error:"Download requires a valid subjectId and detailPath."},400);
  try{
-  const r=await fetch(api,{headers:{Accept:"application/json"},signal:AbortSignal.timeout(20000)});if(!r.ok)return json({error:"Stream API returned HTTP "+r.status},502);
-  const data=await r.json(),items=getItems(data).filter(s=>{const v=sourceUrl(s);return !!v&&/^https:\/\//i.test(String(v))&&!/\.m3u8(?:$|[?#])/i.test(String(v));});
-  const item=quality==="best"?items.sort((a,b)=>Number(qualityOf(b))-Number(qualityOf(a)))[0]:items.find(s=>qualityOf(s)===quality);
-  const fileUrl=sourceUrl(item);
-  if(!fileUrl)return json({error:"Requested MP4 quality was not returned."},404);
-  const target=new URL(fileUrl);
-  if(target.protocol!=="https:"||["localhost","127.0.0.1","0.0.0.0"].includes(target.hostname))return json({error:"Unsafe download source."},502);
-  const file=await fetch(target,{headers:{Accept:"video/mp4,application/octet-stream,*/*"},redirect:"follow",signal:AbortSignal.timeout(120000)});
-  if(!file.ok||!file.body)return json({error:"Source file returned HTTP "+file.status},502);
-  const actualQuality=qualityOf(item)||quality;const filename="MovieStreamBD-Episode-"+(ep+1)+"-"+actualQuality+"p.mp4";
-  return new Response(file.body,{status:200,headers:{"Content-Type":file.headers.get("Content-Type")||"application/octet-stream","Content-Disposition":'attachment; filename="'+filename+'"',"X-Download-Quality":actualQuality+"p","Cache-Control":"no-store","X-Content-Type-Options":"nosniff"}});
- }catch(e){return json({error:e?.name==="TimeoutError"?"Download source timed out.":"Could not fetch episode file."},502);}
+  const q=new URLSearchParams({subjectId,detailPath,se:String(se),ep:String(ep),streamSignType:"1"});
+  const raw=await upstream("/wefeed-h5api-bff/subject/play?"+q.toString(),{referer:"https://movie-box.co/movies/"+detailPath+"?id="+subjectId,timeout:25000});
+  const d=rootData(raw)||{},streams=Array.isArray(d.streams)?d.streams:[];
+  const mp4=streams.filter(x=>/mp4/i.test(String(x.format||x.type||""))&&typeof x.url==="string");
+  const selected=(quality?mp4.find(x=>String(x.resolutions||x.quality||"").includes(quality)):null)||mp4.sort((a,b)=>Number(b.resolutions||b.quality||0)-Number(a.resolutions||a.quality||0))[0];
+  if(!selected?.url)return response({ok:false,error:"No MP4 download source was supplied for this episode."},404);
+  const target=new URL(selected.url);
+  if(target.protocol!=="https:"||!(target.hostname==="aoneroom.com"||target.hostname.endsWith(".aoneroom.com")))return response({ok:false,error:"The download source host is not in the approved MovieBox CDN allowlist."},502);
+  const file=await fetch(target.toString(),{headers:{"Accept":"video/mp4,application/octet-stream,*/*","Referer":"https://movie-box.co/"},redirect:"follow",signal:AbortSignal.timeout(120000)});
+  if(!file.ok||!file.body)return response({ok:false,error:"The source file returned HTTP "+file.status+"."},502);
+  const ql=String(selected.resolutions||selected.quality||quality||"HD").replace(/[^0-9A-Za-z]/g,"").slice(0,12)||"HD";
+  return new Response(file.body,{status:200,headers:{"Content-Type":file.headers.get("Content-Type")||"video/mp4","Content-Disposition":'attachment; filename="CineVerse-Episode-'+(ep+1)+'-'+ql+'.mp4"',"Cache-Control":"no-store","X-Content-Type-Options":"nosniff"}});
+ }catch(e){return response({ok:false,error:e?.name==="TimeoutError"?"Download timed out.":e.message||"Download unavailable."},502);}
 }
