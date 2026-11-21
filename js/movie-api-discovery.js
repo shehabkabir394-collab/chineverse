@@ -13,7 +13,7 @@
    if(depth>5||v==null)return;
    if(Array.isArray(v)){
     const values=v.filter(x=>typeof x==="string"||typeof x==="number"||(x&&typeof x==="object"));
-    if(values.length&&/(suggest|hot|keyword|items|list|results|records|data|categories|shorts|videos|sports|upcoming)/i.test(key)){
+    if(values.length&&/(suggest|hot|keyword|items|list|results|records|data|categories|shorts|videos|sports|upcoming|channels|streams|events|matches|live|fixtures|broadcasts)/i.test(key)){
      const sig=values.map(x=>typeof x==="object"?titleOf(x):String(x)).join("|");
      if(!seen.has(sig)){seen.add(sig);preferred.push({key,values});}
     }
