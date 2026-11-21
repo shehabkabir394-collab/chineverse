@@ -85,20 +85,8 @@
    cats.forEach(c=>{const label=titleOf(c),path=String(c.path||c.categoryPath||c.slug||"");if(!label||existing.has(label.toLowerCase()))return;const a=document.createElement("a");a.className="catalog-chip";a.textContent=label;a.href="catalog.html?category="+encodeURIComponent(path.startsWith("/")?path:"/"+path);nav.appendChild(a);});
   }catch{}
  };
- const loadPlatforms=async()=>{
-  const target=$("#movieApiPlatformSection");
-  if(!target)return;
-  const names=["Netflix","Hoichoi","Zee5","PrimeVideo","Disney"];
-  const results=await Promise.all(names.map(async name=>{
-   try{return {name,items:arrays(await api("/api/movie-api/platform?name="+encodeURIComponent(name)+"&page=1"))};}
-   catch{return {name,items:[]};}
-  }));
-  const html=results.filter(x=>x.items.length).map(x=>section("platform-"+x.name.toLowerCase(),x.name,"STREAMING PLATFORM",x.items)).join("");
-  if(html){target.hidden=false;target.innerHTML=html;}
- };
  // Start optional feeds after the primary homepage feed; all requests use same-origin secure proxy routes.
  loadExtras();
  loadCategories();
- loadPlatforms();
  // filter-options, details, stream, related, comments, staff and account routes are consumed by their respective catalog/watch/account screens.
 })();
