@@ -108,6 +108,7 @@
  ];
  function renderPlatforms(){
   if(!platformSection||!hero)return;
+  platformSection.classList.add("cv-platform-section");
   hero.insertAdjacentElement("afterend",platformSection);
   platformSection.hidden=false;
   platformSection.innerHTML='<div class="cv-platform-head"><div><p class="eyebrow">STREAMING SERVICES</p><h2>Explore by <em>platform</em></h2></div></div><div class="cv-platform-logos" role="group" aria-label="Streaming platforms">'+platformChoices.map(p=>'<a class="cv-platform-logo" href="platform.html?name='+encodeURIComponent(p.name)+'"><img loading="lazy" decoding="async" src="'+esc(p.logo)+'" alt="'+esc(p.name)+' logo" onerror="this.hidden=true"><span>'+esc(p.name)+'</span></a>').join("")+'</div>';
