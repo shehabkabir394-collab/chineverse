@@ -14,7 +14,7 @@ function safeFilename(value) {
 export async function onRequestGet({ request }) {
   const u = new URL(request.url);
   const subjectId = String(u.searchParams.get("subjectId") || "").trim().slice(0, 100);
-  const detailPath = String(u.searchParams.get("detailPath") || "").trim().replace(/^\\/+|\\/+$/g, "").slice(0, 360);
+  const detailPath = String(u.searchParams.get("detailPath") || "").trim().replace(/^\/+|\/+$/g, "").slice(0, 360);
   const se = Number(u.searchParams.get("se") ?? 0), ep = Number(u.searchParams.get("ep") ?? 0);
   const requested = String(u.searchParams.get("quality") || "best").trim().slice(0, 12).toLowerCase();
   if (!subjectId || !detailPath || !Number.isInteger(se) || !Number.isInteger(ep) || se < 0 || ep < 0 || se > 300 || ep > 1000) {
