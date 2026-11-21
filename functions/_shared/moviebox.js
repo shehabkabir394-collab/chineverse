@@ -45,19 +45,59 @@ export function response(data,status=200,cache="no-store"){
   return new Response(JSON.stringify(data),{status,headers:{"Content-Type":"application/json; charset=utf-8","Cache-Control":cache,"X-Content-Type-Options":"nosniff"}});
 }
 function headers(extra={}) {
-  return {...jsonHeaders,"Origin":"https://moviebox01.com","Referer":REFERER,"X-Client-Info":JSON.stringify({timezone:"Asia/Dhaka"}),"X-Request-Lang":"en","X-Client-Token":clientToken(),...extra};
+  return {...jsonHeaders,"Origin":"https://moviebox.ph","Referer":REFERER,"X-Client-Info":JSON.stringify({timezone:"Asia/Dhaka"}),"X-Request-Lang":"en","X-Client-Token":clientToken(),...extra};
+}
+function addProviderHost(path) {
+  const [pathname, query=""] = path.split("?", 2);
+  const params = new URLSearchParams(query);
+  params.set("host", PROVIDER_HOST);
+  return pathname + "?" + params.toString();
+}
+async function getGuestToken(timeout=18000, force=false) {
+  if (!force && guestToken && Date.now()-guestTokenAt < 20*60*1000) return guestToken;
+  if (tokenPromise && !force) return tokenPromise;
+  tokenPromise = (async()=>{
+    const res = await fetch(MAIN+"/wefeed-h5api-bff/home?host="+PROVIDER_HOST, {
+      method:"GET",
+      headers:{"User-Agent":jsonHeaders["User-Agent"],"Referer":REFERER,"Accept":"application/json"},
+      signal:AbortSignal.timeout(timeout)
+    });
+    if (!res.ok) throw new Error("MovieBox guest-token bootstrap failed (HTTP "+res.status+").");
+    const xUser=res.headers.get("x-user");
+    if(xUser){try{const parsed=JSON.parse(xUser);if(parsed?.token){guestToken=String(parsed.token);guestTokenAt=Date.now();return guestToken;}}catch{}}
+    const cookie=res.headers.get("set-cookie")||"";
+    const match=cookie.match(/(?:^|[,; ]+)token=([^;, ]+)/i);
+    if(match?.[1]){guestToken=match[1];guestTokenAt=Date.now();return guestToken;}
+    throw new Error("MovieBox did not provide a guest token (x-user/set-cookie missing).");
+  })();
+  try{return await tokenPromise;}finally{tokenPromise=null;}
+}
+function isInvalidToken(status,data) {
+  return status===401 || (status===400 && /invalid token/i.test(String(data?.message||"")));
 }
 export async function upstream(path,{method="GET",body,host=MAIN,referer=REFERER,timeout=18000}={}) {
-  const url=host+path;
-  const h=headers({"Referer":referer});
-  const init={method,headers:h,signal:AbortSignal.timeout(timeout)};
-  if(body!==undefined)init.body=JSON.stringify(body);
-  const res=await fetch(url,init);
-  const raw=await res.text();
-  let data;try{data=JSON.parse(raw);}catch{throw new Error("MovieBox API returned non-JSON (HTTP "+res.status+").");}
-  if(!res.ok)throw new Error("MovieBox API HTTP "+res.status+": "+String(data?.message||data?.error||"upstream request failed").slice(0,180));
-  if(data?.success===false||data?.code&&Number(data.code)>=400)throw new Error(String(data.message||data.error||"MovieBox API rejected the request").slice(0,180));
-  return data;
+  const url=host+addProviderHost(path);
+  let token=await getGuestToken(timeout);
+  const run=async(currentToken)=>{
+    const h=headers({"Referer":referer,"Authorization":"Bearer "+currentToken});
+    const init={method,headers:h,signal:AbortSignal.timeout(timeout)};
+    if(body!==undefined)init.body=JSON.stringify(body);
+    const res=await fetch(url,init);
+    const raw=await res.text();
+    let data;try{data=JSON.parse(raw);}catch{throw new Error("MovieBox API returned non-JSON (HTTP "+res.status+").");}
+    if(!res.ok) {
+      if(isInvalidToken(res.status,data)) return {retryToken:true};
+      throw new Error("MovieBox API HTTP "+res.status+": "+String(data?.message||data?.error||"upstream request failed").slice(0,180));
+    }
+    const rotated=res.headers.get("x-user");
+    if(rotated){try{const next=JSON.parse(rotated)?.token;if(next){guestToken=String(next);guestTokenAt=Date.now();}}catch{}}
+    if(data?.success===false||data?.code&&Number(data.code)>=400)throw new Error(String(data.message||data.error||"MovieBox API rejected the request").slice(0,180));
+    return {data};
+  };
+  let result=await run(token);
+  if(result.retryToken){token=await getGuestToken(timeout,true);result=await run(token);}
+  if(result.retryToken)throw new Error("MovieBox rejected the refreshed guest token.");
+  return result.data;
 }
 export const rootData=d=>d?.data??d?.result??d;
 export function pickArray(obj,keys){
