@@ -6,7 +6,7 @@ const REFERER = "https://moviebox01.com/";
 const jsonHeaders = { "Accept": "application/json", "Content-Type": "application/json" };
 
 function md5(input) {
-  const bytes = new TextEncoder().encode(input);
+  const bytes = Array.from(String(input), c => c.charCodeAt(0) & 255);
   const words = [];
   for (let i = 0; i < bytes.length; i++) words[i >> 2] = (words[i >> 2] || 0) | (bytes[i] << ((i % 4) * 8));
   words[bytes.length >> 2] = (words[bytes.length >> 2] || 0) | (0x80 << ((bytes.length % 4) * 8));
