@@ -1,4 +1,4 @@
-const API = "https://hd-w0l1.onrender.com/api/trial/home";
+const API = "https://hd-hcfs.onrender.com/api/trial/home";
 
 const json = (data, status = 200) =>
   new Response(JSON.stringify(data), {
