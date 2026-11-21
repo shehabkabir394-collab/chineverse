@@ -81,10 +81,30 @@
    const embedUrl=findEmbedUrl(payload)||findEmbedUrl(watchDetail);
    const streamItems=Array.isArray(streamRoot.sources)?streamRoot.sources:Array.isArray(streamRoot.streams)?streamRoot.streams:Array.isArray(streamRoot.urls)?streamRoot.urls:[];
    currentSubtitles=getSubtitles(streamRoot,payload,ep,detail);
-   const normalized=streamItems.map(s=>({url:s.url||s.playUrl||s.play_url||s.src||s.file||s.streamUrl||s.stream_url,quality:s.quality||s.resolution||s.label||"720p",provider:s.provider||s.name||"Movie API",type:s.type||s.format||s.mimeType||"",audioLanguage:getLang(s)})).filter(s=>{try{const u=new URL(s.url);return u.protocol==="https:"&&(u.hostname==="hd-w0l1.onrender.com"||u.hostname==="hd-hcfs.onrender.com"||u.hostname==="mb-stream.rahamanabduar2.workers.dev");}catch{return false;}});
-   if(normalized.length)sources=normalized.map(s=>({url:s.url,quality:/^\\d+$/.test(String(s.quality))?String(s.quality)+"p":String(s.quality),provider:s.provider,mime:/m3u8|hls/i.test(s.type+" "+s.url)?"application/vnd.apple.mpegurl":"video/mp4",audioLanguage:s.audioLanguage}));
-   // Always use the provider's universal embedded player. Keep CineVerse's
-   // native video player hidden; do not fall back to direct MP4/HLS playback.
+   const normalized=streamItems.map(s=>({url:s.url||s.playUrl||s.play_url||s.src||s.file||s.streamUrl||s.stream_url,quality:s.quality||s.resolution||s.label||"720p",provider:s.provider||s.name||"Movie API",type:s.type||s.format||s.mimeType||"",audioLanguage:getLang(s)})).filter(s=>{try{const u=new URL(s.url);const kind=String(s.type||"").toLowerCase();return u.protocol==="https:"&&(u.hostname==="hd-w0l1.onrender.com"||u.hostname==="hd-hcfs.onrender.com"||u.hostname==="mb-stream.rahamanabduar2.workers.dev")&&(kind==="mp4"||kind==="m3u8"||kind.includes("mpegurl")||/\\/api\\/mb-stream\\.mp4|\\.m3u8(?:$|[?#])/i.test(u.pathname+u.search));}catch{return false;}});
+   if(normalized.length)sources=normalized.map(s=>({url:s.url,quality:(String(s.quality).match(/\\d+/)?.[0]||"720")+"p",provider:s.provider,mime:/m3u8|hls/i.test(s.type+" "+s.url)?"application/vnd.apple.mpegurl":"video/mp4",audioLanguage:s.audioLanguage}));
+   // Prefer direct MP4/HLS sources in the custom CineVerse player.
+   if(sources.length){
+    currentSources=sources;
+    currentSubtitles=getSubtitles(streamRoot,payload,ep,detail);
+    hideEmbedPlayer();
+    video.hidden=false;
+    const titleText=detail.title||"Now Playing";
+    if(playerApi){
+     playerApi.setSources(sourcesForLanguage(sources,sources.find(s=>isHindi(s.audioLanguage))?.audioLanguage||sources[0]?.audioLanguage));
+     playerApi.setSubtitles(currentSubtitles);
+    }else{
+     playerApi=window.CineVersePlayer?.mount({video,sources,storageKey:"cv-moviebox-"+String(detail.subjectId||detail.id||path)+"-"+season+"-"+episodeNumber,subtitles:currentSubtitles,title:titleText,backUrl:"./"});
+    }
+    $("#movieWatchNow").textContent=ep.label||("Episode "+(ep.number||index+1));
+    root.querySelectorAll("[data-watch-episode]").forEach((b,i)=>b.classList.toggle("active",i===index));
+    const dl=$("#movieWatchDownload");if(dl)dl.href="download.html?path="+encodeURIComponent(path)+"&episode="+index;
+    const audioBox=$("#movieWatchAudioBox");if(audioBox)audioBox.hidden=true;
+    const unmute=$("#movieWatchUnmute");if(unmute)unmute.hidden=true;
+    message.textContent="CineVerse Player · "+sources.map(s=>s.quality).join(" · ")+" · "+(sources.some(s=>isHindi(s.audioLanguage))?"Hindi Dub":"Direct stream");
+    return;
+   }
+   // No direct file source: use the provider embed as a fallback.
    if(embedUrl&&showEmbedPlayer(embedUrl)){
     currentSources=[];currentSubtitles=getSubtitles(payload,streamRoot,ep,detail);
     $("#movieWatchNow").textContent=ep.label||("Episode "+(ep.number||index+1));
