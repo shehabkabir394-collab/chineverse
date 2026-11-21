@@ -1,38 +1,14 @@
-/* Compact, single-row streaming platform links */
-#movieApiPlatformSection.cv-platform-section{
- margin:12px auto 22px;padding:12px clamp(10px,2vw,18px);
- max-width:1400px;border:1px solid rgba(255,255,255,.10);border-radius:16px;
- background:linear-gradient(110deg,rgba(255,255,255,.065),rgba(255,255,255,.025));
- -webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);
-}
-#movieApiPlatformSection .cv-platform-head{display:flex;align-items:center;gap:8px;margin:0 0 9px}
-#movieApiPlatformSection .cv-platform-head .eyebrow{margin:0;font-size:10px;letter-spacing:1.5px;color:#f17b91}
+/* Compact logo-only platform strip */
+#movieApiPlatformSection.cv-platform-section{margin:12px auto 18px;padding:10px 12px;max-width:1400px;border:1px solid rgba(255,255,255,.10);border-radius:15px;background:linear-gradient(110deg,rgba(255,255,255,.065),rgba(255,255,255,.025));-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}
+#movieApiPlatformSection .cv-platform-head{margin:0 0 7px}
+#movieApiPlatformSection .cv-platform-head .eyebrow{margin:0;font-size:10px;letter-spacing:1.4px;color:#f17b91}
 #movieApiPlatformSection .cv-platform-head h2{display:none}
-#movieApiPlatformSection .cv-platform-logos{
- display:flex;flex-flow:row nowrap;align-items:center;gap:8px;
- width:100%;overflow-x:auto;overflow-y:hidden;padding:1px 0 5px;
- scrollbar-width:none;-webkit-overflow-scrolling:touch;
-}
+#movieApiPlatformSection .cv-platform-logos{display:flex;flex-flow:row nowrap;align-items:center;gap:10px;width:100%;overflow-x:auto;overflow-y:hidden;padding:2px 1px 5px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
 #movieApiPlatformSection .cv-platform-logos::-webkit-scrollbar{display:none}
-#movieApiPlatformSection .cv-platform-logo{
- box-sizing:border-box;flex:0 0 auto;display:inline-flex;flex-direction:row;
- align-items:center;justify-content:center;gap:7px;min-height:42px;
- min-width:0;padding:7px 11px;border:1px solid rgba(255,255,255,.13);
- border-radius:999px;background:rgba(255,255,255,.055);color:#fff;
- text-decoration:none;white-space:nowrap;font-size:11px;font-weight:700;
- transition:background .18s,border-color .18s;
-}
-#movieApiPlatformSection .cv-platform-logo img{display:block;width:auto;height:17px;max-width:58px;object-fit:contain}
-#movieApiPlatformSection .cv-platform-logo span{font-size:11px;line-height:1}
-#movieApiPlatformSection .cv-platform-logo:hover{border-color:rgba(255,95,125,.7);background:rgba(255,55,75,.13)}
-#movieApiPlatformSection .movie-api-row,
-#movieApiPlatformSection .movie-api-card,
-#movieApiPlatformSection .cv-platform-results{display:none!important}
-@media(max-width:560px){
- #movieApiPlatformSection.cv-platform-section{margin:10px 12px 18px;padding:10px;border-radius:14px}
- #movieApiPlatformSection .cv-platform-head{margin-bottom:7px}
- #movieApiPlatformSection .cv-platform-logo{min-height:36px;padding:6px 9px;gap:5px}
- #movieApiPlatformSection .cv-platform-logo img{height:15px;max-width:48px}
- #movieApiPlatformSection .cv-platform-logo span{font-size:10px}
-}
+#movieApiPlatformSection .cv-platform-logo{box-sizing:border-box;flex:0 0 48px;width:48px;height:48px;display:inline-flex;align-items:center;justify-content:center;padding:8px;border:1px solid rgba(255,255,255,.14);border-radius:14px;background:rgba(255,255,255,.07);text-decoration:none;transition:background .18s,border-color .18s}
+#movieApiPlatformSection .cv-platform-logo img{display:block;width:30px;height:30px;max-width:100%;object-fit:contain;border-radius:7px}
+#movieApiPlatformSection .cv-platform-logo:hover{border-color:rgba(255,95,125,.75);background:rgba(255,55,75,.15)}
+#movieApiPlatformSection .cv-platform-logo span{display:none!important}
+#movieApiPlatformSection .movie-api-row,#movieApiPlatformSection .movie-api-card,#movieApiPlatformSection .cv-platform-results{display:none!important}
+@media(max-width:560px){#movieApiPlatformSection.cv-platform-section{margin:9px 12px 15px;padding:9px 10px;border-radius:13px}#movieApiPlatformSection .cv-platform-logos{gap:8px}#movieApiPlatformSection .cv-platform-logo{flex-basis:42px;width:42px;height:42px;padding:6px}#movieApiPlatformSection .cv-platform-logo img{width:27px;height:27px}}
 @media(prefers-reduced-motion:reduce){#movieApiPlatformSection .cv-platform-logo{transition:none}}
