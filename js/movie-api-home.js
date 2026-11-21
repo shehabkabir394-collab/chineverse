@@ -96,11 +96,11 @@
 
   const platformSection=$("#movieApiPlatformSection");
  const platformChoices=[
-  {name:"Netflix",logo:"https://cdn.simpleicons.org/netflix/E50914"},
-  {name:"Hoichoi",logo:"https://cdn.simpleicons.org/hoichoi/E50914"},
-  {name:"Zee5",logo:"https://cdn.simpleicons.org/zee5/8230C6"},
-  {name:"Prime Video",logo:"https://cdn.simpleicons.org/amazonprimevideo/00A8E1"},
-  {name:"Disney+",logo:"https://cdn.simpleicons.org/disneyplus/113CCF"}
+  {name:"Netflix",logo:"https://www.google.com/s2/favicons?domain=netflix.com&sz=128"},
+  {name:"Hoichoi",logo:"https://www.google.com/s2/favicons?domain=hoichoi.tv&sz=128"},
+  {name:"Zee5",logo:"https://www.google.com/s2/favicons?domain=zee5.com&sz=128"},
+  {name:"Prime Video",logo:"https://www.google.com/s2/favicons?domain=primevideo.com&sz=128"},
+  {name:"Disney+",logo:"https://www.google.com/s2/favicons?domain=disneyplus.com&sz=128"}
  ];
  function renderPlatforms(){
   if(!platformSection||!hero)return;
@@ -246,7 +246,7 @@
   const azLink=tools?.querySelector('a[href="catalog.html"]');
   const actionRow=document.createElement("div");
   actionRow.className="category-action-row";
-  if(azLink){azLink.classList.add("category-az-link");actionRow.appendChild(azLink);}
+  if(azLink)azLink.remove();
   if(actualCategories.length>9){
    const more=document.createElement("button");
    more.type="button";
