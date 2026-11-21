@@ -1,1 +1,22 @@
 .catalog-page{min-height:70vh;padding:26px clamp(12px,3vw,42px) 60px}.catalog-api-page{max-width:1500px;margin:auto}.catalog-category-nav,.catalog-az-nav{display:flex;gap:8px;overflow-x:auto;padding:9px 2px 14px;scrollbar-width:thin;white-space:nowrap}.catalog-chip,.catalog-letter{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;padding:10px 15px;border:1px solid rgba(255,255,255,.15);border-radius:12px;background:rgba(255,255,255,.065);color:#f8edf0;text-decoration:none;font-size:12px;font-weight:800;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px)}.catalog-chip.active,.catalog-letter.active{background:linear-gradient(135deg,#f31b3c,#a90020);border-color:#ff647b;box-shadow:0 5px 20px #e5092438}.catalog-letter{min-width:38px;padding:9px}.catalog-nav-title{margin-top:14px;color:#ff687d;font-size:11px;font-weight:900;letter-spacing:1.5px}.catalog-pagination{display:flex;justify-content:center;flex-wrap:wrap;gap:7px;margin:28px 0}.catalog-pagination .btn{min-width:38px;padding:9px 12px}.catalog-api-page .movie-api-tools{display:flex;gap:9px}.catalog-api-page .movie-api-tools input{flex:1;min-width:0}.catalog-api-page .grid{grid-template-columns:repeat(6,minmax(0,1fr))}.catalog-api-page .movie-api-card{min-width:0}@media(max-width:1000px){.catalog-api-page .grid{grid-template-columns:repeat(4,minmax(0,1fr))}}@media(max-width:650px){.catalog-page{padding:12px 10px 38px}.catalog-api-page .grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:11px}.catalog-api-page .movie-api-tools{display:grid;grid-template-columns:1fr auto}.catalog-chip{padding:9px 12px}.catalog-pagination{gap:5px}}
+/* Homepage category shortcuts: compact, ordered grid */
+#movieApiCatalog #movieApiCategories.catalog-category-nav{
+ display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;
+ overflow:visible;white-space:normal;padding:7px 2px 9px;
+}
+#movieApiCatalog #movieApiCategories .catalog-chip{
+ min-width:0;min-height:38px;box-sizing:border-box;gap:5px;
+ padding:7px 8px;border-radius:999px;font-size:11px;line-height:1.15;
+ white-space:normal;text-align:center;justify-content:center;
+}
+#movieApiCatalog #movieApiCategories .catalog-chip .category-emoji{font-size:13px;flex:0 0 auto}
+#movieApiCatalog .category-action-row{display:flex;justify-content:flex-end;gap:8px;margin:0 2px 8px}
+#movieApiCatalog .category-action-row .category-see-more{padding:7px 13px;border:1px solid rgba(255,255,255,.16);border-radius:999px;background:rgba(255,255,255,.07);color:#fff;font-size:11px}
+#movieApiCatalog .category-action-row:empty{display:none}
+#movieApiCatalog .movie-api-tools{display:none!important}
+@media(max-width:650px){
+ #movieApiCatalog #movieApiCategories.catalog-category-nav{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;padding:6px 1px 8px}
+ #movieApiCatalog #movieApiCategories .catalog-chip{min-height:34px;padding:6px 5px;font-size:10px;gap:4px}
+ #movieApiCatalog #movieApiCategories .catalog-chip .category-emoji{font-size:12px}
+ #movieApiCatalog .category-action-row{margin-bottom:5px}
+}
