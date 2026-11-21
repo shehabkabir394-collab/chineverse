@@ -14,6 +14,7 @@ const ALLOWED = [
   "/wefeed-h5api-bff/platform/play-list",
   "/wefeed-h5api-bff/detail",
   "/wefeed-h5api-bff/subject/detail-rec",
+  "/wefeed-h5api-bff/subject/caption",
   "/wefeed-h5api-bff/post/list/subject",
   "/wefeed-h5api-bff/staff/subject-list",
   "/wefeed-h5api-bff/staff/staff-related",
