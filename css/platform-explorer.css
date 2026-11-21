@@ -1,0 +1,14 @@
+/* Streaming platform explorer directly below the hero */
+.cv-platform-section{display:block!important;margin:26px auto 34px;padding:24px clamp(14px,3vw,30px);max-width:1400px;border:1px solid rgba(255,255,255,.12);border-radius:22px;background:linear-gradient(135deg,rgba(255,255,255,.075),rgba(255,255,255,.025));backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
+.cv-platform-head h2{margin:3px 0 6px;font-size:clamp(22px,3vw,32px)}
+.cv-platform-head .muted{margin:0 0 18px}
+.cv-platform-logos{display:grid;grid-template-columns:repeat(9,minmax(0,1fr));gap:10px}
+.cv-platform-logo{min-height:88px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;padding:12px 8px;border:1px solid rgba(255,255,255,.12);border-radius:15px;background:rgba(255,255,255,.055);color:#fff;cursor:pointer;transition:border-color .18s,background .18s,transform .18s}
+.cv-platform-logo:hover,.cv-platform-logo.active{border-color:rgba(255,95,95,.75);background:rgba(255,55,75,.13);transform:translateY(-2px)}
+.cv-platform-logo img{width:auto;max-width:100px;height:28px;max-height:30px;object-fit:contain}
+.cv-platform-logo span{font-size:12px;font-weight:750;text-align:center}
+.cv-platform-status{min-height:24px;margin:18px 0 12px;color:rgba(255,255,255,.72);font-size:13px}
+.cv-platform-results{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:15px}
+@media(max-width:900px){.cv-platform-logos{grid-template-columns:repeat(5,minmax(0,1fr))}}
+@media(max-width:560px){.cv-platform-section{margin:18px 12px 26px;padding:17px 12px;border-radius:17px}.cv-platform-logos{grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.cv-platform-logo{min-height:78px}.cv-platform-results{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}}
+@media(prefers-reduced-motion:reduce){.cv-platform-logo{transition:none}}
