@@ -6,6 +6,7 @@
  let episodes=[],playerApi=null,selected=-1,currentSources=[],currentDubs=[],watchDetail=null,streamRequest=0,currentSubtitles=[],currentSuggestedMarkup="";
  let embedFrame=null;
  function validEmbedUrl(value){try{const u=new URL(String(value||""));return u.protocol==="https:"?u.href:"";}catch{return "";}}
+ function findEmbedUrl(value,depth=0){if(!value||typeof value!=="object"||depth>6)return "";if(Array.isArray(value)){for(const item of value){const found=findEmbedUrl(item,depth+1);if(found)return found;}return "";}for(const key of ["embedPlayerUrl","embed_player_url","embedUrl","embed_url","playerUrl","player_url"]){const found=validEmbedUrl(value[key]);if(found)return found;}for(const key of Object.keys(value)){const child=value[key];if(child&&typeof child==="object"){const found=findEmbedUrl(child,depth+1);if(found)return found;}}return "";}
  function showEmbedPlayer(value){
   const src=validEmbedUrl(value);if(!src)return false;
   const video=$("#movieWatchVideo"),message=$("#movieWatchMessage");
@@ -77,7 +78,7 @@
    const payload=await response.json();
    if(requestId!==streamRequest)return;
    const streamRoot=payload.stream||payload.data||payload.result||payload;
-   const embedUrl=payload.embedPlayerUrl||payload.embed_player_url||payload.stream?.embedPlayerUrl||payload.data?.embedPlayerUrl||payload.result?.embedPlayerUrl||watchDetail?.embedPlayerUrl||watchDetail?.embed_player_url;
+   const embedUrl=findEmbedUrl(payload)||findEmbedUrl(watchDetail);
    const streamItems=Array.isArray(streamRoot.sources)?streamRoot.sources:Array.isArray(streamRoot.streams)?streamRoot.streams:Array.isArray(streamRoot.urls)?streamRoot.urls:[];
    currentSubtitles=getSubtitles(streamRoot,payload,ep,detail);
    const normalized=streamItems.map(s=>({url:s.url||s.playUrl||s.play_url||s.src||s.file||s.streamUrl||s.stream_url,quality:s.quality||s.resolution||s.label||"720p",provider:s.provider||s.name||"Movie API",type:s.type||s.format||s.mimeType||"",audioLanguage:getLang(s)})).filter(s=>{try{const u=new URL(s.url);return u.protocol==="https:"&&(u.hostname==="hd-w0l1.onrender.com"||u.hostname==="hd-hcfs.onrender.com"||u.hostname==="mb-stream.rahamanabduar2.workers.dev");}catch{return false;}});
@@ -96,7 +97,7 @@
   }catch(err){console.warn("Stream endpoint unavailable",err);}
   if(requestId!==streamRequest)return;
   // If the stream endpoint failed, still try the embed URL returned by details.
-  const fallbackEmbed=watchDetail?.embedPlayerUrl||watchDetail?.embed_player_url;
+  const fallbackEmbed=findEmbedUrl(watchDetail);
   if(fallbackEmbed&&showEmbedPlayer(fallbackEmbed)){
    currentSources=[];currentSubtitles=getSubtitles(ep,watchDetail);
    $("#movieWatchNow").textContent=ep.label||("Episode "+(ep.number||index+1));
@@ -244,9 +245,9 @@
  async function load(){
   if(!/^\/mb\/[a-zA-Z0-9_./-]{1,300}$/.test(path)){status.textContent="Invalid title link.";return;}
   try{
-   const response=await fetch("/api/movie-api/details?path="+encodeURIComponent(path),{cache:"no-store"}),data=await response.json();
+   const response=await fetch("/api/movie-api/details?path="+encodeURIComponent(path),{cache:"no-store",signal:AbortSignal.timeout(18000)}),data=await response.json();
    if(!response.ok||!data.detail)throw new Error(data.error||"Details unavailable.");
-   const d=data.detail;watchDetail=d;episodes=Array.isArray(d.episodes)?d.episodes:[];if(!episodes.length&&(d.embedPlayerUrl||d.embed_player_url))episodes=[{label:"Play Movie",number:1,seasonNumber:0}];currentDubs=Array.isArray(d.dubs)?d.dubs:[];
+   const d=data.detail;watchDetail=d;episodes=Array.isArray(d.episodes)?d.episodes:[];if(!episodes.length&&findEmbedUrl(d))episodes=[{label:"Play Movie",number:1,seasonNumber:0}];currentDubs=Array.isArray(d.dubs)?d.dubs:[];
    const poster=safeImage(d.poster),typeHint=[d.type,d.mediaType,d.typeBadge,d.category,d.categoryPath].join(" ").toLowerCase();
    const isDrama=/series|tv|drama|show|serial|web\s*series/.test(typeHint)||episodes.some(e=>/episode|season|ep\s*\d|s\d+\s*e\d+/i.test(String(e.kind||e.label||"")));
    const listTitle=isDrama?"Episodes":"Available Versions";
@@ -281,7 +282,7 @@
     const hindiIndex=episodes.findIndex(ep=>isHindi(getLang(ep))||getSources(ep).some(s=>isHindi(s.audioLanguage)));
     start(hindiIndex>=0?hindiIndex:0);
    }else status.textContent="Details loaded, but no playable episodes were found.";
-  }catch(error){status.textContent=error.message||"Could not load this title.";}
+  }catch(error){console.error("Movie details loading failed:",error);status.textContent=(error.name==="TimeoutError"||error.name==="AbortError")?"Movie details request timed out. Check the Movie API server and Cloudflare deployment.":(error.message||"Could not load this title.");}
  }
  load();
 })();
