@@ -5,7 +5,7 @@
  const safeUrl=v=>{try{const u=new URL(String(v||""),location.origin);return ["http:","https:"].includes(u.protocol)?u.href:"";}catch{return "";}};
  const pathOf=x=>typeof x?.path==="string"&&x.path.startsWith("/mb/")?x.path:"";
  const imageOf=x=>safeUrl(x?.poster||x?.previewImage||x?.thumbnail||x?.image||x?.cover||x?.posterUrl);
- const titleOf=x=>String(x?.title||x?.name||x?.label||x?.keyword||x?.suggestion||x?.text||x?.value||x?.query||"Untitled");
+ const titleOf=(x,i=0)=>{const nested=x?.channel||x?.event||x?.match||x?.stream||x?.team;const value=x?.title||x?.name||x?.label||x?.channelName||x?.channel_name||x?.eventName||x?.event_name||x?.matchName||x?.match_name||x?.streamName||x?.stream_name||x?.teamName||x?.team_name||x?.leagueName||x?.league_name||x?.keyword||x?.suggestion||x?.text||x?.value||x?.query||nested?.title||nested?.name||nested?.label||nested?.titleName;return String(value||("Live Channel "+(i+1)));};
  const arrays=d=>{
   const preferred=[];
   const seen=new Set();
@@ -32,9 +32,10 @@
  const api=async(path)=>{const r=await fetch(path,{headers:{Accept:"application/json"}});const d=await r.json().catch(()=>({}));if(!r.ok||d.ok===false)throw new Error(d.error||"API unavailable");return d;};
  const section=(id,title,eyebrow,items,mode="cards")=>{
   if(!items.length && id!=="sports")return "";
-  const cards=items.length ? items.slice(0,12).map(x=>{
-   const p=pathOf(x),img=imageOf(x),title=titleOf(x),sub=x.language||x.categoryName||x.type||x.description||"";
-   const href=p?"watch.html?path="+encodeURIComponent(p):safeUrl(x.url||x.link||x.playUrl||x.webUrl);
+  const cards=items.length ? items.slice(0,12).map((x,i)=>{
+   const p=pathOf(x),img=imageOf(x),title=titleOf(x,i),sub=x.language||x.categoryName||x.category||x.league||x.sport||x.type||x.description||"";
+   const stream=x.stream||x.channel||x.event||{};
+   const href=p?"watch.html?path="+encodeURIComponent(p):safeUrl(x.url||x.link||x.playUrl||x.play_url||x.streamUrl||x.stream_url||x.m3u8||x.webUrl||stream.url||stream.playUrl||stream.streamUrl);
    return '<a class="cv-extra-card" href="'+esc(href||"#")+'" '+(!href?'aria-disabled="true"':'')+'>'+(img?'<img loading="lazy" src="'+esc(img)+'" alt="">':'<span class="cv-extra-placeholder">▶</span>')+'<span class="cv-extra-copy"><b>'+esc(title)+'</b><small>'+esc(sub)+'</small></span></a>';
   }).join("") : '<div class="cv-extra-empty">No live channels are available right now. Please refresh later.</div>';
   return '<section class="cv-extra-section" id="'+esc(id)+'"><div class="section-head"><div><p class="eyebrow">'+esc(eyebrow)+'</p><h2>'+esc(title)+'</h2></div></div><div class="cv-extra-grid">'+cards+'</div></section>';
