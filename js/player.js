@@ -44,7 +44,7 @@
   }
   video.addEventListener("error",handleMediaError);
   function loadHlsLibrary(){if(window.Hls)return Promise.resolve(window.Hls);if(window.__odHlsPromise)return window.__odHlsPromise;window.__odHlsPromise=new Promise((resolve,reject)=>{const script=document.createElement("script");script.src="https://cdn.jsdelivr.net/npm/hls.js@1.6.15/dist/hls.min.js";script.onload=()=>resolve(window.Hls);script.onerror=reject;document.head.appendChild(script);});return window.__odHlsPromise;}
-  async function setSource(src,keep=true,autoplay=false){const token=++sourceToken,t=keep?video.currentTime:0,was=!video.paused;activeSource=src;errorNotice.hidden=true;if(activeHls){activeHls.destroy();activeHls=null;} video.pause();video.removeAttribute("src");video.load();quality.value=src.quality||"auto";
+  async function setSource(src,keep=true,autoplay=false){const token=++sourceToken,t=keep?video.currentTime:0,was=!video.paused;errorNotice.hidden=true;if(activeHls){activeHls.destroy();activeHls=null;}video.pause();activeSource=null;video.removeAttribute("src");video.load();activeSource=src;quality.value=src.quality||"auto";
    const isHls=/\.m3u8(?:$|[?#])/i.test(src.url)||/mpegurl|m3u8|hls/i.test(String(src.mime||src.type||""));
    const ready=()=>{if(token!==sourceToken)return;if(t>0&&Number.isFinite(video.duration))video.currentTime=Math.min(t,Math.max(0,video.duration-2));if(was||autoplay)video.play().catch(()=>{});};
    if(isHls&&!video.canPlayType("application/vnd.apple.mpegurl")){
