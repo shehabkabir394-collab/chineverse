@@ -83,7 +83,9 @@
   const episodeNumber=Number(ep.number??ep.episodeNumber??(index+1))||index+1;
   try{
    const query=new URLSearchParams({title:String(detail.title||""),se:String(season),ep:String(episodeNumber)});
-   if(detail.subjectId||detail.id)query.set("subjectId",String(detail.subjectId||detail.id));\n   if(detail.detailPath)query.set("detailPath",String(detail.detailPath));\n   query.set("path",path);
+   if(detail.subjectId||detail.id)query.set("subjectId",String(detail.subjectId||detail.id));
+   if(detail.detailPath)query.set("detailPath",String(detail.detailPath));
+   query.set("path",path);
    const response=await fetch("/api/movie-api/stream?"+query.toString(),{cache:"no-store"});
    const payload=await response.json();
    if(requestId!==streamRequest)return;
