@@ -1,47 +1,11 @@
-const BASE = "https://hd-hcfs.onrender.com/api/trial/platform";
-const json = (data, status = 200, cache = "no-store") => new Response(JSON.stringify(data), {
-  status,
-  headers: {
-    "Content-Type": "application/json; charset=utf-8",
-    "Cache-Control": cache,
-    "X-Content-Type-Options": "nosniff"
-  }
-});
-export async function onRequestGet({ request, env }) {
-  if (!(env.MOVIEBOX_API_KEY || env.MOVIE_API_KEY || env.MOVIE_API_KOY)) return json({ error: "Movie API key is not configured." }, 503);
-  const incoming = new URL(request.url);
-  const upstream = new URL(BASE);
-  const allowed = ["name","page"];
-  for (const key of allowed) {
-    const value = (incoming.searchParams.get(key) || "").trim();
-    if (!value) continue;
-    if (value.length > 300 || /[\r\n]/.test(value)) return json({ error: "Invalid " + key + " parameter." }, 400);
-    upstream.searchParams.set(key, value);
-  }
-  
-  if (!upstream.searchParams.get("name")) return json({ error: "Missing name parameter." }, 400);
-  
-  
-  
-  const cacheControl = "public, max-age=180";
-  const cacheKey = new Request(upstream.toString(), { method: "GET" });
-  try { const cached = await caches.default.match(cacheKey); if (cached) return cached; } catch {}
-  try {
-    const response = await fetch(upstream.toString(), {
-      headers: { "X-API-Key": (env.MOVIEBOX_API_KEY || env.MOVIE_API_KEY || env.MOVIE_API_KOY), "Accept": "application/json" },
-      signal: AbortSignal.timeout(15000)
-    });
-    const body = await response.text();
-    let data;
-    try { data = JSON.parse(body); } catch { return json({ error: "Movie API returned invalid JSON." }, 502); }
-    if (!response.ok) return json({ error: "Movie API returned HTTP " + response.status, details: data?.message || data?.error || null }, 502);
-    if (!data || data.ok !== true) return json({ error: "Invalid Movie API response." }, 502);
-    delete data.trial;
-    delete data.apiKey;
-    const result = json(data, 200, cacheControl);
-    try { await caches.default.put(cacheKey, result.clone()); } catch {}
-    return result;
-  } catch {
-    return json({ error: "Movie API is temporarily unavailable." }, 502);
-  }
+import {upstream,rootData,itemsFrom,response} from "../../_shared/moviebox.js";
+const aliases={"Prime Video":"PrimeVideo","Disney+":"Disney","Apple TV+":"AppleTV","Zee5":"Zee5","Hoichoi":"Hoichoi","Netflix":"Netflix","Hulu":"Hulu","Vivamax":"Vivamax","Viu":"Viu","Showmax":"Showmax"};
+export async function onRequestGet({request}){
+ const u=new URL(request.url),name=(u.searchParams.get("name")||"").trim(),page=Math.max(1,Number(u.searchParams.get("page"))||1);
+ if(!name)return response({ok:false,error:"Missing platform name."},400);
+ const platform=aliases[name]||name.replace(/[^A-Za-z0-9]/g,"");
+ try{const raw=await upstream("/wefeed-h5api-bff/platform/play-list?"+new URLSearchParams({page:String(page),perPage:"6",platform})),d=rootData(raw)||{};
+  const months=Array.isArray(d.monthList)?d.monthList:[],items=months.flatMap(m=>(Array.isArray(m.subjects)?m.subjects:[]).map(x=>({...x,_platformMonth:m.month})));
+  return response({ok:true,items:itemsFrom({items}),monthList:months.map(m=>({month:m.month,count:Array.isArray(m.subjects)?m.subjects.length:0})),totalPages:Math.max(1,months.length)},200,"public, max-age=180, s-maxage=240");
+ }catch(e){return response({ok:false,error:e.message||"Platform playlist unavailable."},502);}
 }
