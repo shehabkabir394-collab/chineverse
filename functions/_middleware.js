@@ -28,26 +28,21 @@ export async function onRequest(context) {
 
   const origin = request.headers.get("Origin");
   const fetchSite = request.headers.get("Sec-Fetch-Site");
-  const referer = request.headers.get("Referer");
 
-  // Modern browsers identify same-origin fetches with Sec-Fetch-Site.
-  if (fetchSite && fetchSite !== "same-origin") {
+  // Reject requests explicitly identified by the browser as cross-site.
+  // "none" is normal for a URL opened directly in the address bar.
+  if (fetchSite === "cross-site") {
     return blocked(403, "Cross-site API requests are not allowed.");
   }
 
-  // If Origin is present, it must be the production CineVerse origin.
+  // If a browser sends Origin, it must be the production CineVerse origin.
   if (origin && !ALLOWED_ORIGINS.has(origin)) {
     return blocked(403, "This origin is not allowed to use the API.");
   }
 
-  // Fallback for clients that omit Origin: require a CineVerse Referer.
-  if (!origin && !fetchSite) {
-    let refererOrigin = "";
-    try { refererOrigin = referer ? new URL(referer).origin : ""; } catch {}
-    if (!ALLOWED_ORIGINS.has(refererOrigin)) {
-      return blocked(403, "A valid CineVerse page is required.");
-    }
-  }
+  // Requests without Origin (direct navigation, curl, or same-origin
+  // browser requests that omit it) are allowed. The MovieBox key remains
+  // server-side and is never returned to the caller.
 
   const response = await context.next();
   const headers = new Headers(response.headers);
