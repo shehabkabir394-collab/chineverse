@@ -40,7 +40,7 @@ function updateSources(){
 async function loadStreamSources(index){
  const ep=episodes[index],subjectId=subjectIdOf();if(!subjectId)return;
  for(const c of episodeCoords(ep,index)){
-  try{const r=await fetch("/api/movie-api/stream?subjectId="+encodeURIComponent(subjectId)+"&se="+c.se+"&ep="+c.ep,{cache:"no-store"});const data=await r.json();if(!r.ok||data?.ok===false)continue;
+  try{const r=await fetch("/api/movie-api/stream?subjectId="+encodeURIComponent(subjectId)+"&detailPath="+encodeURIComponent(detail?.detailPath||"")+"&se="+c.se+"&ep="+c.ep,{cache:"no-store"});const data=await r.json();if(!r.ok||data?.ok===false)continue;
    const incoming=getSources(data);if(incoming.length){ep.sources=[...(ep.sources||[]),...incoming];ep.downloadButtons=[];return;}
   }catch(e){console.warn("Stream source lookup",e);}
  }
