@@ -1,4 +1,4 @@
-const ALLOWED_HOSTS = new Set(["chineverse.pages.dev"]);
+const ALLOWED_HOSTS = new Set(["chineverse.pages.dev", "chineverse4k.pages.dev"]);
 const ALLOWED_ORIGINS = new Set(["https://chineverse.pages.dev"]);
 
 function blocked(status, message) {
@@ -22,7 +22,9 @@ export async function onRequest(context) {
     return context.next();
   }
 
-  if (!ALLOWED_HOSTS.has(url.hostname.toLowerCase())) {
+  const hostname = url.hostname.toLowerCase();
+  const isProjectPreview = /^[a-z0-9-]+\.chineverse4k\.pages\.dev$/.test(hostname);
+  if (!ALLOWED_HOSTS.has(hostname) && !isProjectPreview) {
     return blocked(403, "API host is not allowed.");
   }
 
