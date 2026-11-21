@@ -42,9 +42,13 @@
  const isHindi=s=>/^(hi|hin|hindi)([-_ ]|$)/i.test(String(s||"").trim())||/hindi|हिन्दी|हिंदी/i.test(String(s||""));
  const isHindiDubbed=item=>item?._hindiCatalog===true||[item?.language,item?.audioLanguage,item?.audioLanguages,item?.dubLanguage,item?.dubLanguages,item?.availableLanguages,item?.languages,item?.audio].some(v=>Array.isArray(v)?v.some(x=>isHindi(getLang(x)||x?.code)):isHindi(v));
  function getSources(ep){
-  return (Array.isArray(ep.sources)?ep.sources:[]).filter(s=>{try{const u=new URL(s.url);return u.protocol==="https:"&&(u.hostname==="hd-w0l1.onrender.com"||u.hostname==="hd-hcfs.onrender.com"||u.hostname==="mb-stream.rahamanabduar2.workers.dev")&&Number(s.quality)>0;}catch{return false;}})
-   .map(s=>({url:s.url,quality:Number(s.quality)+"p",provider:String(s.provider||"Movie API"),mime:s.type==="m3u8"?"application/vnd.apple.mpegurl":"video/mp4",audioLanguage:getLang(s)}))
-   .sort((a,b)=>Number(isHindi(b.audioLanguage))-Number(isHindi(a.audioLanguage)));
+  return (Array.isArray(ep.sources)?ep.sources:[]).map(s=>{
+   try{const u=new URL(s.url||s.playUrl||s.play_url);if(u.protocol!=="https:"||u.username||u.password)return null;
+    const raw=String(s.quality||s.resolution||s.resolutions?.[0]||"");const q=raw.match(/\d{3,4}/)?.[0]||"";
+    const type=String(s.type||s.format||"");if(!q&&!/m3u8|mpegurl|hls/i.test(type))return null;
+    return {url:u.href,quality:q?(q+"p"):"Auto",provider:String(s.provider||"MovieBox"),mime:/m3u8|mpegurl|hls/i.test(type)?"application/vnd.apple.mpegurl":"video/mp4",audioLanguage:getLang(s)};
+   }catch{return null;}
+  }).filter(Boolean).sort((a,b)=>Number(isHindi(b.audioLanguage))-Number(isHindi(a.audioLanguage)));
  }
  function sourcesForLanguage(sources,language){
   const chosen=String(language||"").trim();
@@ -80,10 +84,12 @@
   const detail=watchDetail||{};
   currentSubtitles=getSubtitles(ep,detail);
   const season=Number(ep.seasonNumber??ep.season??0)||0;
-  const episodeNumber=Number(ep.number??ep.episodeNumber??(index+1))||index+1;
+  const episodeNumber=ep.isMovie?0:Number(ep.number??ep.episodeNumber??(index+1));
   try{
    const query=new URLSearchParams({title:String(detail.title||""),se:String(season),ep:String(episodeNumber)});
-   if(!detail.title&&(detail.subjectId||detail.id))query.set("subjectId",String(detail.subjectId||detail.id));
+   if(detail.subjectId||detail.id)query.set("subjectId",String(detail.subjectId||detail.id));
+   if(detail.detailPath)query.set("detailPath",String(detail.detailPath));
+   query.set("path",path);
    const response=await fetch("/api/movie-api/stream?"+query.toString(),{cache:"no-store"});
    const payload=await response.json();
    if(requestId!==streamRequest)return;
@@ -102,10 +108,10 @@
    }
    const streamItems=Array.isArray(streamRoot.sources)?streamRoot.sources:Array.isArray(streamRoot.streams)?streamRoot.streams:Array.isArray(streamRoot.urls)?streamRoot.urls:[];
    currentSubtitles=getSubtitles(streamRoot,payload,ep,detail);
-   const normalized=streamItems.map(s=>({url:s.url||s.playUrl||s.play_url||s.src||s.file||s.streamUrl||s.stream_url,quality:s.quality||s.resolution||s.label||"720p",provider:s.provider||s.name||"Movie API",type:s.type||s.format||s.mimeType||"",audioLanguage:getLang(s)})).filter(s=>{try{const u=new URL(s.url);const kind=String(s.type||"").toLowerCase();return u.protocol==="https:"&&(u.hostname==="hd-w0l1.onrender.com"||u.hostname==="hd-hcfs.onrender.com"||u.hostname==="mb-stream.rahamanabduar2.workers.dev")&&(kind==="mp4"||kind==="m3u8"||kind.includes("mpegurl")||/\/api\/mb-stream\.mp4|\.m3u8(?:$|[?#])/i.test(u.pathname+u.search));}catch{return false;}});
+   const normalized=streamItems.map(s=>({url:s.url||s.playUrl||s.play_url||s.src||s.file||s.streamUrl||s.stream_url,quality:s.quality||s.resolution||s.label||"720p",provider:s.provider||s.name||"Movie API",type:s.type||s.format||s.mimeType||"",audioLanguage:getLang(s)})).filter(s=>{try{const u=new URL(s.url);const kind=String(s.type||"").toLowerCase();return u.protocol==="https:"&&!u.username&&!u.password&&(kind==="mp4"||kind==="m3u8"||kind.includes("mpegurl")||/\.m3u8(?:$|[?#])/i.test(u.pathname+u.search)||/mp4/i.test(kind));}catch{return false;}});
    if(normalized.length)sources=normalized.map(s=>({url:s.url,quality:(String(s.quality).match(/\d+/)?.[0]||"720")+"p",provider:s.provider,mime:/m3u8|hls/i.test(s.type+" "+s.url)?"application/vnd.apple.mpegurl":"video/mp4",audioLanguage:s.audioLanguage}));
    // Direct sources are not used while the provider embed is available.
-   if(false&&sources.length){
+   if(sources.length){
     currentSources=sources;
     currentSubtitles=getSubtitles(streamRoot,payload,ep,detail);
     hideEmbedPlayer();
@@ -258,7 +264,7 @@
    try{
     const query=new URLSearchParams({se:String(Number(ep.seasonNumber??ep.season??seasonFallback)||0),ep:String(Number(ep.number??ep.episodeNumber??(index+1))||index+1),quality:"best"});
     const sid=watchDetail?.subjectId||watchDetail?.subject_id||watchDetail?.commentSubjectId||watchDetail?.comment_subject_id||watchDetail?.contentId||watchDetail?.id||watchDetail?._id;
-    if(sid!=null)query.set("subjectId",String(sid));if(watchDetail?.title)query.set("title",String(watchDetail.title));
+    if(sid!=null)query.set("subjectId",String(sid));if(watchDetail?.detailPath)query.set("detailPath",String(watchDetail.detailPath));if(watchDetail?.title)query.set("title",String(watchDetail.title));
     const response=await fetch("/api/movie-api/download-file?"+query.toString(),{cache:"no-store"});
     if(!response.ok)throw new Error("HTTP "+response.status);
     const blob=await response.blob();if(!blob.size)throw new Error("Empty file");
@@ -284,7 +290,7 @@
  }
 
  async function load(){
-  if(!/^\/mb\/[a-zA-Z0-9_./-]{1,300}$/.test(path)){status.textContent="Invalid title link.";return;}
+  if(!/^\/mb\/[a-zA-Z0-9_./~-]{1,360}$/.test(path)){status.textContent="Invalid title link.";return;}
   try{
    const response=await fetch("/api/movie-api/details?path="+encodeURIComponent(path),{cache:"no-store",signal:AbortSignal.timeout(25000)});
    const data=await response.json();
@@ -293,7 +299,7 @@
    // top-level {ok:true, subjectId, embedPlayerUrl, ...} response.
    const d=data.detail||data.data?.detail||data.data||data.result||data;
    if(!d||typeof d!=="object"||(!d.title&&!d.subjectId&&!d.embedPlayerUrl&&!d.episodes&&!d.totalEpisodes))throw new Error(data.error||"Details API returned no usable title data.");
-   watchDetail=d;episodes=Array.isArray(d.episodes)?d.episodes:[];if(!episodes.length&&findEmbedUrl(d))episodes=[{label:"Play Movie",number:1,seasonNumber:0}];currentDubs=Array.isArray(d.dubs)?d.dubs:[];
+   watchDetail=d;episodes=Array.isArray(d.episodes)?d.episodes:[];if(!episodes.length)episodes=[{label:"Play Movie",number:0,episodeNumber:0,seasonNumber:0,isMovie:true,kind:"movie"}];currentDubs=Array.isArray(d.dubs)?d.dubs:[];
    const poster=safeImage(d.poster),typeHint=[d.type,d.mediaType,d.typeBadge,d.category,d.categoryPath].join(" ").toLowerCase();
    const isDrama=/series|tv|drama|show|serial|web\s*series/.test(typeHint)||episodes.some(e=>/episode|season|ep\s*\d|s\d+\s*e\d+/i.test(String(e.kind||e.label||"")));
    const listTitle=isDrama?"Episodes":"Available Versions";

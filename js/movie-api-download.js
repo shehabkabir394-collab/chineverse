@@ -26,13 +26,19 @@ function getSources(ep){
  return rows.filter(s=>{try{return !!s.quality&&new URL(s.url).protocol==="https:"&&!/m3u8|hls/i.test(s.type)&&!/\.m3u8(?:$|[?#])/i.test(s.url);}catch{return false;}})
  .sort((a,b)=>Number(b.quality.replace("p",""))-Number(a.quality.replace("p","")));
 }
+function downloadProxyUrl(ep,index,quality){
+ const subjectId=subjectIdOf();if(!subjectId||!detail?.detailPath)return "";
+ const coords=episodeCoords(ep,index)[0];
+ const query=new URLSearchParams({subjectId,detailPath:detail.detailPath,se:String(coords.se),ep:String(coords.ep),quality:quality||"best",filename:safeName(detail?.title)+"-"+safeName(ep?.label||("Episode "+(index+1)))});
+ return "/api/movie-api/download-file?"+query.toString();
+}
 function updateSources(){
  const ep=episodes[selected];downloadable=getSources(ep);
  const quality=$("#downloadQuality"),action=$("#downloadAction"),status=$("#downloadStatus");
  quality.innerHTML=downloadable.length?downloadable.map((s,i)=>'<option value="'+i+'">'+esc(s.quality)+(s.language?" · "+esc(s.language):"")+'</option>').join(""):'<option value="">No direct MP4 quality</option>';
  quality.disabled=!downloadable.length;
- $("#downloadLinks").innerHTML=downloadable.map((s,i)=>'<a class="ms-download-link" href="'+esc(s.url)+'" target="_blank" rel="noopener"><span>Download '+esc(s.quality)+'<small>'+(s.language?esc(s.language):"Direct MP4")+'</small></span><b>⬇</b></a>').join("");
- if(downloadable.length){action.href=downloadable[0].url;action.setAttribute("aria-disabled","false");action.textContent="⚡ ONE CLICK DOWNLOAD · "+downloadable[0].quality;action.setAttribute("download",safeName(detail?.title)+"-"+safeName(ep?.label||("Episode "+(selected+1)))+"-"+downloadable[0].quality+".mp4");status.textContent=downloadable.length+"টি MP4 quality পাওয়া গেছে।";}
+ $("#downloadLinks").innerHTML=downloadable.map((s,i)=>'<a class="ms-download-link" href="'+esc(downloadProxyUrl(ep,selected,s.quality))+'"><span>Download '+esc(s.quality)+'<small>'+(s.language?esc(s.language):"Direct MP4")+'</small></span><b>⬇</b></a>').join("");
+ if(downloadable.length){action.href=downloadProxyUrl(ep,selected,downloadable[0].quality);action.setAttribute("aria-disabled",action.href?"false":"true");action.textContent="⚡ ONE CLICK DOWNLOAD · "+downloadable[0].quality;action.removeAttribute("download");status.textContent=downloadable.length+"টি MP4 quality পাওয়া গেছে।";}
  else{action.href="#";action.removeAttribute("download");action.setAttribute("aria-disabled","true");action.textContent="Download source unavailable";status.textContent="এই Episode-এর সরাসরি MP4 source পাওয়া যায়নি। অন্য Episode নির্বাচন করে দেখুন।";}
  $("#downloadZip").hidden=episodes.length<2||!subjectIdOf();
  renderEpisodeList();
@@ -40,12 +46,12 @@ function updateSources(){
 async function loadStreamSources(index){
  const ep=episodes[index],subjectId=subjectIdOf();if(!subjectId)return;
  for(const c of episodeCoords(ep,index)){
-  try{const r=await fetch("/api/movie-api/stream?subjectId="+encodeURIComponent(subjectId)+"&se="+c.se+"&ep="+c.ep,{cache:"no-store"});const data=await r.json();if(!r.ok||data?.ok===false)continue;
+  try{const r=await fetch("/api/movie-api/stream?subjectId="+encodeURIComponent(subjectId)+"&detailPath="+encodeURIComponent(detail?.detailPath||"")+"&se="+c.se+"&ep="+c.ep,{cache:"no-store"});const data=await r.json();if(!r.ok||data?.ok===false)continue;
    const incoming=getSources(data);if(incoming.length){ep.sources=[...(ep.sources||[]),...incoming];ep.downloadButtons=[];return;}
   }catch(e){console.warn("Stream source lookup",e);}
  }
 }
-$("#downloadQuality").addEventListener("change",()=>{const s=downloadable[Number($("#downloadQuality").value)];if(!s)return;const ep=episodes[selected],a=$("#downloadAction");a.href=s.url;a.setAttribute("aria-disabled","false");a.textContent="⚡ ONE CLICK DOWNLOAD · "+s.quality;a.setAttribute("download",safeName(detail?.title)+"-"+safeName(ep?.label||("Episode "+(selected+1)))+"-"+s.quality+".mp4");});
+$("#downloadQuality").addEventListener("change",()=>{const s=downloadable[Number($("#downloadQuality").value)];if(!s)return;const ep=episodes[selected],a=$("#downloadAction");a.href=downloadProxyUrl(ep,selected,s.quality);a.setAttribute("aria-disabled",a.href?"false":"true");a.textContent="⚡ ONE CLICK DOWNLOAD · "+s.quality;a.setAttribute("download",safeName(detail?.title)+"-"+safeName(ep?.label||("Episode "+(selected+1)))+"-"+s.quality+".mp4");});
 function renderEpisodeList(){
  const section=$("#downloadEpisodeSection"),list=$("#downloadEpisodeList");
  if(episodes.length<2){section.hidden=true;return;}
@@ -66,7 +72,7 @@ $("#downloadEpisodeList").addEventListener("click",async e=>{
 async function fetchEpisode(subjectId,item,index){
  let last="No downloadable MP4 source";
  for(const c of episodeCoords(item,index)){
-  const url="/api/movie-api/download-file?subjectId="+encodeURIComponent(subjectId)+"&se="+c.se+"&ep="+c.ep+"&quality=best";
+  const url="/api/movie-api/download-file?subjectId="+encodeURIComponent(subjectId)+"&detailPath="+encodeURIComponent(detail?.detailPath||"")+"&se="+c.se+"&ep="+c.ep+"&quality=best";
   try{const r=await fetch(url,{cache:"no-store"});if(!r.ok){let msg="HTTP "+r.status;try{const j=await r.json();msg=j.error||msg;}catch{}last=msg;continue;}
    const type=(r.headers.get("content-type")||"").toLowerCase();if(type.includes("json")||type.includes("text/html")){last="Server returned a message instead of video";continue;}
    const blob=await r.blob();if(!blob.size){last="Empty video file";continue;}return {blob,coords:c};
