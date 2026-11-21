@@ -1,27 +1,15 @@
-const BASE = "https://hd-hcfs.onrender.com/api/trial/stream";
-const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
-export async function onRequestGet({ request, env }) {
-  if (!(env.MOVIEBOX_API_KEY || env.MOVIE_API_KEY || env.MOVIE_API_KOY)) return json({ error: "Movie API key is not configured." }, 503);
-  const incoming = new URL(request.url);
-  const title = (incoming.searchParams.get("title") || "").trim();
-  const subjectId = (incoming.searchParams.get("subjectId") || "").trim();
-  const se = Math.max(0, Math.floor(Number(incoming.searchParams.get("se")) || 0));
-  const ep = Math.max(0, Math.floor(Number(incoming.searchParams.get("ep")) || 0));
-  if ((!title && !subjectId) || title.length > 180 || !/^[a-zA-Z0-9_-]{1,160}$/.test(subjectId || "fallback")) return json({ error: "Provide a valid title or subjectId." }, 400);
-  const upstream = new URL(BASE);
-  if (title) upstream.searchParams.set("title", title);
-  if (subjectId) upstream.searchParams.set("subjectId", subjectId);
-  upstream.searchParams.set("se", String(se));
-  upstream.searchParams.set("ep", String(ep));
-  try {
-    const response = await fetch(upstream.toString(), {
-      headers: { "X-API-Key": (env.MOVIEBOX_API_KEY || env.MOVIE_API_KEY || env.MOVIE_API_KOY), "Accept": "application/json" },
-      signal: AbortSignal.timeout(20000)
-    });
-    const body = await response.text();
-    let data; try { data = JSON.parse(body); } catch { return json({ error: "Stream API returned invalid JSON." }, 502); }
-    if (!response.ok) return json({ error: "Stream API returned HTTP " + response.status, details: data?.message || data?.error || null }, 502);
-    delete data.apiKey; delete data.trial;
-    return json(data);
-  } catch { return json({ error: "Could not load stream sources." }, 502); }
+import {upstream,rootData,itemsFrom,parseEncodedPath,response} from "../../_shared/moviebox.js";
+export async function onRequestGet({request}){
+ const u=new URL(request.url),title=(u.searchParams.get("title")||"").trim(),se=Math.max(0,Number(u.searchParams.get("se"))||0),ep=Math.max(0,Number(u.searchParams.get("ep"))||0);
+ let subjectId=(u.searchParams.get("subjectId")||"").trim(),detailPath=(u.searchParams.get("detailPath")||"").trim();
+ if(!detailPath){const parsed=parseEncodedPath(u.searchParams.get("path"));detailPath=parsed.detailPath;subjectId=subjectId||parsed.subjectId;}
+ if((!subjectId||!detailPath)&&title){
+  try{const sr=await upstream("/wefeed-h5api-bff/subject/search",{method:"POST",body:{keyword:title,page:1,perPage:5,subjectType:0}});const item=itemsFrom(rootData(sr)).find(x=>String(x.title||"").toLowerCase()===title.toLowerCase())||itemsFrom(rootData(sr))[0];if(item){subjectId=subjectId||item.subjectId;detailPath=detailPath||item.detailPath;}}catch{}
+ }
+ if(!subjectId||!detailPath)return response({ok:false,error:"A valid subjectId and detailPath are required for playback."},400);
+ try{const q=new URLSearchParams({subjectId,detailPath,se:String(se),ep:String(ep),streamSignType:"1"});
+  const raw=await upstream("/wefeed-h5api-bff/subject/play?"+q.toString(),{referer:"https://movie-box.co/movies/"+detailPath+"?id="+subjectId,timeout:25000});
+  const d=rootData(raw)||{},streams=Array.isArray(d.streams)?d.streams:Array.isArray(d.sources)?d.sources:[];
+  return response({ok:true,...d,streams,subjectId,detailPath},200,"no-store");
+ }catch(e){return response({ok:false,error:e.message||"Stream sources unavailable."},502);}
 }
