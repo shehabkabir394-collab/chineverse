@@ -10,6 +10,8 @@ export async function onRequestGet({request}){
  try{const q=new URLSearchParams({subjectId,detailPath,se:String(se),ep:String(ep),streamSignType:"1"});
   const raw=await upstream("/wefeed-h5api-bff/subject/play?"+q.toString(),{referer:"https://movie-box.co/movies/"+detailPath+"?id="+subjectId,timeout:25000});
   const d=rootData(raw)||{},streams=Array.isArray(d.streams)?d.streams:Array.isArray(d.sources)?d.sources:[];
-  return response({ok:true,...d,streams,subjectId,detailPath},200,"no-store");
+  let captions=[];const streamId=streams[0]?.id||streams[0]?.streamId||streams[0]?.stream_id;
+  if(streamId){try{const cap=rootData(await upstream("/wefeed-h5api-bff/subject/caption?"+new URLSearchParams({format:String(streams[0]?.format||"MP4"),id:String(streamId),subjectId,detailPath})))||{};captions=Array.isArray(cap.captions)?cap.captions:[];}catch{}}
+  return response({ok:true,...d,streams,captions,subjectId,detailPath},200,"no-store");
  }catch(e){return response({ok:false,error:e.message||"Stream sources unavailable."},502);}
 }
