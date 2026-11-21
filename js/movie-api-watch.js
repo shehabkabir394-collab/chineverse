@@ -18,8 +18,18 @@
    video?.parentNode?.insertBefore(embedFrame,video);
   }
   embedFrame.src=src;embedFrame.hidden=false;
-  if(video){video.pause();video.removeAttribute("src");video.load();video.hidden=true;}
-  if(playerApi?.wrap)playerApi.wrap.hidden=true;
+  if(video){
+   video.pause();video.removeAttribute("src");video.load();
+   video.hidden=true;video.setAttribute("hidden","");
+   video.style.setProperty("display","none","important");
+   const ownPlayer=video.closest(".cv-player");
+   if(ownPlayer){ownPlayer.hidden=true;ownPlayer.setAttribute("hidden","");ownPlayer.style.setProperty("display","none","important");}
+  }
+  // Hard-disable every CineVerse-built player surface; only the provider iframe remains visible.
+  document.querySelectorAll(".cv-player, #movieWatchVideo, video.movie-player").forEach(el=>{
+   el.hidden=true;el.setAttribute("hidden","");el.style.setProperty("display","none","important");
+  });
+  if(playerApi?.wrap){playerApi.wrap.hidden=true;playerApi.wrap.setAttribute("hidden","");playerApi.wrap.style.setProperty("display","none","important");}
   if(message)message.textContent="Universal HD player loaded · Use Next Server inside the player to switch servers.";
   return true;
  }
