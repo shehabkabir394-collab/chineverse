@@ -1,4 +1,4 @@
-const BASE = "https://hd-w0l1.onrender.com/api/trial/related";
+const BASE = "https://hd-hcfs.onrender.com/api/trial/related";
 const json = (data, status = 200, cache = "no-store") => new Response(JSON.stringify(data), {
   status,
   headers: {
