@@ -1,4 +1,4 @@
-const BASE = "https://hd-w0l1.onrender.com/api/trial/details";
+const BASE = "https://hd-hcfs.onrender.com/api/trial/details";
 const json = (data, status = 200) => new Response(JSON.stringify(data), {
   status, headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" }
 });
