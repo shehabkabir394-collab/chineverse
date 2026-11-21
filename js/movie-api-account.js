@@ -21,7 +21,7 @@ async function initPlatforms(){
  const raw=[...arr(d.platforms),...arr(d.platformList),...arr(d.platformCategories)];
  if(!raw.length){try{const cr=await fetch("/api/movie-api/categories",{cache:"no-store"}),cd=await cr.json();const cats=arr(cd.categories||cd.items||cd.data||cd);raw.push(...cats.filter(x=>/platform/i.test(String(x.type||x.kind||x.categoryType||""))||x.platformName||x.platforms));}catch{}}
  platformNames=[...new Map(raw.map(x=>[title(x).toLowerCase(),x]).filter(x=>x[0])).values()];
- if(!platformNames.length)return;
+ if(!platformNames.length)platformNames=["Netflix","Hoichoi","Zee5","PrimeVideo","Disney"].map(name=>({name}));
  platformBox.hidden=false;
  platformBox.innerHTML='<div class="section-head"><div><p class="eyebrow">EXPLORE BY PLATFORM</p><h2>Streaming <em>Platforms</em></h2></div></div><div class="cv-platform-tabs">'+platformNames.map((x,i)=>'<button type="button" class="cv-platform-tab" data-platform="'+esc(title(x))+'">'+esc(title(x))+'</button>').join("")+'</div><div id="cvPlatformResults"></div>';
  platformBox.addEventListener("click",e=>{const b=e.target.closest("[data-platform]");if(!b)return;platformBox.querySelectorAll(".cv-platform-tab").forEach(x=>x.classList.toggle("active",x===b));loadPlatform(b.dataset.platform);});
