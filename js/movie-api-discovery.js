@@ -31,12 +31,12 @@
  }
  const api=async(path)=>{const r=await fetch(path,{headers:{Accept:"application/json"}});const d=await r.json().catch(()=>({}));if(!r.ok||d.ok===false)throw new Error(d.error||"API unavailable");return d;};
  const section=(id,title,eyebrow,items,mode="cards")=>{
-  if(!items.length)return "";
-  const cards=items.slice(0,12).map(x=>{
+  if(!items.length && id!=="sports")return "";
+  const cards=items.length ? items.slice(0,12).map(x=>{
    const p=pathOf(x),img=imageOf(x),title=titleOf(x),sub=x.language||x.categoryName||x.type||x.description||"";
    const href=p?"watch.html?path="+encodeURIComponent(p):safeUrl(x.url||x.link||x.playUrl||x.webUrl);
    return '<a class="cv-extra-card" href="'+esc(href||"#")+'" '+(!href?'aria-disabled="true"':'')+'>'+(img?'<img loading="lazy" src="'+esc(img)+'" alt="">':'<span class="cv-extra-placeholder">▶</span>')+'<span class="cv-extra-copy"><b>'+esc(title)+'</b><small>'+esc(sub)+'</small></span></a>';
-  }).join("");
+  }).join("") : '<div class="cv-extra-empty">No live channels are available right now. Please refresh later.</div>';
   return '<section class="cv-extra-section" id="'+esc(id)+'"><div class="section-head"><div><p class="eyebrow">'+esc(eyebrow)+'</p><h2>'+esc(title)+'</h2></div></div><div class="cv-extra-grid">'+cards+'</div></section>';
  };
  const extras=$("#movieApiExtraSections");
