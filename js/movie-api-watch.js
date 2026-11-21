@@ -78,7 +78,14 @@
    if(requestId!==streamRequest)return;
    const streamRoot=payload.stream||payload.data||payload.result||payload;
    const embedUrl=payload.embedPlayerUrl||payload.embed_player_url||payload.stream?.embedPlayerUrl||payload.data?.embedPlayerUrl||payload.result?.embedPlayerUrl||watchDetail?.embedPlayerUrl||watchDetail?.embed_player_url;
-   if(embedUrl&&showEmbedPlayer(embedUrl)){
+   const streamItems=Array.isArray(streamRoot.sources)?streamRoot.sources:Array.isArray(streamRoot.streams)?streamRoot.streams:Array.isArray(streamRoot.urls)?streamRoot.urls:[];
+   currentSubtitles=getSubtitles(streamRoot,payload,ep,detail);
+   const normalized=streamItems.map(s=>({url:s.url||s.playUrl||s.play_url||s.src||s.file||s.streamUrl||s.stream_url,quality:s.quality||s.resolution||s.label||"720p",provider:s.provider||s.name||"Movie API",type:s.type||s.format||s.mimeType||"",audioLanguage:getLang(s)})).filter(s=>{try{const u=new URL(s.url);return u.protocol==="https:"&&(u.hostname==="hd-w0l1.onrender.com"||u.hostname==="hd-hcfs.onrender.com"||u.hostname==="mb-stream.rahamanabduar2.workers.dev");}catch{return false;}});
+   if(normalized.length)sources=normalized.map(s=>({url:s.url,quality:/^\\d+$/.test(String(s.quality))?String(s.quality)+"p":String(s.quality),provider:s.provider,mime:/m3u8|hls/i.test(s.type+" "+s.url)?"application/vnd.apple.mpegurl":"video/mp4",audioLanguage:s.audioLanguage}));
+   // Prefer CineVerse's own player when direct MP4/HLS sources are available.
+   // Provider embed is only a fallback when no direct source can be used.
+   if(sources.length)hideEmbedPlayer();
+   else if(embedUrl&&showEmbedPlayer(embedUrl)){
     currentSources=[];currentSubtitles=getSubtitles(payload,streamRoot,ep,detail);
     $("#movieWatchNow").textContent=ep.label||("Episode "+(ep.number||index+1));
     root.querySelectorAll("[data-watch-episode]").forEach((b,i)=>b.classList.toggle("active",i===index));
@@ -87,11 +94,6 @@
     const unmute=$("#movieWatchUnmute");if(unmute)unmute.hidden=true;
     return;
    }
-   hideEmbedPlayer();
-   const streamItems=Array.isArray(streamRoot.sources)?streamRoot.sources:Array.isArray(streamRoot.streams)?streamRoot.streams:Array.isArray(streamRoot.urls)?streamRoot.urls:[];
-   currentSubtitles=getSubtitles(streamRoot,payload,ep,detail);
-   const normalized=streamItems.map(s=>({url:s.url||s.playUrl||s.src||s.file,quality:s.quality||s.resolution||s.label||"720p",provider:s.provider||s.name||"Movie API",type:s.type||s.format||"",audioLanguage:getLang(s)})).filter(s=>{try{const u=new URL(s.url);return u.protocol==="https:"&&(u.hostname==="hd-w0l1.onrender.com"||u.hostname==="hd-hcfs.onrender.com"||u.hostname==="mb-stream.rahamanabduar2.workers.dev");}catch{return false;}});
-   if(normalized.length)sources=normalized.map(s=>({url:s.url,quality:/^\d+$/.test(String(s.quality))?String(s.quality)+"p":String(s.quality),provider:s.provider,mime:/m3u8|hls/i.test(s.type)?"application/vnd.apple.mpegurl":"video/mp4",audioLanguage:s.audioLanguage}));
   }catch(err){console.warn("Stream endpoint unavailable; using detail sources",err);}
   if(requestId!==streamRequest)return;
   if(!sources.length){message.textContent="No playable source is available for this episode or version.";return;}
