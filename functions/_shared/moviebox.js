@@ -2,7 +2,11 @@
 // All upstream requests stay server-side; no provider credentials are exposed to browsers.
 const MAIN = "https://h5-api.aoneroom.com";
 const SPORT = "https://h5-sport-api.aoneroom.com";
-const REFERER = "https://moviebox01.com/";
+const REFERER = "https://moviebox.ph/";
+const PROVIDER_HOST = "moviebox.ph";
+let guestToken = "";
+let guestTokenAt = 0;
+let tokenPromise = null;
 const jsonHeaders = { "Accept": "application/json", "Content-Type": "application/json", "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36" };
 
 function md5(input) {
