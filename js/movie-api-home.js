@@ -94,24 +94,28 @@
  }
 
 
- const platformSection=$("#movieApiPlatformSection");
+  const platformSection=$("#movieApiPlatformSection");
  const platformChoices=[
   {name:"Netflix",logo:"https://cdn.simpleicons.org/netflix/E50914"},
+  {name:"Hoichoi",logo:"https://cdn.simpleicons.org/hoichoi/E50914"},
+  {name:"Zee5",logo:"https://cdn.simpleicons.org/zee5/8230C6"},
   {name:"Prime Video",logo:"https://cdn.simpleicons.org/amazonprimevideo/00A8E1"},
-  {name:"Disney+",logo:"https://cdn.simpleicons.org/disneyplus/113CCF"},
-  {name:"Hulu",logo:"https://cdn.simpleicons.org/hulu/1CE783"},
-  {name:"Max",logo:"https://cdn.simpleicons.org/max/FFFFFF"},
-  {name:"Apple TV+",logo:"https://cdn.simpleicons.org/appletv/FFFFFF"},
-  {name:"Paramount+",logo:"https://cdn.simpleicons.org/paramountplus/0064FF"},
-  {name:"Peacock",logo:"https://cdn.simpleicons.org/peacock/FFFFFF"},
-  {name:"Crunchyroll",logo:"https://cdn.simpleicons.org/crunchyroll/F47521"}
+  {name:"Disney+",logo:"https://cdn.simpleicons.org/disneyplus/113CCF"}
  ];
  function renderPlatforms(){
   if(!platformSection||!hero)return;
   platformSection.classList.add("cv-platform-section");
-  hero.insertAdjacentElement("afterend",platformSection);
+  if(hero.nextElementSibling!==platformSection)hero.insertAdjacentElement("afterend",platformSection);
   platformSection.hidden=false;
-  platformSection.innerHTML='<div class="cv-platform-head"><div><p class="eyebrow">STREAMING SERVICES</p><h2>Explore by <em>platform</em></h2></div></div><div class="cv-platform-logos" role="group" aria-label="Streaming platforms">'+platformChoices.map(p=>'<a class="cv-platform-logo" href="platform.html?name='+encodeURIComponent(p.name)+'"><img loading="lazy" decoding="async" src="'+esc(p.logo)+'" alt="'+esc(p.name)+' logo" onerror="this.hidden=true"><span>'+esc(p.name)+'</span></a>').join("")+'</div>';
+  platformSection.dataset.cvPlatformLock="1";
+  platformSection.innerHTML='<div class="cv-platform-head"><p class="eyebrow">EXPLORE BY PLATFORM</p><h2>Streaming <em>Platforms</em></h2></div><div class="cv-platform-logos" role="group" aria-label="Streaming platforms">'+platformChoices.map(p=>'<a class="cv-platform-logo" href="platform.html?name='+encodeURIComponent(p.name)+'" aria-label="Browse '+esc(p.name)+'"><img loading="lazy" decoding="async" src="'+esc(p.logo)+'" alt=""><span>'+esc(p.name)+'</span></a>').join("")+'</div>';
+ }
+ renderPlatforms();
+ if(platformSection&&!platformSection.dataset.cvPlatformObserver){
+  platformSection.dataset.cvPlatformObserver="1";
+  new MutationObserver(()=>{
+   if(!platformSection.querySelector(".cv-platform-logo")||platformSection.querySelector(".movie-api-row,.movie-api-card,.cv-platform-results"))renderPlatforms();
+  }).observe(platformSection,{childList:true,subtree:true});
  }
  function renderHero(){
   if(!hero)return;
