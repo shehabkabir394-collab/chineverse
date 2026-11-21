@@ -41,7 +41,7 @@ export function response(data,status=200,cache="no-store"){
   return new Response(JSON.stringify(data),{status,headers:{"Content-Type":"application/json; charset=utf-8","Cache-Control":cache,"X-Content-Type-Options":"nosniff"}});
 }
 function headers(extra={}) {
-  return {...jsonHeaders,"Referer":REFERER,"X-Client-Info":JSON.stringify({timezone:"Asia/Dhaka"}),"X-Vip-Restrict":"0","X-No-High-Risk-Restrict":"1","X-Request-Lang":"en","X-Client-Token":clientToken(),...extra};
+  return {...jsonHeaders,"Referer":REFERER,"X-Client-Info":JSON.stringify({timezone:"Asia/Dhaka"}),"X-Request-Lang":"en","X-Client-Token":clientToken(),...extra};
 }
 export async function upstream(path,{method="GET",body,host=MAIN,referer=REFERER,timeout=18000}={}) {
   const url=host+path;
