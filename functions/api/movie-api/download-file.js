@@ -7,7 +7,7 @@ const getItems=data=>{
 const sourceUrl=s=>s?.downloadUrl||s?.download_url||s?.url||s?.link||s?.fileUrl||s?.file_url||s?.downloadLink||s?.download_link||s?.src||"";
 const qualityOf=s=>String(s.quality||s.resolution||s.label||s.name||s.title||"").match(/\d{3,4}/)?.[0]||"";
 export async function onRequestGet({request,env}){
- const apiKey = env.MOVIEBOX_API_KEY || env.MOVIE_API_KEY || env.MOVIE_API_KOY; if(!apiKey)return json({error:"Movie API key is not configured."},503);
+ const apiKey = env.MOVIEBOX_API_KEY || env.MOVIE_API_KEY || env.MOVIE_API_KOY || env.MOVIE_API_KOY; if(!apiKey)return json({error:"Movie API key is not configured."},503);
  const u=new URL(request.url),subjectId=(u.searchParams.get("subjectId")||"").trim(),title=(u.searchParams.get("title")||"").trim(),se=Math.max(0,Math.floor(Number(u.searchParams.get("se"))||0)),ep=Math.max(0,Math.floor(Number(u.searchParams.get("ep"))||0)),requestedQuality=String(u.searchParams.get("quality")||"").toLowerCase(),quality=requestedQuality==="best"?"best":requestedQuality.replace(/[^0-9]/g,"");
  if(!/^[a-zA-Z0-9_-]{1,160}$/.test(subjectId)||!(quality==="best"||/^\d{3,4}$/.test(quality)))return json({error:"Invalid episode or quality."},400);
  const api=new URL(BASE);if(subjectId)api.searchParams.set("subjectId",subjectId);else api.searchParams.set("title",title);api.searchParams.set("se",String(se));api.searchParams.set("ep",String(ep));api.searchParams.set("apiKey",apiKey);
