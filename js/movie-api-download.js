@@ -66,7 +66,7 @@ $("#downloadEpisodeList").addEventListener("click",async e=>{
 async function fetchEpisode(subjectId,item,index){
  let last="No downloadable MP4 source";
  for(const c of episodeCoords(item,index)){
-  const url="/api/movie-api/download-file?subjectId="+encodeURIComponent(subjectId)+"&se="+c.se+"&ep="+c.ep+"&quality=best";
+  const url="/api/movie-api/download-file?subjectId="+encodeURIComponent(subjectId)+"&detailPath="+encodeURIComponent(detail?.detailPath||"")+"&se="+c.se+"&ep="+c.ep+"&quality=best";
   try{const r=await fetch(url,{cache:"no-store"});if(!r.ok){let msg="HTTP "+r.status;try{const j=await r.json();msg=j.error||msg;}catch{}last=msg;continue;}
    const type=(r.headers.get("content-type")||"").toLowerCase();if(type.includes("json")||type.includes("text/html")){last="Server returned a message instead of video";continue;}
    const blob=await r.blob();if(!blob.size){last="Empty video file";continue;}return {blob,coords:c};
