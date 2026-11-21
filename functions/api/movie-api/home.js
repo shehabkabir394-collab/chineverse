@@ -11,14 +11,14 @@ const json = (data, status = 200) =>
   });
 
 export async function onRequestGet({ request, env }) {
-  if (!(env.MOVIEBOX_API_KEY || (env.MOVIEBOX_API_KEY || env.MOVIE_API_KEY))) {
+  if (!(env.MOVIEBOX_API_KEY || env.MOVIE_API_KEY || env.MOVIE_API_KOY || env.MOVIE_API_KOY)) {
     return json({ error: "Movie API key is not configured." }, 503);
   }
 
 try {
     const response = await fetch(API, {
       headers: {
-        "X-API-Key": (env.MOVIEBOX_API_KEY || (env.MOVIEBOX_API_KEY || env.MOVIE_API_KEY)),
+        "X-API-Key": (env.MOVIEBOX_API_KEY || env.MOVIE_API_KEY || env.MOVIE_API_KOY || env.MOVIE_API_KOY),
         "Accept": "application/json"
       },
       signal: AbortSignal.timeout(15000)
