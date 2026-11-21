@@ -521,3 +521,7 @@
  #home>.ms-hero-slider .ms-featured-poster{flex-basis:36%!important;width:36%!important;max-width:36%!important;}
  #home>.ms-hero-slider .ms-featured-poster img{height:185px!important;}
 }
+
+/* Hero poster should remain a clean movie poster, not a phone/device-like framed box. */
+#home>.ms-hero-slider .ms-featured-poster{background:transparent!important;border:0!important;border-radius:0!important;padding:0!important;box-shadow:none!important;}
+#home>.ms-hero-slider .ms-featured-poster img{background:transparent!important;border-radius:12px!important;box-shadow:0 14px 32px rgba(0,0,0,.48)!important;object-fit:contain!important;}
