@@ -2,7 +2,7 @@ import {upstream,rootData,normalizeHome,response} from "../../_shared/moviebox.j
 export async function onRequestGet(){
  try{
   const [home,trend]=await Promise.all([
-   upstream("/wefeed-h5api-bff/home?host=movie-box.co"),
+   upstream("/wefeed-h5api-bff/home?host=moviebox.ph"),
    upstream("/wefeed-h5api-bff/subject/trending?page=1&perPage=28").catch(()=>null)
   ]);
   return response(normalizeHome(home,trend),200,"public, max-age=60, s-maxage=120, stale-while-revalidate=300");
