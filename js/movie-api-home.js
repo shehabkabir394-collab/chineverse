@@ -92,6 +92,22 @@
   visible.forEach(item=>homeRenderedKeys.add(pathOf(item)||String(item.id||item.title||"").trim().toLowerCase()));
   return '<section class="movie-api-row"><div class="section-head"><div><p class="eyebrow">'+esc(badgeText)+'</p><h2>'+esc(title)+'</h2></div><a class="btn ghost" href="catalog.html?category='+encodeURIComponent(target||"/type/movies")+'">View all →</a></div><div class="movie-api-shelf">'+visible.map(card).join("")+'</div></section>';
  }
+
+ const platformSection=$("#movieApiPlatformSection");
+ const platformChoices=[{name:"Netflix",logo:"https://cdn.simpleicons.org/netflix/E50914"},{name:"Prime Video",logo:"https://cdn.simpleicons.org/amazonprimevideo/00A8E1"},{name:"Disney+",logo:"https://cdn.simpleicons.org/disneyplus/113CCF"},{name:"Hulu",logo:"https://cdn.simpleicons.org/hulu/1CE783"},{name:"Max",logo:"https://cdn.simpleicons.org/max/FFFFFF"},{name:"Apple TV+",logo:"https://cdn.simpleicons.org/appletv/FFFFFF"},{name:"Paramount+",logo:"https://cdn.simpleicons.org/paramountplus/0064FF"},{name:"Peacock",logo:"https://cdn.simpleicons.org/peacock/FFFFFF"},{name:"Crunchyroll",logo:"https://cdn.simpleicons.org/crunchyroll/F47521"}];
+ function renderPlatforms(){
+  if(!platformSection||!hero)return;
+  hero.insertAdjacentElement("afterend",platformSection);platformSection.hidden=false;
+  platformSection.innerHTML='<div class="cv-platform-head"><div><p class="eyebrow">STREAMING SERVICES</p><h2>Explore by <em>platform</em></h2><p class="muted">Choose a streaming service to explore its movies and series.</p></div></div><div class="cv-platform-logos" role="group" aria-label="Streaming platforms">'+platformChoices.map((p,i)=>'<button type="button" class="cv-platform-logo '+(i===0?'active':'')+'" data-platform="'+esc(p.name)+'" aria-pressed="'+(i===0?'true':'false')+'"><img loading="lazy" decoding="async" src="'+esc(p.logo)+'" alt="" onerror="this.hidden=true"><span>'+esc(p.name)+'</span></button>').join("")+'</div><div class="cv-platform-status" aria-live="polite">Loading platform titles…</div><div class="cv-platform-results"></div>';
+  const buttons=[...platformSection.querySelectorAll("[data-platform]")],result=platformSection.querySelector(".cv-platform-results"),message=platformSection.querySelector(".cv-platform-status");let requestId=0;
+  async function selectPlatform(name,button){const id=++requestId;buttons.forEach(b=>{const active=b===button;b.classList.toggle("active",active);b.setAttribute("aria-pressed",String(active));});result.innerHTML="";message.textContent="Loading "+name+" titles…";
+   try{const response=await fetch("/api/movie-api/platform?name="+encodeURIComponent(name)+"&page=1",{headers:{Accept:"application/json"},cache:"default"});const payload=await response.json();if(!response.ok||payload.ok!==true)throw new Error(payload.error||"Platform API unavailable");if(id!==requestId)return;
+    const items=Array.isArray(payload.items)?payload.items:Array.isArray(payload.results)?payload.results:Array.isArray(payload.data?.items)?payload.data.items:[];const unique=new Map();items.filter(item=>!isNigerianItem(item)).forEach(item=>{const key=pathOf(item)||String(item.id||item.title||"");if(key&&!unique.has(key))unique.set(key,item);});const list=[...unique.values()];
+    if(!list.length){message.textContent="এই platform-এর কোনো title পাওয়া যায়নি।";return;}message.textContent=name+" · "+list.length+" titles";result.innerHTML=list.slice(0,24).map(card).join("");
+   }catch(error){if(id===requestId)message.textContent=name+" load করা যায়নি: "+(error.message||"Unknown error");}
+  }
+  buttons.forEach(button=>button.addEventListener("click",()=>selectPlatform(button.dataset.platform,button)));result.addEventListener("click",event=>{const button=event.target.closest("[data-path]");if(button?.dataset.path)location.href="watch.html?path="+encodeURIComponent(button.dataset.path);});selectPlatform("Netflix",buttons[0]);
+ }
  function renderHero(){
   if(!hero)return;
   const banners=Array.isArray(home.banners)?home.banners:[];
@@ -360,6 +376,7 @@
   status.textContent="";
   status.hidden=true;
   renderHero();
+  renderPlatforms();
  }
  root.addEventListener("pointerdown",e=>{
   const shelf=e.target.closest(".movie-api-shelf");
