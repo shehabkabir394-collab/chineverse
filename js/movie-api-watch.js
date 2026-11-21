@@ -4,6 +4,29 @@
  const safeImage=s=>/^https:\/\//i.test(s||"")?s:"";
  const params=new URLSearchParams(location.search),path=params.get("path")||"",root=$("#movieWatchRoot"),status=$("#movieWatchStatus");
  let episodes=[],playerApi=null,selected=-1,currentSources=[],currentDubs=[],watchDetail=null,streamRequest=0,currentSubtitles=[],currentSuggestedMarkup="";
+ let embedFrame=null;
+ function validEmbedUrl(value){try{const u=new URL(String(value||""));return u.protocol==="https:"?u.href:"";}catch{return "";}}
+ function showEmbedPlayer(value){
+  const src=validEmbedUrl(value);if(!src)return false;
+  const video=$("#movieWatchVideo"),message=$("#movieWatchMessage");
+  if(!embedFrame){
+   embedFrame=document.createElement("iframe");embedFrame.id="movieWatchEmbed";embedFrame.title="Movie and episode player";
+   embedFrame.allow="autoplay; fullscreen; encrypted-media; picture-in-picture";embedFrame.allowFullscreen=true;
+   embedFrame.referrerPolicy="strict-origin-when-cross-origin";
+   embedFrame.style.cssText="display:block;width:100%;aspect-ratio:16/9;min-height:240px;border:0;border-radius:14px;background:#000";
+   video?.parentNode?.insertBefore(embedFrame,video);
+  }
+  embedFrame.src=src;embedFrame.hidden=false;
+  if(video){video.pause();video.removeAttribute("src");video.load();video.hidden=true;}
+  if(playerApi?.wrap)playerApi.wrap.hidden=true;
+  if(message)message.textContent="Universal HD player loaded · Use Next Server inside the player to switch servers.";
+  return true;
+ }
+ function hideEmbedPlayer(){
+  if(embedFrame){embedFrame.src="about:blank";embedFrame.hidden=true;}
+  const video=$("#movieWatchVideo");if(video)video.hidden=false;
+  if(playerApi?.wrap)playerApi.wrap.hidden=false;
+ }
  const getLang=o=>String(o?.audioLanguage||o?.dubLanguage||o?.language||o?.lang||o?.audio||o?.label||o?.name||"").trim();
  const isHindi=s=>/^(hi|hin|hindi)([-_ ]|$)/i.test(String(s||"").trim())||/hindi|हिन्दी|हिंदी/i.test(String(s||""));
  const isHindiDubbed=item=>item?._hindiCatalog===true||[item?.language,item?.audioLanguage,item?.audioLanguages,item?.dubLanguage,item?.dubLanguages,item?.availableLanguages,item?.languages,item?.audio].some(v=>Array.isArray(v)?v.some(x=>isHindi(getLang(x)||x?.code)):isHindi(v));
@@ -54,6 +77,17 @@
    const payload=await response.json();
    if(requestId!==streamRequest)return;
    const streamRoot=payload.stream||payload.data||payload.result||payload;
+   const embedUrl=payload.embedPlayerUrl||payload.embed_player_url||payload.stream?.embedPlayerUrl||payload.data?.embedPlayerUrl||payload.result?.embedPlayerUrl||watchDetail?.embedPlayerUrl||watchDetail?.embed_player_url;
+   if(embedUrl&&showEmbedPlayer(embedUrl)){
+    currentSources=[];currentSubtitles=getSubtitles(payload,streamRoot,ep,detail);
+    $("#movieWatchNow").textContent=ep.label||("Episode "+(ep.number||index+1));
+    root.querySelectorAll("[data-watch-episode]").forEach((b,i)=>b.classList.toggle("active",i===index));
+    const dl=$("#movieWatchDownload");if(dl)dl.href="download.html?path="+encodeURIComponent(path)+"&episode="+index;
+    const audioBox=$("#movieWatchAudioBox");if(audioBox)audioBox.innerHTML='<span class="muted">Server selection and audio switching are available inside the universal player.</span>';
+    const unmute=$("#movieWatchUnmute");if(unmute)unmute.hidden=true;
+    return;
+   }
+   hideEmbedPlayer();
    const streamItems=Array.isArray(streamRoot.sources)?streamRoot.sources:Array.isArray(streamRoot.streams)?streamRoot.streams:Array.isArray(streamRoot.urls)?streamRoot.urls:[];
    currentSubtitles=getSubtitles(streamRoot,payload,ep,detail);
    const normalized=streamItems.map(s=>({url:s.url||s.playUrl||s.src||s.file,quality:s.quality||s.resolution||s.label||"720p",provider:s.provider||s.name||"Movie API",type:s.type||s.format||"",audioLanguage:getLang(s)})).filter(s=>{try{const u=new URL(s.url);return u.protocol==="https:"&&(u.hostname==="hd-w0l1.onrender.com"||u.hostname==="hd-hcfs.onrender.com"||u.hostname==="mb-stream.rahamanabduar2.workers.dev");}catch{return false;}});
@@ -203,7 +237,7 @@
   try{
    const response=await fetch("/api/movie-api/details?path="+encodeURIComponent(path),{cache:"no-store"}),data=await response.json();
    if(!response.ok||!data.detail)throw new Error(data.error||"Details unavailable.");
-   const d=data.detail;watchDetail=d;episodes=Array.isArray(d.episodes)?d.episodes:[];currentDubs=Array.isArray(d.dubs)?d.dubs:[];
+   const d=data.detail;watchDetail=d;episodes=Array.isArray(d.episodes)?d.episodes:[];if(!episodes.length&&(d.embedPlayerUrl||d.embed_player_url))episodes=[{label:"Play Movie",number:1,seasonNumber:0}];currentDubs=Array.isArray(d.dubs)?d.dubs:[];
    const poster=safeImage(d.poster),typeHint=[d.type,d.mediaType,d.typeBadge,d.category,d.categoryPath].join(" ").toLowerCase();
    const isDrama=/series|tv|drama|show|serial|web\s*series/.test(typeHint)||episodes.some(e=>/episode|season|ep\s*\d|s\d+\s*e\d+/i.test(String(e.kind||e.label||"")));
    const listTitle=isDrama?"Episodes":"Available Versions";
