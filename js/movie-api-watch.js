@@ -258,7 +258,7 @@
    try{
     const query=new URLSearchParams({se:String(Number(ep.seasonNumber??ep.season??seasonFallback)||0),ep:String(Number(ep.number??ep.episodeNumber??(index+1))||index+1),quality:"best"});
     const sid=watchDetail?.subjectId||watchDetail?.subject_id||watchDetail?.commentSubjectId||watchDetail?.comment_subject_id||watchDetail?.contentId||watchDetail?.id||watchDetail?._id;
-    if(sid!=null)query.set("subjectId",String(sid));if(watchDetail?.title)query.set("title",String(watchDetail.title));
+    if(sid!=null)query.set("subjectId",String(sid));if(watchDetail?.detailPath)query.set("detailPath",String(watchDetail.detailPath));if(watchDetail?.title)query.set("title",String(watchDetail.title));
     const response=await fetch("/api/movie-api/download-file?"+query.toString(),{cache:"no-store"});
     if(!response.ok)throw new Error("HTTP "+response.status);
     const blob=await response.blob();if(!blob.size)throw new Error("Empty file");
