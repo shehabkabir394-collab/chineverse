@@ -1,4 +1,4 @@
-const BASE = "https://hd-w0l1.onrender.com/api/trial/stream";
+const BASE = "https://hd-hcfs.onrender.com/api/trial/stream";
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
 export async function onRequestGet({ request, env }) {
   if (!env.MOVIE_API_KEY) return json({ error: "Movie API key is not configured." }, 503);
