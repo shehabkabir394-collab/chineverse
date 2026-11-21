@@ -79,12 +79,23 @@
    if(requestId!==streamRequest)return;
    const streamRoot=payload.stream||payload.data||payload.result||payload;
    const embedUrl=findEmbedUrl(payload)||findEmbedUrl(watchDetail);
+   // Restore the provider's universal embedded player as the primary player.
+   // Keep the built-in CineVerse video player hidden.
+   if(embedUrl&&showEmbedPlayer(embedUrl)){
+    currentSources=[];currentSubtitles=getSubtitles(streamRoot,payload,ep,detail);
+    $("#movieWatchNow").textContent=ep.label||("Episode "+(ep.number||index+1));
+    root.querySelectorAll("[data-watch-episode]").forEach((b,i)=>b.classList.toggle("active",i===index));
+    const dl=$("#movieWatchDownload");if(dl)dl.href="download.html?path="+encodeURIComponent(path)+"&episode="+index;
+    const audioBox=$("#movieWatchAudioBox");if(audioBox)audioBox.hidden=true;
+    const unmute=$("#movieWatchUnmute");if(unmute)unmute.hidden=true;
+    return;
+   }
    const streamItems=Array.isArray(streamRoot.sources)?streamRoot.sources:Array.isArray(streamRoot.streams)?streamRoot.streams:Array.isArray(streamRoot.urls)?streamRoot.urls:[];
    currentSubtitles=getSubtitles(streamRoot,payload,ep,detail);
    const normalized=streamItems.map(s=>({url:s.url||s.playUrl||s.play_url||s.src||s.file||s.streamUrl||s.stream_url,quality:s.quality||s.resolution||s.label||"720p",provider:s.provider||s.name||"Movie API",type:s.type||s.format||s.mimeType||"",audioLanguage:getLang(s)})).filter(s=>{try{const u=new URL(s.url);const kind=String(s.type||"").toLowerCase();return u.protocol==="https:"&&(u.hostname==="hd-w0l1.onrender.com"||u.hostname==="hd-hcfs.onrender.com"||u.hostname==="mb-stream.rahamanabduar2.workers.dev")&&(kind==="mp4"||kind==="m3u8"||kind.includes("mpegurl")||/\/api\/mb-stream\.mp4|\.m3u8(?:$|[?#])/i.test(u.pathname+u.search));}catch{return false;}});
    if(normalized.length)sources=normalized.map(s=>({url:s.url,quality:(String(s.quality).match(/\d+/)?.[0]||"720")+"p",provider:s.provider,mime:/m3u8|hls/i.test(s.type+" "+s.url)?"application/vnd.apple.mpegurl":"video/mp4",audioLanguage:s.audioLanguage}));
-   // Prefer direct MP4/HLS sources in the custom CineVerse player.
-   if(sources.length){
+   // Direct sources are not used while the provider embed is available.
+   if(false&&sources.length){
     currentSources=sources;
     currentSubtitles=getSubtitles(streamRoot,payload,ep,detail);
     hideEmbedPlayer();
