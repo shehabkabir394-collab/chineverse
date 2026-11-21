@@ -148,7 +148,7 @@
   const activeSources=sourcesForLanguage(initialGroup,selectedLang);
   // The native CineVerse player is intentionally not mounted or shown.
   video.pause();video.removeAttribute("src");video.load();video.hidden=true;
-  const audioBox=$("#movieWatchAudioBox");if(audioBox)audioBox.hidden=true;
+  if(audioBox)audioBox.hidden=true;
   $("#movieWatchUnmute").hidden=true;
   message.textContent="Universal embedded player URL was not returned by the API. Please check the provider's stream response.";
  }
