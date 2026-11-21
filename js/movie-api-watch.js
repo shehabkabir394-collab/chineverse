@@ -245,9 +245,14 @@
  async function load(){
   if(!/^\/mb\/[a-zA-Z0-9_./-]{1,300}$/.test(path)){status.textContent="Invalid title link.";return;}
   try{
-   const response=await fetch("/api/movie-api/details?path="+encodeURIComponent(path),{cache:"no-store",signal:AbortSignal.timeout(18000)}),data=await response.json();
-   if(!response.ok||!data.detail)throw new Error(data.error||"Details unavailable.");
-   const d=data.detail;watchDetail=d;episodes=Array.isArray(d.episodes)?d.episodes:[];if(!episodes.length&&findEmbedUrl(d))episodes=[{label:"Play Movie",number:1,seasonNumber:0}];currentDubs=Array.isArray(d.dubs)?d.dubs:[];
+   const response=await fetch("/api/movie-api/details?path="+encodeURIComponent(path),{cache:"no-store",signal:AbortSignal.timeout(25000)});
+   const data=await response.json();
+   if(!response.ok)throw new Error(data.error||("Details API HTTP "+response.status));
+   // Accept both proxy-normalized {detail:{...}} and the original MovieBox
+   // top-level {ok:true, subjectId, embedPlayerUrl, ...} response.
+   const d=data.detail||data.data?.detail||data.data||data.result||data;
+   if(!d||typeof d!=="object"||(!d.title&&!d.subjectId&&!d.embedPlayerUrl&&!d.episodes&&!d.totalEpisodes))throw new Error(data.error||"Details API returned no usable title data.");
+   watchDetail=d;episodes=Array.isArray(d.episodes)?d.episodes:[];if(!episodes.length&&findEmbedUrl(d))episodes=[{label:"Play Movie",number:1,seasonNumber:0}];currentDubs=Array.isArray(d.dubs)?d.dubs:[];
    const poster=safeImage(d.poster),typeHint=[d.type,d.mediaType,d.typeBadge,d.category,d.categoryPath].join(" ").toLowerCase();
    const isDrama=/series|tv|drama|show|serial|web\s*series/.test(typeHint)||episodes.some(e=>/episode|season|ep\s*\d|s\d+\s*e\d+/i.test(String(e.kind||e.label||"")));
    const listTitle=isDrama?"Episodes":"Available Versions";
