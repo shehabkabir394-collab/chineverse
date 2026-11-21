@@ -22,9 +22,11 @@ export async function onRequest(context) {
     return context.next();
   }
 
-  const hostname = url.hostname.toLowerCase();
-  const isProjectPreview = /^[a-z0-9-]+\.chineverse4k\.pages\.dev$/.test(hostname);
-  if (!ALLOWED_HOSTS.has(hostname) && !isProjectPreview) {
+  const isAllowedHostname = (hostname) => {
+    const host = String(hostname || "").toLowerCase();
+    return ALLOWED_HOSTS.has(host) || /^[a-z0-9-]+\\.chineverse4k\\.pages\\.dev$/.test(host);
+  };
+  if (!isAllowedHostname(url.hostname)) {
     return blocked(403, "API host is not allowed.");
   }
 
@@ -38,7 +40,12 @@ export async function onRequest(context) {
   }
 
   // If a browser sends Origin, it must be the production CineVerse origin.
-  if (origin && !ALLOWED_ORIGINS.has(origin)) {
+  let originAllowed = !origin;
+  if (origin) {
+    try { originAllowed = ALLOWED_ORIGINS.has(origin) || isAllowedHostname(new URL(origin).hostname); }
+    catch { originAllowed = false; }
+  }
+  if (!originAllowed) {
     return blocked(403, "This origin is not allowed to use the API.");
   }
 
