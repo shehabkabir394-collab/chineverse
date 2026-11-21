@@ -67,11 +67,17 @@ export function pickArray(obj,keys){
 function slugOf(x){
   return String(x?.detailPath||x?.detail_path||x?.path||x?.slug||x?.urlPath||x?.url_path||"").replace(/^\/+|\/+$/g,"");
 }
-export function normalizeItem(item){
-  if(!item||typeof item!=="object")return item;
-  const id=item.subjectId??item.subject_id??item.contentId??item.content_id??item.id??item._id??"";
-  const detailPath=slugOf(item);
-  const poster=item.poster||item.cover||item.coverUrl||item.cover_url||item.image||item.imageUrl||item.image_url||item.thumbnail||item.posterUrl||item.poster_url||item.verticalCover||item.vertical_cover||item.horizontalCover||item.horizontal_cover||"";
+export function normalizeItem(raw){
+  if(!raw||typeof raw!=="object")return raw;
+  const nested=raw.subject&&typeof raw.subject==="object"?raw.subject:{};
+  const item={...nested,...raw};
+  const id=item.subjectId??item.subject_id??item.contentId??item.content_id??item.id??item._id??nested.subjectId??"";
+  const detailPath=slugOf(item)||slugOf(nested);
+  const cover=item.cover||nested.cover||{};
+  const image=item.image||{};
+  const coverUrl=typeof cover==="string"?cover:cover.url||cover.imageUrl||cover.src||"";
+  const imageUrl=typeof image==="string"?image:image.url||image.imageUrl||image.src||"";
+  const poster=item.poster||item.coverUrl||item.cover_url||item.imageUrl||item.image_url||item.thumbnail||item.posterUrl||item.poster_url||item.verticalCover||item.vertical_cover||item.horizontalCover||item.horizontal_cover||coverUrl||imageUrl||"";
   const path=detailPath?"/mb/"+detailPath+(id?"~"+String(id):""):"";
   const langs=pickArray(item,["dubs","dubList","audioList","languages","audioLanguages"]);
   const language=item.language||item.originalLanguage||item.original_language||item.lang||"";
@@ -79,7 +85,7 @@ export function normalizeItem(item){
     audioLanguages:item.audioLanguages||item.audio_languages||langs,
     title:item.title||item.name||item.subjectName||item.subject_name||"Untitled",
     year:item.year||item.releaseYear||item.release_year||"",
-    quality:item.quality||item.resolution||"HD"};
+    quality:item.quality||item.resolution||item.corner||"HD"};
 }
 export function itemsFrom(data){
   const root=rootData(data);
@@ -96,7 +102,7 @@ export function cleanResponse(data){
 export function normalizeHome(data,trendingData){
   const d=rootData(data)||{};
   const operating=pickArray(d,["operatingList","operating_list","sections","list"]);
-  const sections=operating.map((s,i)=>{
+  const sections=operating.filter(s=>String(s.type||"").toUpperCase()!=="BANNER").map((s,i)=>{
     const arr=pickArray(s,["subjects","items","subjectList","subject_list","list","contentList","contents"]);
     return {title:s.title||s.name||s.label||s.moduleName||s.module_name||("Collection "+(i+1)),
       badge:s.subtitle||s.description||s.badge||"",categoryPath:s.detailPath||s.path||s.categoryPath||"",
@@ -104,7 +110,9 @@ export function normalizeHome(data,trendingData){
   }).filter(s=>s.items.length);
   const trendRoot=rootData(trendingData)||{};
   const trending=pickArray(trendRoot,["subjectList","items","subjects","list"]).map(normalizeItem);
-  const banners=pickArray(d,["bannerList","banners","banner","bannerSubjects"]).map(normalizeItem);
+  const bannerOps=operating.filter(s=>String(s.type||"").toUpperCase()==="BANNER");
+  const bannerItems=bannerOps.flatMap(s=>pickArray(s.banner||{},["items","list","subjects"]));
+  const banners=[...pickArray(d,["bannerList","banners","bannerSubjects"]),...bannerItems].map(normalizeItem);
   const platformList=pickArray(d,["platformList","platform_list"]);
   const categories=operating.map((s,i)=>({label:s.title||s.name||s.label||("Category "+(i+1)),name:s.title||s.name||s.label||("Category "+(i+1)),path:s.detailPath||s.path||s.categoryPath||"/type/movies"}));
   const filterCats=pickArray(d,["channelList","channels"]);
