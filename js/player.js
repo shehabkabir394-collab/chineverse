@@ -31,7 +31,7 @@
   function showSkip(delta){skipHint.textContent=delta<0?"−10 seconds":"＋10 seconds";skipHint.classList.add("show");clearTimeout(showSkip.timer);showSkip.timer=setTimeout(()=>skipHint.classList.remove("show"),650);}
   const fmt=t=>{if(!Number.isFinite(t))return"0:00";const h=Math.floor(t/3600),m=Math.floor(t%3600/60),s=Math.floor(t%60);return h?h+":"+String(m).padStart(2,"0")+":"+String(s).padStart(2,"0"):m+":"+String(s).padStart(2,"0")};
   let activeHls=null,sourceToken=0,activeSource=null,failedSources=new Set();
-  const errorNotice=document.createElement("div");errorNotice.className="cv-player-error";errorNotice.hidden=true;errorNotice.setAttribute("role","status");wrap.appendChild(errorNotice);
+  const errorNotice=document.createElement("div");errorNotice.className="cv-player-error";errorNotice.hidden=true;errorNotice.setAttribute("role","status");errorNotice.style.cssText="position:absolute;z-index:8;left:8%;right:8%;top:50%;transform:translateY(-50%);padding:14px 18px;border-radius:12px;background:rgba(12,18,30,.94);color:#fff;text-align:center;font:600 14px/1.5 system-ui;";wrap.appendChild(errorNotice);
   function handleMediaError(){
    const failed=activeSource;if(!failed||failedSources.has(failed.url))return;
    failedSources.add(failed.url);
