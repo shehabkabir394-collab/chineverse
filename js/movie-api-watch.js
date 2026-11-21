@@ -82,21 +82,31 @@
    currentSubtitles=getSubtitles(streamRoot,payload,ep,detail);
    const normalized=streamItems.map(s=>({url:s.url||s.playUrl||s.play_url||s.src||s.file||s.streamUrl||s.stream_url,quality:s.quality||s.resolution||s.label||"720p",provider:s.provider||s.name||"Movie API",type:s.type||s.format||s.mimeType||"",audioLanguage:getLang(s)})).filter(s=>{try{const u=new URL(s.url);return u.protocol==="https:"&&(u.hostname==="hd-w0l1.onrender.com"||u.hostname==="hd-hcfs.onrender.com"||u.hostname==="mb-stream.rahamanabduar2.workers.dev");}catch{return false;}});
    if(normalized.length)sources=normalized.map(s=>({url:s.url,quality:/^\\d+$/.test(String(s.quality))?String(s.quality)+"p":String(s.quality),provider:s.provider,mime:/m3u8|hls/i.test(s.type+" "+s.url)?"application/vnd.apple.mpegurl":"video/mp4",audioLanguage:s.audioLanguage}));
-   // Prefer CineVerse's own player when direct MP4/HLS sources are available.
-   // Provider embed is only a fallback when no direct source can be used.
-   if(sources.length)hideEmbedPlayer();
-   else if(embedUrl&&showEmbedPlayer(embedUrl)){
+   // Always use the provider's universal embedded player. Keep CineVerse's
+   // native video player hidden; do not fall back to direct MP4/HLS playback.
+   if(embedUrl&&showEmbedPlayer(embedUrl)){
     currentSources=[];currentSubtitles=getSubtitles(payload,streamRoot,ep,detail);
     $("#movieWatchNow").textContent=ep.label||("Episode "+(ep.number||index+1));
     root.querySelectorAll("[data-watch-episode]").forEach((b,i)=>b.classList.toggle("active",i===index));
     const dl=$("#movieWatchDownload");if(dl)dl.href="download.html?path="+encodeURIComponent(path)+"&episode="+index;
-    const audioBox=$("#movieWatchAudioBox");if(audioBox)audioBox.innerHTML='<span class="muted">Server selection and audio switching are available inside the universal player.</span>';
+    const audioBox=$("#movieWatchAudioBox");if(audioBox)audioBox.hidden=true;
     const unmute=$("#movieWatchUnmute");if(unmute)unmute.hidden=true;
     return;
    }
-  }catch(err){console.warn("Stream endpoint unavailable; using detail sources",err);}
+  }catch(err){console.warn("Stream endpoint unavailable",err);}
   if(requestId!==streamRequest)return;
-  if(!sources.length){message.textContent="No playable source is available for this episode or version.";return;}
+  // If the stream endpoint failed, still try the embed URL returned by details.
+  const fallbackEmbed=watchDetail?.embedPlayerUrl||watchDetail?.embed_player_url;
+  if(fallbackEmbed&&showEmbedPlayer(fallbackEmbed)){
+   currentSources=[];currentSubtitles=getSubtitles(ep,watchDetail);
+   $("#movieWatchNow").textContent=ep.label||("Episode "+(ep.number||index+1));
+   root.querySelectorAll("[data-watch-episode]").forEach((b,i)=>b.classList.toggle("active",i===index));
+   const dl=$("#movieWatchDownload");if(dl)dl.href="download.html?path="+encodeURIComponent(path)+"&episode="+index;
+   const audioBox=$("#movieWatchAudioBox");if(audioBox)audioBox.hidden=true;
+   const unmute=$("#movieWatchUnmute");if(unmute)unmute.hidden=true;
+   return;
+  }
+  if(!sources.length){message.textContent="Universal embedded player URL was not returned by the API. The built-in CineVerse player is disabled as requested.";video.hidden=true;return;}
   if(!currentSubtitles.length)currentSubtitles=getSubtitles(ep,detail);
   currentSources=sources;
   const downloadLink=$("#movieWatchDownload");if(downloadLink)downloadLink.href="download.html?path="+encodeURIComponent(path)+"&episode="+index;
@@ -135,14 +145,11 @@
   const initialGroup=serverGroups.find(([name])=>name===activeProvider)?.[1]||sources;
   const selectedLang=initialGroup.find(s=>isHindi(s.audioLanguage))?.audioLanguage||initialGroup.find(s=>s.audioLanguage)?.audioLanguage||"auto";
   const activeSources=sourcesForLanguage(initialGroup,selectedLang);
-  if(!playerApi){
-   playerApi=window.CineVersePlayer?.mount({video,sources:activeSources,subtitles:currentSubtitles,storageKey:"msbd-"+encodeURIComponent(path)+"-"+encodeURIComponent(ep.id||index),title:document.querySelector("#movieWatchRoot .ms-title-copy h1")?.textContent||"Now Playing",backUrl:"./"});
-   if(!playerApi){video.controls=true;video.src=activeSources[0].url;video.load();video.play().catch(()=>{message.textContent="Tap the video to start playback.";});}
-  }else playerApi.setSources(activeSources);
-  renderServerControls(false);
-  playerApi?.setSubtitles?.(currentSubtitles);
-  playerApi?.setSuggestions?.(currentSuggestedMarkup);
-  $("#movieWatchUnmute").hidden=false;
+  // The native CineVerse player is intentionally not mounted or shown.
+  video.pause();video.removeAttribute("src");video.load();video.hidden=true;
+  const audioBox=$("#movieWatchAudioBox");if(audioBox)audioBox.hidden=true;
+  $("#movieWatchUnmute").hidden=true;
+  message.textContent="Universal embedded player URL was not returned by the API. Please check the provider's stream response.";
  }
  const clean=s=>String(s||"").toLowerCase().replace(/[_-]+/g," ").replace(/\s+/g," ").trim();
  function suggestedGroup(item){
@@ -249,7 +256,7 @@
    const dubLabels=currentDubs.map(x=>getLang(x)).filter(Boolean);
    const hindiDub=dubLabels.some(isHindi)||episodes.some(e=>isHindi(getLang(e))||getSources(e).some(s=>isHindi(s.audioLanguage)));
    document.title=(d.title||"Watch")+" — MovieStream BD";
-   root.innerHTML='<section class="ms-title-detail">'+(poster?'<img class="ms-title-poster" src="'+esc(poster)+'" alt="'+esc(d.title||"Poster")+'">':'')+'<div class="ms-title-copy"><p class="eyebrow">MOVIESTREAM BD · '+(isDrama?"DRAMA SERIES":"MOVIE")+'</p><h1>'+esc(d.title||"Untitled")+'</h1><p class="muted">'+esc(d.releaseDate||"")+' · '+esc(d.quality||d.resolution||"")+' · '+esc(d.language||"")+'</p><p>'+esc(d.storyline||"")+'</p><p><b>Genre:</b> '+esc(d.genre||"Not specified")+'</p><p><b>Audio Languages:</b> '+esc(dubLabels.join(", ")||d.language||"Not listed")+'</p><p><b>Hindi Audio:</b> '+(hindiDub?"Available":"Not confirmed by source metadata")+'</p></div></section><section class="ms-watch-player"><div class="video-heading"><div><p class="eyebrow">NOW PLAYING</p><h2 id="movieWatchNow">Loading first '+(isDrama?"episode":"version")+'…</h2></div><button class="btn ghost" id="movieWatchUnmute" type="button" hidden>🔊 Turn Sound On</button></div><div id="movieWatchAudioBox" class="ms-audio-box"></div><p id="movieWatchMessage" class="muted" aria-live="polite">Preparing video…</p><video id="movieWatchVideo" class="movie-player" controls playsinline preload="metadata" '+(poster?'poster="'+esc(poster)+'"':'')+'></video><a id="movieWatchDownload" class="ms-download-entry" href="download.html?path='+encodeURIComponent(path)+'&episode=0"><span>⬇</span><span><b>Download</b><small>Select quality and download</small></span><span class="ms-download-arrow">›</span></a></section><section class="ms-episode-section" '+(isDrama?'':'hidden')+'><div class="section-head"><div><p class="eyebrow">'+(isDrama?"SEASON & EPISODE GUIDE":"PLAYBACK OPTIONS")+'</p><h2>'+listTitle+' <em>('+episodes.length+')</em></h2></div></div><div id="msZipProgress" class="muted" aria-live="polite"></div><div class="movie-api-episodes">'+episodeRows+'</div></section><section id="movieWatchSuggested" class="ms-suggested-section" hidden><div class="section-head"><div><p class="eyebrow">KEEP WATCHING</p><h2 id="movieWatchSuggestedTitle">Suggested for you</h2></div></div><div id="movieWatchSuggestedGrid" class="ms-suggested-grid"></div></section>';
+   root.innerHTML='<section class="ms-title-detail">'+(poster?'<img class="ms-title-poster" src="'+esc(poster)+'" alt="'+esc(d.title||"Poster")+'">':'')+'<div class="ms-title-copy"><p class="eyebrow">MOVIESTREAM BD · '+(isDrama?"DRAMA SERIES":"MOVIE")+'</p><h1>'+esc(d.title||"Untitled")+'</h1><p class="muted">'+esc(d.releaseDate||"")+' · '+esc(d.quality||d.resolution||"")+' · '+esc(d.language||"")+'</p><p>'+esc(d.storyline||"")+'</p><p><b>Genre:</b> '+esc(d.genre||"Not specified")+'</p><p><b>Audio Languages:</b> '+esc(dubLabels.join(", ")||d.language||"Not listed")+'</p><p><b>Hindi Audio:</b> '+(hindiDub?"Available":"Not confirmed by source metadata")+'</p></div></section><section class="ms-watch-player"><div class="video-heading"><div><p class="eyebrow">NOW PLAYING</p><h2 id="movieWatchNow">Loading first '+(isDrama?"episode":"version")+'…</h2></div><button class="btn ghost" id="movieWatchUnmute" type="button" hidden>🔊 Turn Sound On</button></div><div id="movieWatchAudioBox" class="ms-audio-box"></div><p id="movieWatchMessage" class="muted" aria-live="polite">Preparing video…</p><video id="movieWatchVideo" class="movie-player" hidden controls playsinline preload="none" '+(poster?'poster="'+esc(poster)+'"':'')+'></video><a id="movieWatchDownload" class="ms-download-entry" href="download.html?path='+encodeURIComponent(path)+'&episode=0"><span>⬇</span><span><b>Download</b><small>Select quality and download</small></span><span class="ms-download-arrow">›</span></a></section><section class="ms-episode-section" '+(isDrama?'':'hidden')+'><div class="section-head"><div><p class="eyebrow">'+(isDrama?"SEASON & EPISODE GUIDE":"PLAYBACK OPTIONS")+'</p><h2>'+listTitle+' <em>('+episodes.length+')</em></h2></div></div><div id="msZipProgress" class="muted" aria-live="polite"></div><div class="movie-api-episodes">'+episodeRows+'</div></section><section id="movieWatchSuggested" class="ms-suggested-section" hidden><div class="section-head"><div><p class="eyebrow">KEEP WATCHING</p><h2 id="movieWatchSuggestedTitle">Suggested for you</h2></div></div><div id="movieWatchSuggestedGrid" class="ms-suggested-grid"></div></section>';
    status.textContent="Details loaded successfully.";
    const extras=document.createElement("section");extras.className="cv-watch-community";extras.innerHTML='<section id="cvComments"><h2>Comments</h2><p class="muted">Loading comments…</p></section><section id="cvCast"><h2>Cast &amp; Crew</h2><p class="muted">Loading cast…</p></section>';root.appendChild(extras);
    const safeText=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
