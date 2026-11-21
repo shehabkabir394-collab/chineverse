@@ -24,7 +24,12 @@ export async function onRequestGet({ request, env }) {
     let data; try { data = JSON.parse(body); } catch { return json({ error: "Movie details returned invalid JSON." }, 502); }
     if (!response.ok) return json({ error: "Movie details returned HTTP " + response.status, details: data?.message || data?.error || null }, 502);
     if (!data || data.ok !== true) return json({ error: "Invalid Movie API details response." }, 502);
-    delete data.trial; delete data.apiKey;
-    return json(data);
+    // The original MovieBox endpoint returns the detail fields at the top
+    // level (not inside data.detail). Normalize both response shapes for the
+    // watch page, which reads { ok: true, detail: {...} }.
+    const detail = data.detail || data.data?.detail || data.data || data.result || data;
+    if (!detail || typeof detail !== "object") return json({ error: "Movie details are missing from the API response." }, 502);
+    delete detail.trial; delete detail.apiKey;
+    return json({ ok: true, detail });
   } catch { return json({ error: "Could not load movie details." }, 502); }
 }
