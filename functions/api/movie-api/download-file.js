@@ -9,7 +9,7 @@ function score(item) {
   return Number(String(typeof value === "object" ? value?.name || value?.label || value?.value : value).match(/\d{3,4}/)?.[0] || 0);
 }
 function safeFilename(value) {
-  return String(value || "CineVerse-Download").replace(/[\\/:*?"<>|\r\n]+/g, "-").slice(0, 100);
+  return String(value || "CineVerse-Download").replace(/[\\\/:*?"<>|\r\n]+/g, "-").slice(0, 100);
 }
 export async function onRequestGet({ request }) {
   const u = new URL(request.url);
