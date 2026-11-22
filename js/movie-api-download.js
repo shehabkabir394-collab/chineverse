@@ -22,7 +22,7 @@ function episodeCoords(item,index){
 function getSources(ep){
  const raw=[...(Array.isArray(ep?.sources)?ep.sources:[])];
  for(const b of Array.isArray(ep?.downloadButtons)?ep.downloadButtons:[])raw.push({...b,url:b.downloadUrl||b.download_url||b.url||b.link||b.fileUrl});
- const rows=raw.map(s=>{const url=s.downloadUrl||s.download_url||s.url||s.link||s.fileUrl||s.file_url;const q=String(s.quality||s.resolution||s.label||s.name||s.title||"").match(/\d{3,4}/)?.[0];return {url,quality:q? q+"p":"",language:String(s.audioLanguage||s.dubLanguage||s.language||s.lang||""),type:String(s.type||s.format||"")};});
+ const rows=raw.map(s=>{const rawUrl=s.downloadUrl||s.download_url||s.url||s.link||s.fileUrl||s.file_url||s.proxyUrl||s.proxy_url;let url=rawUrl;try{const parsed=new URL(String(rawUrl||""));const token=parsed.searchParams.get("t");if(token&&/^cp1[A-Za-z0-9._~-]{8,2048}$/.test(token))url="/api/cinepulse-media?t="+encodeURIComponent(token)+"&download=1";}catch{}const q=String(s.quality||s.resolution||s.label||s.name||s.title||"").match(/\d{3,4}/)?.[0];return {url,quality:q? q+"p":"",language:String(s.audioLanguage||s.dubLanguage||s.language||s.lang||""),type:String(s.type||s.format||"")};});
  return rows.filter(s=>{try{return !!s.quality&&new URL(s.url).protocol==="https:"&&!/m3u8|hls/i.test(s.type)&&!/\.m3u8(?:$|[?#])/i.test(s.url);}catch{return false;}})
  .sort((a,b)=>Number(b.quality.replace("p",""))-Number(a.quality.replace("p","")));
 }
@@ -65,8 +65,10 @@ $("#downloadEpisodeList").addEventListener("click",async e=>{
 });
 async function fetchEpisode(subjectId,item,index){
  let last="No downloadable MP4 source";
- for(const c of episodeCoords(item,index)){
-  const url="/api/movie-api/download-file?subjectId="+encodeURIComponent(subjectId)+"&title="+encodeURIComponent(detail?.title||"")+"&detailPath="+encodeURIComponent(detail?.detailPath||"")+"&source="+encodeURIComponent(detail?.source||"")+"&se="+c.se+"&ep="+c.ep+"&quality=best";
+ await loadStreamSources(index);
+ const candidates=getSources(item).filter(s=>s.url);
+ for(const source of candidates){
+  const url=source.url;
   try{const r=await fetch(url,{cache:"no-store"});if(!r.ok){let msg="HTTP "+r.status;try{const j=await r.json();msg=j.error||msg;}catch{}last=msg;continue;}
    const type=(r.headers.get("content-type")||"").toLowerCase();if(type.includes("json")||type.includes("text/html")){last="Server returned a message instead of video";continue;}
    const blob=await r.blob();if(!blob.size){last="Empty video file";continue;}return {blob,coords:c};
@@ -98,7 +100,7 @@ $("#downloadZip").addEventListener("click",async()=>{
 $("#downloadAction").addEventListener("click",e=>{if($("#downloadAction").getAttribute("aria-disabled")==="true")e.preventDefault();});
 async function load(){
  if(!/^\/(?:mb|movie|series)\/[a-zA-Z0-9_./-]{1,300}$/.test(path)){$("#downloadStatus").textContent="Invalid title link.";return;}
- try{const r=await fetch("/api/movie-api/details?path="+encodeURIComponent(path)+"&title="+encodeURIComponent(requestedTitle),{cache:"no-store"}),data=await r.json();if(!r.ok||!data.detail)throw new Error(data.error||"Title details unavailable.");
+ try{const r=await fetch("/api/movie-api/details?path="+encodeURIComponent(path)+"&title="+encodeURIComponent(requestedTitle),{cache:"default"}),data=await r.json();if(!r.ok||!data.detail)throw new Error(data.error||"Title details unavailable.");
   detail=data.detail;episodes=Array.isArray(detail.episodes)?detail.episodes:[];if(!episodes.length)throw new Error("No versions or episodes were returned.");
   selected=Math.min(requested,episodes.length-1);$("#downloadTitle").textContent=detail.title||"Download";$("#downloadSubtitle").textContent=episodes[selected].label||("Episode "+(selected+1));
   $("#downloadCount").textContent=episodes.length+" Episodes / Versions";$("#downloadType").textContent=episodes.length>1?"Full Drama":"Single Video";
