@@ -17,8 +17,8 @@ export async function onRequest(context) {
   const { request } = context;
   const url = new URL(request.url);
 
-  // Apply only to the MovieBox proxy API; leave pages and other APIs untouched.
-  if (!url.pathname.startsWith("/api/movie-api/")) {
+  // Apply origin and host protections to MovieBox and CinePulse proxy APIs; leave other routes untouched.
+  if (!url.pathname.startsWith("/api/movie-api/") && !url.pathname.startsWith("/api/cinepulse/")) {
     return context.next();
   }
 
