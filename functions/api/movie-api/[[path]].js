@@ -17,7 +17,7 @@ function secureTree(value){
  if(Array.isArray(value))return value.map(secureTree);
  if(!value||typeof value!=="object")return value;
  const out={...value};
- if(out.proxyUrl){const safe=mediaLocal(out.proxyUrl);out.proxyUrl=safe;if(safe!==out.proxyUrl||String(safe).startsWith("/api/cinepulse-media")){out.url=safe;out.downloadUrl=safe;}}
+ if(out.proxyUrl){const original=out.proxyUrl;const safe=mediaLocal(original);out.proxyUrl=safe;if(safe!==original){out.url=safe;out.downloadUrl=safe;}}
  else if(typeof out.url==="string"){const safe=mediaLocal(out.url);if(safe!==out.url){out.url=safe;out.downloadUrl=safe;}}
  for(const [k,v] of Object.entries(out))if(v&&typeof v==="object")out[k]=secureTree(v);
  return out;
