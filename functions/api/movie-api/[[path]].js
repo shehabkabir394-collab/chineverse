@@ -48,6 +48,8 @@ function redactProxyKeys(value) {
   return out;
 }
 
+const CACHE_TTL = { home: 180, categories: 600, trending: 180, ranking: 180, catalog: 120, "updates-24h": 120, upcoming: 300, details: 600, related: 300, platform: 180, search: 45, suggest: 45, "hot-search": 60, "filter-options": 600, status: 30, stream: 20 };
+
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
@@ -95,6 +97,14 @@ export async function onRequest({ request, env, params }) {
   const target = new URL("/api/v1/" + route, UPSTREAM);
   target.search = query.toString();
 
+  const ttl = CACHE_TTL[legacy] || 0;
+  const cache = caches.default;
+  const cacheKey = new Request(target.toString(), { method: "GET" });
+  if (request.method === "GET" && ttl > 0) {
+    const cached = await cache.match(cacheKey);
+    if (cached) return cached;
+  }
+
   try {
     const upstream = await fetch(target.toString(), {
       method: request.method,
@@ -113,7 +123,18 @@ export async function onRequest({ request, env, params }) {
       return new Response(JSON.stringify(payload), { status: upstream.status, headers });
     }
     const body = await upstream.arrayBuffer();
-    return new Response(body, { status: upstream.status, headers });
+    if (upstream.status === 429) {
+      const retryAfter = upstream.headers.get("retry-after");
+      if (retryAfter) headers.set("retry-after", retryAfter);
+      headers.set("cache-control", "no-store");
+    } else if (upstream.ok && request.method === "GET" && ttl > 0) {
+      headers.set("cache-control", "public, max-age=" + ttl);
+    }
+    const response = new Response(body, { status: upstream.status, headers });
+    if (upstream.ok && request.method === "GET" && ttl > 0) {
+      try { await cache.put(cacheKey, response.clone()); } catch {}
+    }
+    return response;
   } catch (error) {
     return json({ ok: false, error: "CinePulse API request failed.", detail: error?.name === "TimeoutError" ? "Upstream timeout" : "Upstream unavailable" }, 502);
   }
