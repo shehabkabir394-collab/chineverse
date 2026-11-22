@@ -70,9 +70,9 @@
   return Number(isHindiDubbed(b))-Number(isHindiDubbed(a));
  };
  const isKDrama=item=>/k[- ]?drama|korean drama|south korea/i.test([item?.title,item?.type,item?.typeBadge,item?.category,item?.categoryName,item?.genre,item?.genres,item?.country,...(Array.isArray(item?._sections)?item._sections:[])].flat().map(v=>typeof v==="object"?[v?.name,v?.label,v?.title].filter(Boolean).join(" "):String(v||"")).join(" "));
- const popularFirst=(a,b)=>chronologicalFirst(a,b)||Number(isHindiDubbed(b))-Number(isHindiDubbed(a))||Number(isPinned(b))-Number(isPinned(a))||popularity(b)-popularity(a);
+ const popularFirst=(a,b)=>Number(isHindiDubbed(b))-Number(isHindiDubbed(a))||Number(isPinned(b))-Number(isPinned(a))||popularity(b)-popularity(a)||chronologicalFirst(a,b);
  const sort=items=>[...items].sort((a,b)=>chronologicalFirst(a,b)||Number(isHindiDubbed(b))-Number(isHindiDubbed(a)));
- const prioritySort=items=>[...items].sort((a,b)=>chronologicalFirst(a,b)||Number(isHindiDubbed(b))-Number(isHindiDubbed(a)));
+ const prioritySort=items=>[...items].sort((a,b)=>Number(isHindiDubbed(b))-Number(isHindiDubbed(a))||Number(isPinned(b))-Number(isPinned(a))||popularity(b)-popularity(a)||chronologicalFirst(a,b));
  function card(item){
   const title=item.title||"Untitled",poster=posterOf(item),path=pathOf(item);
   return '<article class="movie-card movie-api-card"><button class="movie-api-poster" type="button" data-path="'+esc(path)+'" data-title="'+esc(title)+'" '+(!path?"disabled":"")+' aria-label="Open '+esc(title)+'">'+(poster?'<img loading="lazy" decoding="async" src="'+esc(poster)+'" alt="'+esc(title)+' poster">':'<span class="movie-api-placeholder">MOVIESTREAM BD</span>')+'<span class="quality">'+esc(item.quality||item.typeBadge||"HD")+'</span>'+(isHindiDubbed(item)?'<span class="movie-api-language-badge">HINDI DUBBED</span>':"")+'<span class="overlay">▶<small>View details &amp; watch</small></span></button><div class="movie-info"><h3>'+esc(title)+'</h3><p>'+esc(item.language||item.country||item.typeBadge||"")+'</p></div></article>';
@@ -334,11 +334,17 @@
    const rank=s=>/trending bengali movies|bengali movies|bangla movies/i.test(text(s.title))?0:/bollywood|south indian/i.test(text(s.title))?1:/k[- ]?drama|korean drama/i.test(text(s.title))?2:/anime in hindi/i.test(text(s.title))?3:/trending india/i.test(text(s.title))?4:5;
    return rank(a)-rank(b);
   });
-  const topTen=prioritySort((Array.isArray(home._topTen)&&home._topTen.length?home._topTen:trending).filter(item=>!isNigerian(item))).slice(0,10);
+  const topTen=prioritySort((Array.isArray(home._topTen)&&home._topTen.length?home._topTen:trending).filter(item=>!isNigerian(item)&&(isMovie(item)||isDrama(item)))).slice(0,24);
   const collections=Array.isArray(home.collections)?home.collections:[];
   const upcoming=[...(Array.isArray(home.upcoming)?home.upcoming:(Array.isArray(home.upcomingReleases)?home.upcomingReleases:[]))].filter(item=>!isNigerian(item)).sort((a,b)=>Number(isHindiDubbed(b))-Number(isHindiDubbed(a))||chronologicalFirst(a,b));
   const tagged=pattern=>allLatest(allTitles.filter(item=>pattern.test(sectionTags(item)+" "+String([item.category,item.genre,item.genres,item.type,item.typeBadge,item.language,item.country,item.originCountry].join(" ")).toLowerCase())));
   const southIndian=tagged(/south indian|tamil|telugu|malayalam|kannada/);
+  const southAsia=tagged(/bangladesh|bangladeshi|bangla|dhallywood|kolkata|bengali|india|indian|bollywood|pakistan|pakistani|lollywood|nepal|nepali|sri lanka|srilankan|sinhalese|south asia/);
+  const indiaTrending=tagged(/india|indian|bollywood|south indian|tamil|telugu|malayalam|kannada/);
+  const bangladeshTrending=tagged(/bangladesh|bangladeshi|bangla|dhallywood|kolkata|bengali/);
+  const pakistanTrending=tagged(/pakistan|pakistani|lollywood|urdu/);
+  const nepalTrending=tagged(/nepal|nepali/);
+  const sriLankaTrending=tagged(/sri lanka|srilankan|sinhalese/);
   const cDramas=tagged(/c[- ]?drama|chinese drama|china/).filter(isDrama);
   const jDramas=tagged(/j[- ]?drama|japanese drama|japan/).filter(isDrama);
   const ongoing=allLatest(allTitles.filter(item=>isDrama(item)&&/ongoing|returning|in production|currently airing/i.test(String([item.status,item.releaseStatus,item.airingStatus,item._sections].join(" ")))));
@@ -351,7 +357,13 @@
   const trendingMoviesDramas=prioritySort([...new Map([...trending,...(Array.isArray(home._topTen)?home._topTen:[]),...allTitles].filter(item=>!isNigerian(item)&&(isMovie(item)||isDrama(item))).map(item=>[pathOf(item)||String(item.id||item.title||""),item]).filter(([key])=>key)).values()]).slice(0,24);
   if(newReleases.length)out+=section("New Releases — Movies & Dramas","🆕 HINDI DUBBED FIRST · RELEASE / UPLOAD TIME · NEWEST FIRST",newReleases.slice(0,24),"/new");
   if(trendingMoviesDramas.length)out+=section("Trending Movies & Dramas","🔥 HINDI DUBBED FIRST · THEN NEWEST RELEASES",trendingMoviesDramas,"/mostwatch/7d");
-  if(topTen.length)out+=section("Trending Now","🔥 MOST WATCHED THIS WEEK · HINDI DUBBED FIRST",topTen,"/mostwatch/7d");
+  if(topTen.length)out+=section("South Asia Trending Now","🌏 INDIA · BANGLADESH · PAKISTAN · NEPAL · SRI LANKA · HINDI DUBBED FIRST",topTen,"/mostwatch/7d");
+  if(southAsia.length)out+=section("South Asia — All Trending","🌏 REGIONAL TRENDING · HINDI DUBBED FIRST",prioritySort(southAsia).slice(0,24),"/mostwatch/7d");
+  if(indiaTrending.length)out+=section("India Trending","🇮🇳 BOLLYWOOD · SOUTH INDIAN · HINDI DUBBED",prioritySort(indiaTrending).slice(0,18),"/trending/india");
+  if(bangladeshTrending.length)out+=section("Bangladesh & Bengali Trending","🇧🇩 BANGLA · BENGALI · DHAKA & KOLKATA",prioritySort(bangladeshTrending).slice(0,18),"/trending/bangladesh");
+  if(pakistanTrending.length)out+=section("Pakistan Trending","🇵🇰 PAKISTANI · URDU CONTENT",prioritySort(pakistanTrending).slice(0,14),"/trending/pakistan");
+  if(nepalTrending.length)out+=section("Nepal Trending","🇳🇵 NEPALI CONTENT",prioritySort(nepalTrending).slice(0,12),"/trending/nepal");
+  if(sriLankaTrending.length)out+=section("Sri Lanka Trending","🇱🇰 SINHALA CONTENT",prioritySort(sriLankaTrending).slice(0,12),"/trending/sri-lanka");
   out+=section("All Movies","🎬 HINDI DUBBED FIRST · ALL LANGUAGES · NEWEST FIRST",allMovies.slice(0,24),"/type/movies");
   out+=section("Recently Updated","🆕 LATEST MOVIES, DRAMAS & EPISODES · NEWEST FIRST",newReleases.slice(0,24),"/new");
   regionalSections.forEach(s=>out+=section(text(s.title)||"Regional Picks",text(s.badge)||"🌏 COUNTRY & LANGUAGE COLLECTION",sort(s.items||[]).slice(0,18),text(s.categoryPath)||"/type/movies"));
@@ -439,7 +451,7 @@
   status.textContent="Loading MovieStream BD…";
   if(!home)root.innerHTML="";
   try{
-   const r=await fetch("/api/movie-api/home",{cache:"default"});
+   const r=await fetch("/api/movie-api/home",{cache:"force-cache"});
    const d=await r.json();
    if(!r.ok||d.ok!==true)throw new Error(d.error||"Catalog unavailable");
    home=normalizeHomePayload(d);
