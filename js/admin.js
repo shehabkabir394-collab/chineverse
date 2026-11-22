@@ -33,34 +33,11 @@ set("backdrop",m.backdrop_url);
 set("cast",m.cast_members);
 set("tags",m.tags);
 set("description",m.description);
-set("trailer",m.trailer_url);
-set("watchUrl",m.watch_url);
-set("videoUrl",m.video_url);
-set("download",m.download_url);
-renderDownloadInputs(Array.isArray(m.download_links)?m.download_links:[]);
+
 $("#published").checked=!!m.published;
 $("#formTitle").textContent="Edit drama";
 $("#save").textContent="Update title";
-window.scrollTo({top:0,behavior:"smooth"})}function clear(){ $("#movieForm").reset();
-
-let pendingLinkUpdates=[];
-function linkCSVTemplate(){const headers=["title","watch_url","video_url","download_url","download_links"];const sample=["Example Movie","https://authorized.example/watch","https://cdn.example/movie.mp4","https://authorized.example/download",'[{"label":"Download","quality":"1080p","url":"https://cdn.example/movie-1080p.mp4"}]'];const q=v=>'"'+String(v??"").replace(/"/g,'""')+'"';const blob=new Blob(["\uFEFF"+headers.map(q).join(",")+"\r\n"+sample.map(q).join(",")+"\r\n"],{type:"text/csv;charset=utf-8"});const u=URL.createObjectURL(blob),a=document.createElement("a");a.href=u;a.download="cineverse-video-links-template.csv";a.click();URL.revokeObjectURL(u)}
-function normalizedTitle(s){return String(s||"").normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]+/gu," ").trim()}
-function parseLinkRow(headers,values){const r={};headers.forEach((h,i)=>r[h]=String(values[i]??"").trim());const get=k=>r[k]||"";if(!get("title"))throw Error("title is required");const out={};for(const k of ["watch_url","video_url","download_url"]){if(get(k)){if(!/^https:\/\//i.test(get(k)))throw Error(k+" must use HTTPS");out[k]=get(k)}}if(get("download_links")){let v;try{v=JSON.parse(get("download_links"))}catch{throw Error("download_links must be valid JSON")};if(!Array.isArray(v)||v.some(x=>!x||typeof x.url!=="string"||!/^https:\/\//i.test(x.url)))throw Error("download_links must be a JSON array of HTTPS URLs");out.download_links=v.map(x=>({label:String(x.label||""),quality:String(x.quality||""),url:x.url}))}if(!Object.keys(out).length)throw Error("No link fields supplied");if(get("title"))out.title=get("title");return out}
-async function previewBulkLinks(){const file=$("#linksCsvFile").files[0],report=$("#linksReport"),status=$("#linksMsg");pendingLinkUpdates=[];$("#linksApply").disabled=true;report.textContent="";if(!file){msg(status,"Choose a CSV file first.",true);return}if(file.size>5*1024*1024){msg(status,"CSV must be under 5 MB.",true);return}try{msg(status,"Reading CSV and checking CineVerse titles…");const rows=parseCSV(await file.text());if(rows.length<2)throw Error("CSV needs a header and at least one link row");const headers=rows[0].map(x=>x.trim().toLowerCase().replace(/^\uFEFF/,""));const {data:movies,error}=await db().from("movies").select("id,title,watch_url,video_url,download_url,download_links");if(error)throw Error(error.message);const exactTitle=new Map();for(const m of movies||[]){const key=normalizedTitle(m.title);if(!exactTitle.has(key))exactTitle.set(key,[]);exactTitle.get(key).push(m)}const issues=[],matched=[],used=new Set();for(let i=1;i<rows.length;i++){try{const item=parseLinkRow(headers,rows[i]);let candidates=item.title?(exactTitle.get(normalizedTitle(item.title))||[]):[];if(candidates.length!==1){issues.push("Line "+(i+1)+": "+(candidates.length?"Ambiguous match":"No CineVerse movie match")+" — "+(item.title||"unknown title"));continue}const movie=candidates[0];if(used.has(movie.id)){issues.push("Line "+(i+1)+": duplicate CSV match for "+movie.title);continue}used.add(movie.id);const patch={};for(const k of ["watch_url","video_url","download_url","download_links"]){if(item[k]!==undefined){const empty=k==="download_links"?(!Array.isArray(movie[k])||movie[k].length===0):!movie[k];if($("#linksOverwrite").checked||empty)patch[k]=item[k]}}if(Object.keys(patch).length)matched.push({id:movie.id,title:movie.title,patch});else issues.push("Line "+(i+1)+": existing links kept for "+movie.title)}catch(e){issues.push("Line "+(i+1)+": "+e.message)}}pendingLinkUpdates=matched;report.innerHTML="<b>Preview:</b> "+matched.length+" title(s) ready to update; "+issues.length+" row(s) skipped.<br>"+matched.slice(0,40).map(x=>"✓ "+esc(x.title)+" — "+esc(Object.keys(x.patch).join(", "))).join("<br>")+(issues.length?"<hr><b>Skipped:</b><br>"+issues.slice(0,30).map(esc).join("<br>"):"");$("#linksApply").disabled=!matched.length;msg(status,matched.length?"Preview ready. Nothing has been changed yet.":"No matching updates found.",!matched.length)}catch(e){msg(status,e.message||"Preview failed.",true)}}
-async function applyBulkLinks(){const status=$("#linksMsg");if(!pendingLinkUpdates.length)return;if(!confirm("Apply links to "+pendingLinkUpdates.length+" CineVerse title(s)?"))return;$("#linksApply").disabled=true;let done=0;try{for(const item of pendingLinkUpdates){const {error}=await db().from("movies").update(item.patch).eq("id",item.id);if(error)throw Error("Updated "+done+" before error: "+error.message);done++}pendingLinkUpdates=[];$("#linksReport").textContent="Successfully updated "+done+" CineVerse title(s).";msg(status,"Bulk link import completed.");load()}catch(e){msg(status,e.message,true)}finally{$("#linksApply").disabled=!pendingLinkUpdates.length}}
-$("#linksTemplate").onclick=linkCSVTemplate;$("#linksPreview").onclick=previewBulkLinks;$("#linksApply").onclick=applyBulkLinks;
-
-renderDownloadInputs([]);
-$("#movieId").value="";
-$("#published").checked=true;
-$("#mediaType").value="series";
-$("#countryInput").value="";
-$("#qualityInput").value="1080p";
-$("#contentStatus").value="Released";
-$("#formTitle").textContent="Add a drama";
-$("#save").textContent="Save title";
-msg($("#formMsg"),"")}async function del(id){if(!confirm("Delete this title? This cannot be undone."))return;
+window.scrollTo({top:0,behavior:"smooth"})}function clear(){$("#movieForm").reset();$("#movieId").value="";$("#published").checked=true;$("#mediaType").value="series";$("#countryInput").value="";$("#qualityInput").value="1080p";$("#contentStatus").value="Released";$("#formTitle").textContent="Add a drama";$("#save").textContent="Save title";msg($("#formMsg"),"")}async function del(id){if(!confirm("Delete this title? This cannot be undone."))return;
 const {error}=await db().from("movies").delete().eq("id",id);
 if(error)msg($("#formMsg"),error.message,true);
 else{msg($("#formMsg"),"Title deleted.");
@@ -87,15 +64,12 @@ $("#loginPanel").classList.remove("hidden");
 msg($("#loginMsg"),"Signed out.")};
 $("#refresh").onclick=load;
 $("#clear").onclick=clear;
-$("#addDownloadLink").onclick=()=>{const links=readDownloadInputs();
-links.push({label:"",quality:"",url:""});
-renderDownloadInputs(links)};
 $("#movieForm").onsubmit=async e=>{e.preventDefault();
 if(!db()){msg($("#formMsg"),"Configure Supabase first.",true);
 return}const chosenCountry=$("#countryInput").value;
 const oldTags=$("#tags").value.trim().split(",").map(x=>x.trim()).filter(x=>x&&!/^country\s*:/i.test(x));
-const row={title:$("#title").value.trim(),media_type:"series",release_year:n("year"),quality:$("#qualityInput").value,rating:n("rating"),genre:$("#genreInput").value.trim(),language:$("#languageInput").value.trim(),runtime_minutes:n("runtime"),content_status:$("#contentStatus").value,seasons:n("seasons"),episodes:n("episodes"),poster_url:$("#poster").value.trim()||null,backdrop_url:$("#backdrop").value.trim()||null,cast_members:$("#cast").value.trim(),tags:[...oldTags,...(chosenCountry?["Country: "+chosenCountry]:[])].join(", "),description:$("#description").value.trim(),trailer_url:$("#trailer").value.trim()||null,watch_url:$("#watchUrl").value.trim()||null,video_url:$("#videoUrl").value.trim()||null,download_url:$("#download").value.trim()||null,download_links:readDownloadInputs(),published:$("#published").checked};
-if(!validHttps(row.poster_url)||!validHttps(row.backdrop_url)||!validHttps(row.trailer_url)||!validHttps(row.watch_url)||!validHttps(row.video_url)||!validHttps(row.download_url)||row.download_links.some(link=>!validHttps(link.url))){msg($("#formMsg"),"Use HTTPS URLs only.",true);
+const row={title:$("#title").value.trim(),media_type:"series",release_year:n("year"),quality:$("#qualityInput").value,rating:n("rating"),genre:$("#genreInput").value.trim(),language:$("#languageInput").value.trim(),runtime_minutes:n("runtime"),content_status:$("#contentStatus").value,seasons:n("seasons"),episodes:n("episodes"),poster_url:$("#poster").value.trim()||null,backdrop_url:$("#backdrop").value.trim()||null,cast_members:$("#cast").value.trim(),tags:[...oldTags,...(chosenCountry?["Country: "+chosenCountry]:[])].join(", "),description:$("#description").value.trim(),published:$("#published").checked};
+if(!validHttps(row.poster_url)||!validHttps(row.backdrop_url)){msg($("#formMsg"),"Use HTTPS URLs only.",true);
 return}if(row.rating!==null&&(row.rating<0||row.rating>10)){msg($("#formMsg"),"Rating must be between 0 and 10.",true);
 return}msg($("#formMsg"),"Saving…");
 const id=$("#movieId").value,result=id?await db().from("movies").update(row).eq("id",id):await db().from("movies").insert(row);
@@ -103,96 +77,6 @@ if(result.error){msg($("#formMsg"),result.error.message,true);
 return}msg($("#formMsg"),"Saved successfully.");
 clear();
 load()};
-
-
-let fetchedDetails=null;
-
-function showFetchedPreview(d){
- const fields=[["Title",d.title],["Year",d.release_year],["Genre",d.genre],["Rating",d.rating],["Quality",d.quality],["Poster URL",d.poster_url],["Video URL",d.video_url],["Download page",d.download_url],["Description",d.description]];
-
- const image=d.poster_url&&/^https:\/\//i.test(d.poster_url)?'<img class="fetch-poster" src="'+esc(d.poster_url)+'" alt="Poster preview">':"";
-
- $("#fetchPreview").innerHTML=image+'<div class="fetch-preview-fields">'+fields.filter(x=>x[1]!==null&&x[1]!==undefined&&String(x[1]).trim()!=="").map(x=>'<p><b>'+esc(x[0])+':</b> '+esc(String(x[1]).length>260?String(x[1]).slice(0,260)+"…":x[1])+'</p>').join("")+'</div><p class="tiny muted">This is a preview only. Nothing has been saved to Supabase yet.</p>';
-
- $("#fetchPreview").classList.remove("hidden");
-$("#useFetched").classList.remove("hidden");
-
-}
-async function fetchMovieDetails(){
- const url=$("#sourcePageUrl").value.trim(),status=$("#fetchMsg"),button=$("#fetchDetails");
-
- fetchedDetails=null;
-$("#fetchPreview").classList.add("hidden");
-$("#useFetched").classList.add("hidden");
-
- if(!url){msg(status,"Paste a movie download/details page URL first.",true);
-return}
- if(!/^https:\/\//i.test(url)){msg(status,"Use a public HTTPS webpage URL.",true);
-return}
- button.disabled=true;
-msg(status,"Fetching public page metadata…");
-
- try{
-  const sessionResult=await db().auth.getSession();
-const accessToken=sessionResult.data?.session?.access_token;
-if(!accessToken)throw Error("Sign in again to fetch movie details.");
-
-  const response=await fetch("/api/fetch-movie",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+accessToken},body:JSON.stringify({url})});
-
-  const data=await response.json();
-
-  if(!response.ok||data.error)throw Error(data.error||"Could not fetch details.");
-
-  if(!data.title&&!data.description&&!data.poster_url&&!data.release_year)throw Error("No useful metadata was found. This site may block automated access; enter details manually or try another public page.");
-
-  fetchedDetails=data;
-showFetchedPreview(data);
-msg(status,"Preview ready. Check the fields, then choose Use details in form.");
-
- }catch(e){msg(status,e.message||"Fetch failed.",true)}
- finally{button.disabled=false}
-}
-function useFetchedDetails(){
- if(!fetchedDetails)return;
-
- const d=fetchedDetails;
-
- if(d.title)set("title",d.title);
-
- if(d.release_year)set("year",d.release_year);
-
- if(d.genre)set("genreInput",d.genre);
-
- if(d.rating!==null&&d.rating!==undefined)set("rating",d.rating);
-
- if(d.description)set("description",d.description);
-
- if(d.poster_url)set("poster",d.poster_url);
-
- if(d.video_url)set("videoUrl",d.video_url);
-
- if(d.download_url)set("download",d.download_url);
-
- if(d.quality){const opts=[...$("#qualityInput").options];
-const opt=opts.find(o=>o.value.toLowerCase()===d.quality.toLowerCase()||o.text.toLowerCase()===d.quality.toLowerCase());
-if(opt)$("#qualityInput").value=opt.value}
- $("#mediaType").value="movie";
-
- msg($("#formMsg"),"Details copied into the form. Review them and click Save title; nothing is saved until you do.");
-
- $("#movieForm").scrollIntoView({behavior:"smooth",block:"start"});
-
-}
-$("#fetchDetails").onclick=fetchMovieDetails;
-
-$("#useFetched").onclick=useFetchedDetails;
-
-$("#clearFetched").onclick=()=>{fetchedDetails=null;
-$("#sourcePageUrl").value="";
-$("#fetchPreview").innerHTML="";
-$("#fetchPreview").classList.add("hidden");
-$("#useFetched").classList.add("hidden");
-msg($("#fetchMsg"),"Preview cleared.")};
 
 
 function parseCSV(text){text=text.replace(/^\uFEFF/,"");
@@ -216,36 +100,9 @@ rows.push(row)}if(quoted)throw Error("CSV has an unclosed quote. Check the file 
 return rows.filter(r=>r.some(v=>String(v).trim()!==""))}
 function csvBool(v,fallback){if(v==null||String(v).trim()==="")return fallback;
 return ["true","1","yes","y","published"].includes(String(v).trim().toLowerCase())}
-function csvRow(headers,vals,forcePublish){const raw={};
-headers.forEach((h,i)=>raw[h]=String(vals[i]??"").trim());
-const get=(...keys)=>{for(const k of keys){if(raw[k]!=null&&raw[k]!=="")return raw[k]}return ""};
-const number=(...keys)=>{const v=get(...keys);
-return v===""?null:Number(v)};
-const type="series";
-const quality=get("quality","resolution")||"1080p";
-const year=number("release_year","year");
-const rating=number("rating","imdb_rating");
-const runtime=number("runtime_minutes","runtime");
-const seasons=number("seasons","season_count");
-const episodes=number("episodes","episode_count");
-const downloadLinksValue=get("download_links");
-let downloadLinks=[];
-if(downloadLinksValue){try{downloadLinks=JSON.parse(downloadLinksValue)}catch{throw Error("download_links must be a JSON array")};
-if(!Array.isArray(downloadLinks))throw Error("download_links must be a JSON array");
-downloadLinks=downloadLinks.map(x=>({label:String(x.label||""),quality:String(x.quality||""),url:String(x.url||"")}));
-if(downloadLinks.some(x=>!/^https:\/\//i.test(x.url)))throw Error("Every download link must use HTTPS")};
-const url=(...keys)=>{const v=get(...keys);
-if(!v)return null;
-if(!/^https:\/\//i.test(v))throw Error("URL fields must use HTTPS: "+keys[0]);
-return v};
-if(!get("title","name"))throw Error("Title is required");
-
-if(!["480p","720p","1080p","2k","4k uhd","hevc","other"].includes(quality.toLowerCase()))throw Error("Unsupported quality: "+quality);
-if(year!==null&&(!Number.isInteger(year)||year<1888||year>2100))throw Error("Invalid release_year");
-if(rating!==null&&(!Number.isFinite(rating)||rating<0||rating>10))throw Error("Rating must be 0–10");
-return {title:get("title","name").slice(0,180),media_type:type,release_year:year,genre:get("genre","genres"),language:get("language","languages"),quality:({"2k":"2K","4k uhd":"4K UHD"}[quality.toLowerCase()]||quality),rating,description:get("description","synopsis").slice(0,5000),poster_url:url("poster_url","poster"),backdrop_url:url("backdrop_url","backdrop"),trailer_url:url("trailer_url","trailer"),watch_url:url("watch_url","watch_page_url","watch_link"),video_url:url("video_url","video_file_url"),download_url:url("download_url","viewing_url"),download_links:downloadLinks,cast_members:get("cast_members","cast","crew"),runtime_minutes:runtime,content_status:get("content_status","status")||"Released",seasons,episodes,tags:get("tags"),published:!!forcePublish}}
-function downloadCSVTemplate(){const sample=['title','media_type','release_year','genre','language','quality','rating','description','poster_url','backdrop_url','trailer_url','watch_url','video_url','download_url','download_links','cast_members','runtime_minutes','content_status','seasons','episodes','tags','published'];
-const example=['Example Movie','movie','2024','Action, Drama','English','1080p','7.8','Short synopsis','','','','','','','','[]','Actor Name','120','Released','','','Sample','false'];
+function csvRow(headers,vals,forcePublish){const raw={};headers.forEach((h,i)=>raw[h]=String(vals[i]??"").trim());const get=(...keys)=>{for(const k of keys){if(raw[k]!=null&&raw[k]!=="")return raw[k]}return ""};const number=(...keys)=>{const v=get(...keys);return v===""?null:Number(v)};const quality=get("quality","resolution")||"1080p";const year=number("release_year","year"),rating=number("rating","imdb_rating"),runtime=number("runtime_minutes","runtime"),seasons=number("seasons","season_count"),episodes=number("episodes","episode_count");const url=(...keys)=>{const v=get(...keys);if(!v)return null;if(!/^https:\/\//i.test(v))throw Error("URL fields must use HTTPS: "+keys[0]);return v};if(!get("title","name"))throw Error("Title is required");if(!["480p","720p","1080p","2k","4k uhd","hevc","other"].includes(quality.toLowerCase()))throw Error("Unsupported quality: "+quality);if(year!==null&&(!Number.isInteger(year)||year<1888||year>2100))throw Error("Invalid release_year");if(rating!==null&&(!Number.isFinite(rating)||rating<0||rating>10))throw Error("Rating must be 0–10");return {title:get("title","name").slice(0,180),media_type:"series",release_year:year,genre:get("genre","genres"),language:get("language","languages"),quality:({"2k":"2K","4k uhd":"4K UHD"}[quality.toLowerCase()]||quality),rating,description:get("description","synopsis").slice(0,5000),poster_url:url("poster_url","poster"),backdrop_url:url("backdrop_url","backdrop"),cast_members:get("cast_members","cast","crew"),runtime_minutes:runtime,content_status:get("content_status","status")||"Released",seasons,episodes,tags:get("tags"),published:!!forcePublish}}
+function downloadCSVTemplate(){const sample=['title','media_type','release_year','genre','language','quality','rating','description','poster_url','backdrop_url','cast_members','runtime_minutes','content_status','seasons','episodes','tags','published'];
+const example=['Example Movie','movie','2024','Action, Drama','English','1080p','7.8','Short synopsis','','','','Actor Name','120','Released','','','Sample','false'];
 const quote=v=>'"'+String(v??"").replace(/"/g,'""')+'"';
 const blob=new Blob(["\uFEFF"+sample.map(quote).join(",")+"\r\n"+example.map(quote).join(",")+"\r\n"],{type:"text/csv;charset=utf-8"});
 const url=URL.createObjectURL(blob),a=document.createElement("a");
