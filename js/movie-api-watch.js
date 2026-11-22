@@ -287,7 +287,7 @@
  }
 
  async function load(){
-  if(!/^\/mb\/[a-zA-Z0-9_./-]{1,300}$/.test(path)){status.textContent="Invalid title link.";return;}
+  if(!/^\/(?:mb|movie|series)\/[a-zA-Z0-9_./-]{1,300}$/.test(path)){status.textContent="Invalid title link.";return;}
   try{
    const response=await fetch("/api/movie-api/details?path="+encodeURIComponent(path),{cache:"no-store",signal:AbortSignal.timeout(25000)});
    const data=await response.json();
