@@ -214,7 +214,7 @@
    const relatedResponse=await fetch("/api/movie-api/related?title="+encodeURIComponent(detail.title||""));
    const relatedPayload=await relatedResponse.json();
    const relatedItems=Array.isArray(relatedPayload.items)?relatedPayload.items:Array.isArray(relatedPayload.related)?relatedPayload.related:Array.isArray(relatedPayload.results)?relatedPayload.results:[];
-   const usable=relatedItems.filter(x=>x&&typeof x==="object"&&String(x.path||"").startsWith("/mb/")&&x.path!==path&&!/nigeria|nollywood/i.test(String(x.country||"")+" "+String(x.language||""))).slice(0,12);
+   const usable=relatedItems.filter(x=>x&&typeof x==="object"&&/^\\/(?:mb|movie|series)\\//.test(String(x.path||""))&&x.path!==path&&!/nigeria|nollywood/i.test(String(x.country||"")+" "+String(x.language||""))).slice(0,12);
    if(usable.length){
     title.textContent="Related to "+(detail.title||"this title");
     grid.innerHTML=usable.map(x=>'<a class="ms-suggested-card" href="watch.html?path='+encodeURIComponent(x.path)+'"><img loading="lazy" decoding="async" src="'+esc(safeImage(x.poster||x.previewImage))+'" alt="'+esc(x.title||"")+'"><span><b>'+esc(x.title||"Untitled")+'</b><small>'+esc(x.language||x.typeBadge||"")+'</small></span></a>').join("");
@@ -224,7 +224,7 @@
   const response=await fetch("/api/movie-api/home");if(!response.ok)throw new Error("Catalog API unavailable");
   const api=await response.json();if(!api.ok)return;
   const map=new Map();
-  const add=(x,section)=>{if(!x||typeof x!=="object")return;const p=String(x.path||"");if(!p.startsWith("/mb/"))return;const k=p;if(!map.has(k))map.set(k,{...x,_sections:[]});if(section&&!map.get(k)._sections.includes(section))map.get(k)._sections.push(section);};
+  const add=(x,section)=>{if(!x||typeof x!=="object")return;const p=String(x.path||"");if(!/^\\/(?:mb|movie|series)\\//.test(p))return;const k=p;if(!map.has(k))map.set(k,{...x,_sections:[]});if(section&&!map.get(k)._sections.includes(section))map.get(k)._sections.push(section);};
   ["sections","allOfficialSections"].forEach(key=>(api[key]||[]).forEach(s=>(s.items||[]).forEach(x=>add(x,s.title))));
   ["trending","comingSoon","banners"].forEach(key=>(api[key]||[]).forEach(x=>add(x,key)));
   const current=[...map.values()].find(x=>x.path===path);
