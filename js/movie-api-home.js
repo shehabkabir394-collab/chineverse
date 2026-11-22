@@ -216,6 +216,76 @@
     resetTimer();
   }
 
+  function normalizeHomeResponse(raw) {
+    if (!raw || typeof raw !== "object") return raw;
+    // The current unified API nests content under source objects (e.g. moviebox),
+    // while the older homepage renderer expects top-level banners/trending/sections.
+    const out = { ...raw, banners: [], trending: [], sections: [] };
+    const seenArrays = new Set();
+    const isCard = x => x && typeof x === "object" &&
+      (x.title || x.name) &&
+      (x.poster || x.previewImage || x.bannerImage || x.cover || x.image || x.path || x.url || x.subjectId);
+    const labelFor = key => String(key || "Featured")
+      .replace(/([a-z])([A-Z])/g, "$1 $2")
+      .replace(/[_-]+/g, " ")
+      .replace(/\b\w/g, ch => ch.toUpperCase());
+    const addArray = (key, arr) => {
+      if (!Array.isArray(arr) || seenArrays.has(arr)) return;
+      const items = arr.filter(isCard).map(item => ({
+        ...item,
+        title: item.title || item.name || "Untitled",
+        path: item.path || item.url || item.detailPath || "",
+        poster: item.poster || item.previewImage || item.bannerImage || item.cover || item.image || ""
+      }));
+      if (!items.length) return;
+      seenArrays.add(arr);
+      const k = String(key || "").toLowerCase();
+      if (/hero|banner|slideshow|spotlight|carousel/.test(k)) out.banners.push(...items);
+      else if (/trending|popular|most.?watch|hot|top.?view/.test(k)) out.trending.push(...items);
+      else out.sections.push({ title: labelFor(key), items });
+    };
+    const walk = (node, parentKey = "", depth = 0) => {
+      if (!node || typeof node !== "object" || depth > 5) return;
+      if (Array.isArray(node)) {
+        addArray(parentKey, node);
+        return;
+      }
+      for (const [key, value] of Object.entries(node)) {
+        if (value && typeof value === "object") walk(value, key, depth + 1);
+      }
+    };
+    // Keep any legacy top-level fields and avoid duplicate processing.
+    for (const key of ["banners", "trending", "sections"]) {
+      if (Array.isArray(raw[key])) {
+        if (key === "sections") {
+          raw[key].forEach(section => {
+            if (section && Array.isArray(section.items)) {
+              out.sections.push({ ...section, items: section.items.filter(isCard) });
+              seenArrays.add(section.items);
+            }
+          });
+        } else addArray(key, raw[key]);
+      }
+    }
+    walk(raw);
+    // Promote Hindi-language titles into a dedicated first shelf and spotlight candidates.
+    const allItems = [];
+    const collect = list => list.forEach(x => allItems.push(x));
+    collect(out.banners); collect(out.trending);
+    out.sections.forEach(s => collect(s.items || []));
+    const hindi = allItems.filter(x =>
+      /hindi|हिंदी|हिन्दी/i.test([x.language, x.audioLanguage, x.title, x.dubLanguage].filter(Boolean).join(" "))
+    );
+    if (hindi.length) {
+      out.sections.unshift({ title: "Hindi Dubbed & Hindi", items: [...new Map(hindi.map(x => [x.path || x.subjectId || x.title, x])).values()] });
+      if (!out.trending.length) out.trending = hindi.slice();
+    }
+    // Do not let an empty legacy shape hide valid source-nested content.
+    out.banners = [...new Map(out.banners.map(x => [x.path || x.subjectId || x.title, x])).values()];
+    out.trending = [...new Map(out.trending.map(x => [x.path || x.subjectId || x.title, x])).values()];
+    return out;
+  }
+
   function renderHomeView() {
     if (!homeData) return;
     catSection.hidden = false;
@@ -340,7 +410,7 @@
       const r = await fetch("/api/movie-api/home");
       const d = await r.json();
       if (!r.ok || d.ok !== true) throw new Error(d.error || "API unavailable");
-      homeData = d;
+      homeData = normalizeHomeResponse(d);
       renderHomeView();
     } catch (err) {
       statusEl.textContent = "Could not load catalog: " + (err?.message || "Network error");
