@@ -383,7 +383,7 @@
         : Array.isArray(streamRoot.playUrlList) ? streamRoot.playUrlList
         : [];
       const sources = rawSources
-        .filter(s => s?.url)
+        .filter(s => s && (s.url || s.playUrl || s.play_url || s.src || s.file || s.videoUrl || s.streamUrl))
         .map(s => ({
           url: s.url || s.playUrl || s.play_url || s.src || s.file || s.videoUrl || s.streamUrl,
           quality: String(s.quality || s.resolution || s.label || s.name || "720p"),
