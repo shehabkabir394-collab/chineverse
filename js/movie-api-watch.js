@@ -376,15 +376,19 @@
       const payload = await r.json();
       if (reqId !== streamReqId) return;
 
-      const streamRoot = payload.stream || payload;
-      const rawSources = Array.isArray(streamRoot.sources) ? streamRoot.sources : [];
+      const streamRoot = payload.stream || payload.data?.stream || payload.data || payload;
+      const rawSources = Array.isArray(streamRoot.sources) ? streamRoot.sources
+        : Array.isArray(streamRoot.streams) ? streamRoot.streams
+        : Array.isArray(streamRoot.playSources) ? streamRoot.playSources
+        : Array.isArray(streamRoot.playUrlList) ? streamRoot.playUrlList
+        : [];
       const sources = rawSources
         .filter(s => s?.url)
         .map(s => ({
-          url: s.url,
-          quality: String(s.quality || s.resolution || "720p"),
-          provider: s.provider || "MovieBox Direct",
-          mime: s.type || "video/mp4",
+          url: s.url || s.playUrl || s.play_url || s.src || s.file || s.videoUrl || s.streamUrl,
+          quality: String(s.quality || s.resolution || s.label || s.name || "720p"),
+          provider: s.provider || s.source || "MovieBox Direct",
+          mime: s.type || s.mime || s.mimeType || "video/mp4",
           audioLanguage: s.audioLanguage || ""
         }));
 
@@ -467,6 +471,9 @@
 
       path = targetPath;
       const d = data.detail;
+      // Normalize common image fields returned by different source adapters.
+      d.poster = d.poster || d.previewImage || d.bannerImage || d.cover || d.coverImage ||
+        d.image || d.thumbnail || d.thumbnailUrl || d.pic || "";
       watchDetail = d;
       requestedTitle = d.title || requestedTitle;
       episodes =
@@ -640,7 +647,10 @@
           : "";
 
       const staffList = Array.isArray(d.staff) ? d.staff.slice(0, 12) : [];
-      const poster = safeImg(d.poster);
+      const poster = safeImg(
+        d.poster || d.previewImage || d.bannerImage || d.cover || d.coverImage ||
+        d.image || d.thumbnail || d.thumbnailUrl || d.pic
+      );
 
       statusEl.hidden = true;
       root.innerHTML = `
