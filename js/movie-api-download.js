@@ -97,7 +97,7 @@ $("#downloadZip").addEventListener("click",async()=>{
 });
 $("#downloadAction").addEventListener("click",e=>{if($("#downloadAction").getAttribute("aria-disabled")==="true")e.preventDefault();});
 async function load(){
- if(!/^\/mb\/[a-zA-Z0-9_./-]{1,300}$/.test(path)){$("#downloadStatus").textContent="Invalid title link.";return;}
+ if(!/^\/(?:mb|movie|series)\/[a-zA-Z0-9_./-]{1,300}$/.test(path)){$("#downloadStatus").textContent="Invalid title link.";return;}
  try{const r=await fetch("/api/movie-api/details?path="+encodeURIComponent(path),{cache:"no-store"}),data=await r.json();if(!r.ok||!data.detail)throw new Error(data.error||"Title details unavailable.");
   detail=data.detail;episodes=Array.isArray(detail.episodes)?detail.episodes:[];if(!episodes.length)throw new Error("No versions or episodes were returned.");
   selected=Math.min(requested,episodes.length-1);$("#downloadTitle").textContent=detail.title||"Download";$("#downloadSubtitle").textContent=episodes[selected].label||("Episode "+(selected+1));
