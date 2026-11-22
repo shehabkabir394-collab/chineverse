@@ -305,7 +305,13 @@
    const candidates=[data.detail,data.data?.detail,data.data?.movie,data.data?.item,data.data,data.result?.detail,data.result?.movie,data.result?.item,data.result,data.movie,data.item,data].filter(x=>x&&typeof x==="object"&&!Array.isArray(x));
    const d=candidates.find(x=>x.title||x.subjectId||x.subject_id||x.episodes||x.totalEpisodes||x.embedPlayerUrl)||data;
    if(!d||typeof d!=="object"||(!d.title&&!d.subjectId&&!d.subject_id&&!d.id&&!d.episodes&&!d.totalEpisodes))throw new Error(data.error||"Details API returned no usable title data.");
-   watchDetail=d;episodes=Array.isArray(d.episodes)?d.episodes:[];currentDubs=Array.isArray(d.dubs)?d.dubs:[];
+   watchDetail=d;episodes=Array.isArray(d.episodes)?d.episodes:[];
+   if(!episodes.length&&Array.isArray(d.seasons))episodes=d.seasons.flatMap((season,si)=>{
+    const list=Array.isArray(season.episodes)?season.episodes:Array.isArray(season.items)?season.items:[];
+    return list.map((ep,ei)=>({...ep,seasonNumber:ep.seasonNumber??season.seasonNumber??season.number??si+1,number:ep.number??ep.episodeNumber??ei+1,seasonName:ep.seasonName||season.name||season.title||("Season "+(si+1))}));
+   });
+   if(!episodes.length)episodes=Array.isArray(d.episodeList)?d.episodeList:Array.isArray(d.videoList)?d.videoList:[];
+   currentDubs=Array.isArray(d.dubs)?d.dubs:[];
    // Single movies may have no episode array or embed URL in Details.
    // Still create one playable version so the Stream endpoint is queried.
    const detailType=[d.type,d.mediaType,d.typeBadge,d.category,d.categoryPath].join(" ").toLowerCase();
