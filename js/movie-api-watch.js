@@ -85,7 +85,7 @@
   try{
    const query=new URLSearchParams({title:String(detail.title||""),se:String(season),ep:String(episodeNumber)});
    if(!detail.title&&(detail.subjectId||detail.id))query.set("subjectId",String(detail.subjectId||detail.id));
-   const response=await fetch("/api/movie-api/stream?"+query.toString(),{cache:"no-store"});
+   if(detail.subjectId||detail.subject_id)query.set("subjectId",String(detail.subjectId||detail.subject_id));\n   if(detail.detailPath)query.set("detailPath",String(detail.detailPath));\n   const response=await fetch("/api/movie-api/stream?"+query.toString(),{cache:"no-store"});
    const payload=await response.json();
    if(requestId!==streamRequest)return;
    const streamRoot=payload.stream||payload.data||payload.result||payload;
