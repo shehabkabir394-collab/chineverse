@@ -27,6 +27,27 @@ const ROUTES = {
   status: "status"
 };
 
+function redactProxyKeys(value) {
+  if (Array.isArray(value)) return value.map(redactProxyKeys);
+  if (!value || typeof value !== "object") return value;
+  const out = {};
+  for (const [key, item] of Object.entries(value)) {
+    if ((key === "proxyUrl" || key === "proxy_url") && typeof item === "string") {
+      try {
+        const url = new URL(item);
+        url.searchParams.delete("api_key");
+        url.searchParams.delete("apikey");
+        out[key] = url.toString();
+      } catch {
+        out[key] = item;
+      }
+    } else {
+      out[key] = redactProxyKeys(item);
+    }
+  }
+  return out;
+}
+
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
@@ -83,10 +104,15 @@ export async function onRequest({ request, env, params }) {
       },
       signal: AbortSignal.timeout(25000)
     });
-    const body = await upstream.arrayBuffer();
+    const contentType = upstream.headers.get("content-type") || "application/json; charset=utf-8";
     const headers = new Headers();
-    headers.set("content-type", upstream.headers.get("content-type") || "application/json; charset=utf-8");
+    headers.set("content-type", contentType);
     headers.set("cache-control", "no-store");
+    if (legacy === "stream" && contentType.toLowerCase().includes("json")) {
+      const payload = redactProxyKeys(await upstream.json());
+      return new Response(JSON.stringify(payload), { status: upstream.status, headers });
+    }
+    const body = await upstream.arrayBuffer();
     return new Response(body, { status: upstream.status, headers });
   } catch (error) {
     return json({ ok: false, error: "CinePulse API request failed.", detail: error?.name === "TimeoutError" ? "Upstream timeout" : "Upstream unavailable" }, 502);
