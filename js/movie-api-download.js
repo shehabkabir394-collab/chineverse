@@ -23,7 +23,7 @@ function getSources(ep){
  const raw=[...(Array.isArray(ep?.sources)?ep.sources:[])];
  for(const b of Array.isArray(ep?.downloadButtons)?ep.downloadButtons:[])raw.push({...b,url:b.downloadUrl||b.download_url||b.url||b.link||b.fileUrl});
  const rows=raw.map(s=>{const rawUrl=s.downloadUrl||s.download_url||s.url||s.link||s.fileUrl||s.file_url||s.proxyUrl||s.proxy_url;let url=rawUrl;try{const parsed=new URL(String(rawUrl||""));const token=parsed.searchParams.get("t");if(token&&/^cp1[A-Za-z0-9._~-]{8,2048}$/.test(token))url="/api/cinepulse-media?t="+encodeURIComponent(token)+"&download=1";}catch{}const q=String(s.quality||s.resolution||s.label||s.name||s.title||"").match(/\d{3,4}/)?.[0];return {url,quality:q? q+"p":"",language:String(s.audioLanguage||s.dubLanguage||s.language||s.lang||""),type:String(s.type||s.format||"")};});
- return rows.filter(s=>{try{return !!s.quality&&new URL(s.url).protocol==="https:"&&!/m3u8|hls/i.test(s.type)&&!/\.m3u8(?:$|[?#])/i.test(s.url);}catch{return false;}})
+ return rows.filter(s=>{try{const u=new URL(s.url,location.origin);const allowed=u.protocol==="https:"||u.origin===location.origin&&u.pathname==="/api/cinepulse-media";return !!s.quality&&allowed&&!/m3u8|hls/i.test(s.type)&&!/\.m3u8(?:$|[?#])/i.test(s.url);}catch{return false;}})
  .sort((a,b)=>Number(b.quality.replace("p",""))-Number(a.quality.replace("p","")));
 }
 function updateSources(){
