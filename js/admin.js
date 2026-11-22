@@ -41,16 +41,7 @@ window.scrollTo({top:0,behavior:"smooth"})}function clear(){$("#movieForm").rese
 const {error}=await db().from("movies").delete().eq("id",id);
 if(error)msg($("#formMsg"),error.message,true);
 else{msg($("#formMsg"),"Title deleted.");
-load()}}function renderDownloadInputs(items){const host=$("#downloadLinksEditor");
-if(!host)return;
-host.innerHTML="";
-const list=items.length?items:[{label:"",quality:"",url:""}];
-list.forEach(item=>{const row=document.createElement("div");
-row.className="download-link-row";
-row.innerHTML="<label>Link label<input data-link-label placeholder=\"ZIP Episodes 01-04\" value=\""+esc(item.label||"")+"\"></label><label>Quality / range<input data-link-quality placeholder=\"720p ┬╖ 1.2 GB\" value=\""+esc(item.quality||"")+"\"></label><label>HTTPS URL<input data-link-url type=\"url\" placeholder=\"https://authorized-host.example/file\" value=\""+esc(item.url||"")+"\"></label><button type=\"button\" class=\"mini danger\" data-remove-link>Remove</button>";
-host.append(row);
-row.querySelector("[data-remove-link]").onclick=()=>{row.remove();
-if(!host.children.length)renderDownloadInputs([])}})}function readDownloadInputs(){return [...$("#downloadLinksEditor").querySelectorAll(".download-link-row")].map(row=>({label:row.querySelector("[data-link-label]").value.trim(),quality:row.querySelector("[data-link-quality]").value.trim(),url:row.querySelector("[data-link-url]").value.trim()})).filter(x=>x.url)}function validHttps(v){return !v||/^https:\/\//i.test(v)}function n(id){const v=$("#"+id).value;
+load()}}function validHttps(v){return !v||/^https:\/\//i.test(v)}function n(id){const v=$("#"+id).value;
 return v?Number(v):null}$("#loginForm").onsubmit=async e=>{e.preventDefault();
 if(!db()){setup();
 msg($("#loginMsg"),"Configure Supabase first.",true);
@@ -146,6 +137,6 @@ load()}catch(e){msg(status,e.message||"Import failed.",true)}finally{$("#csvImpo
 $("#csvTemplate").onclick=downloadCSVTemplate;
 $("#csvImport").onclick=importCSV;
 
-renderDownloadInputs([]);
+
 setup();
 if(db())db().auth.getSession().then(({data})=>{if(data.session)enter(data.session.user)})})();
