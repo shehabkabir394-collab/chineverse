@@ -28,9 +28,9 @@ function categoriesFrom(value){
 }
 function normalizeHome(raw,cats){
  const mb=raw?.moviebox||{},ml=raw?.movielinkbd||{};
- const shelves=list(mb.shelves).map(s=>({title:s.title||s.name||"Collection",badge:"CINEPULSE",categoryPath:s.categoryPath||s.path||s.category||"",items:list(s.items)}));
+ const shelves=list(mb.shelves).map(s=>({title:String(s.title||s.name||"Collection").replace(/MovieBox|MovieLinkBD/gi,"CinePulse"),badge:"CINEPULSE",categoryPath:s.categoryPath||s.path||s.category||"",items:list(s.items)}));
  const add=(title,items,path)=>{if(list(items).length)shelves.push({title,badge:"CINEPULSE",categoryPath:path,items:list(items)});};
- add("MovieLinkBD · Latest Uploads",ml.latestUploads,"/new");
+ add("Latest Uploads",ml.latestUploads,"/new");
  add("Bangla Movies",ml.bangla,"/language/bangla");
  add("Bollywood Movies",ml.bollywood,"/bollywood");
  add("South Indian Movies",ml.south,"/southIndian");
