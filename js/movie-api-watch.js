@@ -43,7 +43,7 @@
  const isHindiDubbed=item=>item?._hindiCatalog===true||[item?.language,item?.audioLanguage,item?.audioLanguages,item?.dubLanguage,item?.dubLanguages,item?.availableLanguages,item?.languages,item?.audio].some(v=>Array.isArray(v)?v.some(x=>isHindi(getLang(x)||x?.code)):isHindi(v));
  function isPlayableSource(url,type="") {try{const u=new URL(String(url||""),location.origin);const kind=String(type||"").toLowerCase();const trusted=u.protocol==="https:"||u.origin===location.origin&&u.pathname==="/api/cinepulse-media";return trusted&&(kind==="mp4"||kind==="m3u8"||kind.includes("mpegurl")||kind.includes("video/")||/\.(?:mp4|m3u8)(?:$|[?#])/i.test(u.pathname+u.search)||u.pathname==="/api/cinepulse-media");}catch{return false;}}
  function getSources(ep){
-  return (Array.isArray(ep.sources)?ep.sources:[]).filter(s=>isPlayableSource(s.url,s.type||s.mimeType||s.format)&&Number.parseInt(s.quality,10)>0)
+  return (Array.isArray(ep.sources)?ep.sources:[]).filter(s=>isPlayableSource(s.url||s.proxyUrl||s.downloadUrl,s.type||s.mimeType||s.format)&&Number.parseInt(s.quality,10)>0)
    .map(s=>({url:s.url||s.proxyUrl||s.downloadUrl,quality:(String(s.quality).match(/\d+/)?.[0]||"720")+"p",provider:String(s.provider||"Movie API"),mime:/m3u8|hls/i.test(String(s.type||"")+" "+String(s.url||""))?"application/vnd.apple.mpegurl":"video/mp4",audioLanguage:getLang(s)}))
    .sort((a,b)=>Number(isHindi(b.audioLanguage))-Number(isHindi(a.audioLanguage)));
  }
@@ -106,7 +106,7 @@
    }
    const streamItems=Array.isArray(streamRoot.sources)?streamRoot.sources:Array.isArray(streamRoot.streams)?streamRoot.streams:Array.isArray(streamRoot.urls)?streamRoot.urls:[];
    currentSubtitles=getSubtitles(streamRoot,payload,ep,detail);
-   const normalized=streamItems.map(s=>({url:s.url||s.proxyUrl||s.downloadUrl||s.playUrl||s.play_url||s.src||s.file||s.streamUrl||s.stream_url,quality:s.quality||s.resolution||s.label||"720p",provider:s.provider||s.name||"Movie API",type:s.type||s.format||s.mimeType||"",audioLanguage:getLang(s)})).filter(s=>{try{const u=new URL(s.url);const kind=String(s.type||"").toLowerCase();return isPlayableSource(s.url,kind||s.mimeType||s.format);}catch{return false;}});
+   const normalized=streamItems.map(s=>({url:s.url||s.proxyUrl||s.downloadUrl||s.playUrl||s.play_url||s.src||s.file||s.streamUrl||s.stream_url,quality:s.quality||s.resolution||s.label||"720p",provider:s.provider||s.name||"Movie API",type:s.type||s.format||s.mimeType||"",audioLanguage:getLang(s)})).filter(s=>isPlayableSource(s.url,s.type||s.mimeType||s.format));
    if(normalized.length)sources=normalized.map(s=>({url:s.url,quality:(String(s.quality).match(/\d+/)?.[0]||"720")+"p",provider:s.provider,mime:/m3u8|hls/i.test(s.type+" "+s.url)?"application/vnd.apple.mpegurl":"video/mp4",audioLanguage:s.audioLanguage}));
    // Direct sources are not used while the provider embed is available.
    if(sources.length){
