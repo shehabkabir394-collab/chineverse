@@ -119,7 +119,7 @@
      playerApi.setSources(sourcesForLanguage(sources,sources.find(s=>isHindi(s.audioLanguage))?.audioLanguage||sources[0]?.audioLanguage));
      playerApi.setSubtitles(currentSubtitles);
     }else{
-     playerApi=window.CineVersePlayer?.mount({video,sources,storageKey:"cv-moviebox-"+String(detail.subjectId||detail.id||path)+"-"+season+"-"+episodeNumber,subtitles:currentSubtitles,title:titleText,backUrl:"./"});
+     playerApi=window.CineVersePlayer?.mount({video,sources,storageKey:"cv-cinepulse-"+String(detail.subjectId||detail.id||path)+"-"+season+"-"+episodeNumber,subtitles:currentSubtitles,title:titleText,backUrl:"./"});
     }
     $("#movieWatchNow").textContent=ep.label||("Episode "+(ep.number||index+1));
     root.querySelectorAll("[data-watch-episode]").forEach((b,i)=>b.classList.toggle("active",i===index));
@@ -293,7 +293,7 @@
    const response=await fetch("/api/movie-api/details?path="+encodeURIComponent(path)+"&title="+encodeURIComponent(requestedTitle),{cache:"no-store",signal:AbortSignal.timeout(25000)});
    const data=await response.json();
    if(!response.ok)throw new Error(data.error||("Details API HTTP "+response.status));
-   // Accept both proxy-normalized {detail:{...}} and the original MovieBox
+   // Accept both proxy-normalized {detail:{...}} and the original CinePulse upstream
    // top-level {ok:true, subjectId, embedPlayerUrl, ...} response.
    const d=data.detail||data.data?.detail||data.data||data.result||data;
    if(!d||typeof d!=="object"||(!d.title&&!d.subjectId&&!d.embedPlayerUrl&&!d.episodes&&!d.totalEpisodes))throw new Error(data.error||"Details API returned no usable title data.");
