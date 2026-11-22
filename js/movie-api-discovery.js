@@ -3,7 +3,7 @@
  const $=s=>document.querySelector(s);
  const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
  const safeUrl=v=>{try{const u=new URL(String(v||""),location.origin);return ["http:","https:"].includes(u.protocol)?u.href:"";}catch{return "";}};
- const pathOf=x=>typeof x?.path==="string"&&x.path.startsWith("/mb/")?x.path:"";
+ const pathOf=x=>typeof x?.path==="string"&&/^\/(?:mb|movie|series)\//.test(x.path)?x.path:"";
  const imageOf=x=>safeUrl(x?.poster||x?.previewImage||x?.thumbnail||x?.image||x?.cover||x?.posterUrl);
  const titleOf=(x,i=0)=>{const nested=x?.channel||x?.event||x?.match||x?.stream||x?.team;const value=x?.title||x?.name||x?.label||x?.channelName||x?.channel_name||x?.eventName||x?.event_name||x?.matchName||x?.match_name||x?.streamName||x?.stream_name||x?.teamName||x?.team_name||x?.leagueName||x?.league_name||x?.keyword||x?.suggestion||x?.text||x?.value||x?.query||nested?.title||nested?.name||nested?.label||nested?.titleName;return String(value||("Live Channel "+(i+1)));};
  const arrays=d=>{
