@@ -1,93 +1,301 @@
 (() => {
- "use strict";
- const $=s=>document.querySelector(s);
- const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
- const safeUrl=v=>{try{const u=new URL(String(v||""),location.origin);return ["http:","https:"].includes(u.protocol)?u.href:"";}catch{return "";}};
- const pathOf=x=>typeof x?.path==="string"&&/^\/(?:mb|movie|series)\//.test(x.path)?x.path:"";
- const imageOf=x=>safeUrl(x?.poster||x?.previewImage||x?.thumbnail||x?.image||x?.cover||x?.posterUrl);
- const titleOf=(x,i=0)=>{const nested=x?.channel||x?.event||x?.match||x?.stream||x?.team;const value=x?.title||x?.name||x?.label||x?.channelName||x?.channel_name||x?.eventName||x?.event_name||x?.matchName||x?.match_name||x?.streamName||x?.stream_name||x?.teamName||x?.team_name||x?.leagueName||x?.league_name||x?.keyword||x?.suggestion||x?.text||x?.value||x?.query||nested?.title||nested?.name||nested?.label||nested?.titleName;return String(value||("Live Channel "+(i+1)));};
- const arrays=d=>{
-  const preferred=[];
-  const seen=new Set();
-  const walk=(v,key="",depth=0)=>{
-   if(depth>5||v==null)return;
-   if(Array.isArray(v)){
-    const values=v.filter(x=>typeof x==="string"||typeof x==="number"||(x&&typeof x==="object"));
-    if(values.length&&/(suggest|hot|keyword|items|list|results|records|data|categories|shorts|videos|sports|upcoming|channels|streams|events|matches|live|fixtures|broadcasts)/i.test(key)){
-     const sig=values.map(x=>typeof x==="object"?titleOf(x):String(x)).join("|");
-     if(!seen.has(sig)){seen.add(sig);preferred.push({key,values});}
+  "use strict";
+  const $ = s => document.querySelector(s);
+  const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const safeImg = u => (/^https?:\/\//i.test(String(u || "")) ? String(u) : "");
+  const RECENT_KEY = "cv_recent_searches_v1";
+
+  function loadRecent() {
+    try {
+      const list = JSON.parse(localStorage.getItem(RECENT_KEY) || "[]");
+      return Array.isArray(list) ? list.filter(x => typeof x === "string" && x.trim()).slice(0, 12) : [];
+    } catch {
+      return [];
     }
-    v.forEach(x=>{if(x&&typeof x==="object")walk(x,key,depth+1);});
-    return;
-   }
-   if(typeof v==="object")Object.entries(v).forEach(([k,x])=>walk(x,k,depth+1));
-  };
-  walk(d);
-  preferred.sort((a,b)=>{
-   const score=k=>(/suggest|hot|keyword/i.test(k)?3:/items|list|results|records|data/i.test(k)?2:1);
-   return score(b.key)-score(a.key)||b.values.length-a.values.length;
-  });
-  return preferred[0]?.values||[];
- }
- const api=async(path)=>{const r=await fetch(path,{headers:{Accept:"application/json"}});const d=await r.json().catch(()=>({}));if(!r.ok||d.ok===false)throw new Error(d.error||"API unavailable");return d;};
- const section=(id,title,eyebrow,items,mode="cards")=>{
-  if(!items.length && id!=="sports")return "";
-  const cards=items.length ? items.slice(0,12).map((x,i)=>{
-   const p=pathOf(x),img=imageOf(x),title=titleOf(x,i),sub=x.language||x.categoryName||x.category||x.league||x.sport||x.type||x.description||"";
-   const stream=x.stream||x.channel||x.event||{};
-   const href=p?"watch.html?path="+encodeURIComponent(p)+"&title="+encodeURIComponent(title):safeUrl(x.url||x.link||x.playUrl||x.play_url||x.streamUrl||x.stream_url||x.m3u8||x.webUrl||stream.url||stream.playUrl||stream.streamUrl);
-   return '<a class="cv-extra-card" href="'+esc(href||"#")+'" '+(!href?'aria-disabled="true"':'')+'>'+(img?'<img loading="lazy" src="'+esc(img)+'" alt="">':'<span class="cv-extra-placeholder">▶</span>')+'<span class="cv-extra-copy"><b>'+esc(title)+'</b><small>'+esc(sub)+'</small></span></a>';
-  }).join("") : '<div class="cv-extra-empty">No live channels are available right now. Please refresh later.</div>';
-  return '<section class="cv-extra-section" id="'+esc(id)+'"><div class="section-head"><div><p class="eyebrow">'+esc(eyebrow)+'</p><h2>'+esc(title)+'</h2></div></div><div class="cv-extra-grid">'+cards+'</div></section>';
- };
- const extras=$("#movieApiExtraSections");
- const search=$("#movieApiSearch");
- if(search){
-  const wrap=document.createElement("div");wrap.className="cv-search-wrap";search.parentNode.insertBefore(wrap,search);wrap.appendChild(search);
-  const panel=document.createElement("div");panel.className="cv-search-panel";panel.hidden=true;wrap.appendChild(panel);
-  let timer=0,request=0;
-  let hotItems=null,hotLoading=null;
-  const renderHot=()=>{
-   if(!hotItems?.length){panel.hidden=true;return;}
-   panel.innerHTML='<div class="cv-search-panel-heading">🔥 Trending searches</div><div class="cv-search-hot-list">'+hotItems.slice(0,12).map(x=>{const q=typeof x==="string"?x:titleOf(x);return '<a class="cv-search-hot-chip" href="catalog.html?q='+encodeURIComponent(q)+'">'+esc(q)+'</a>';}).join("")+'</div>';
-   panel.hidden=false;
-  };
-  const loadHot=async()=>{
-   if(hotItems)return hotItems;
-   if(!hotLoading)hotLoading=api("/api/movie-api/hot-search").then(d=>(hotItems=arrays(d))).catch(()=>{hotItems=[];});
-   await hotLoading;return hotItems;
-  };
-  const showSuggestions=(items)=>{
-   panel.innerHTML='<div class="cv-search-panel-heading">Search suggestions</div>'+items.slice(0,8).map(x=>{const p=pathOf(x),t=typeof x==="string"?x:titleOf(x);return '<a class="cv-search-suggestion" href="'+(p?'watch.html?path='+encodeURIComponent(p):'catalog.html?q='+encodeURIComponent(t))+'">'+esc(t)+'</a>';}).join("");
-   panel.hidden=!items.length;
-  };
-  search.addEventListener("focus",async()=>{
-   if(search.value.trim().length<2){await loadHot();if(search.value.trim().length<2)renderHot();}
-  });
-  search.addEventListener("input",()=>{
-   clearTimeout(timer);const q=search.value.trim();
-   if(q.length<2){loadHot().then(()=>{if(document.activeElement===search&&search.value.trim().length<2)renderHot();});return;}
-   panel.hidden=false;panel.innerHTML='<div class="cv-search-panel-heading">Searching…</div>';
-   timer=setTimeout(async()=>{const id=++request;try{const d=await api("/api/movie-api/suggest?q="+encodeURIComponent(q));if(id!==request||search.value.trim()!==q)return;const items=arrays(d);if(items.length)showSuggestions(items);else{panel.innerHTML='<div class="cv-search-panel-heading">No suggestions — press Enter to search</div>';panel.hidden=false;}}catch{panel.innerHTML='<div class="cv-search-panel-heading">Press Enter to search</div>';panel.hidden=false;}},260);
-  });
-  search.form?.addEventListener("submit",e=>{if(!search.value.trim()){e.preventDefault();search.focus();}});
-  document.addEventListener("click",e=>{if(!wrap.contains(e.target))panel.hidden=true;});
-  search.addEventListener("keydown",e=>{if(e.key==="Escape")panel.hidden=true;});
- }
- const loadExtras=async()=>{
-  if(!extras)return;
-  const jobs=[["upcoming","/api/movie-api/upcoming?page=1","Upcoming Releases","COMING SOON"],["shorts","/api/movie-api/shorts?page=1","Movie Shorts","QUICK WATCH"],["sports","/api/movie-api/sports","Live Sports","SPORTS & LIVE EVENTS"]];
-  const results=await Promise.all(jobs.map(async([id,url])=>{try{return {id,items:arrays(await api(url))};}catch{return {id,items:[]};}}));
-  extras.innerHTML=results.map(r=>{const def=jobs.find(x=>x[0]===r.id);return section(r.id,def[2],def[3],r.items);}).join("");
- };
- const loadCategories=async()=>{
-  try{const d=await api("/api/movie-api/categories");const cats=arrays(d).flat();const nav=$("#movieApiCategories");if(!nav||!cats.length)return;
-   const existing=new Set([...nav.querySelectorAll("a")].map(a=>a.textContent.trim().toLowerCase()));
-   cats.forEach(c=>{const label=titleOf(c),path=String(c.path||c.categoryPath||c.slug||"");if(!label||existing.has(label.toLowerCase()))return;const a=document.createElement("a");a.className="catalog-chip";a.textContent=label;a.href="catalog.html?category="+encodeURIComponent(path.startsWith("/")?path:"/"+path);nav.appendChild(a);});
-  }catch{}
- };
- // Start optional feeds after the primary homepage feed; all requests use same-origin secure proxy routes.
- loadExtras();
- loadCategories();
- // filter-options, details, stream, related, comments, staff and account routes are consumed by their respective catalog/watch/account screens.
+  }
+
+  function saveRecent(term) {
+    const clean = String(term || "").trim();
+    if (clean.length < 2) return;
+    const prev = loadRecent().filter(x => x.toLowerCase() !== clean.toLowerCase());
+    const next = [clean, ...prev].slice(0, 10);
+    try {
+      localStorage.setItem(RECENT_KEY, JSON.stringify(next));
+    } catch {}
+  }
+
+  function clearRecent() {
+    try {
+      localStorage.removeItem(RECENT_KEY);
+    } catch {}
+  }
+
+  function createOverlay() {
+    let overlay = $("#cvSearchOverlay");
+    if (overlay) return overlay;
+
+    overlay = document.createElement("div");
+    overlay.id = "cvSearchOverlay";
+    overlay.className = "cv-search-overlay";
+    overlay.hidden = true;
+    overlay.setAttribute("role", "dialog");
+    overlay.setAttribute("aria-modal", "true");
+    overlay.setAttribute("aria-label", "Search movies, series, short dramas and anime");
+
+    overlay.innerHTML = `
+      <div class="cv-search-overlay-head">
+        <button type="button" id="cvSearchBack" class="cv-icon-btn" aria-label="Close search">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+        </button>
+        <form id="cvSearchOverlayForm" class="cv-search-overlay-input-box" role="search">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="color:#98a2b3;flex-shrink:0"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <input id="cvSearchOverlayInput" type="search" placeholder="Search movies, K-Drama, anime or type…" autocomplete="off" aria-label="Search titles">
+          <button type="button" id="cvSearchOverlayClear" class="cv-clear-btn" hidden aria-label="Clear input">×</button>
+        </form>
+      </div>
+      <div class="cv-search-overlay-tabs" role="tablist" aria-label="Filter search by format">
+        <button type="button" class="cv-nav-tab active" data-search-type="0" role="tab" aria-selected="true">All</button>
+        <button type="button" class="cv-nav-tab" data-search-type="1,2" role="tab" aria-selected="false">Movie/Series</button>
+        <button type="button" class="cv-nav-tab" data-search-type="7" role="tab" aria-selected="false">ShortTV</button>
+        <button type="button" class="cv-nav-tab" data-search-type="6" role="tab" aria-selected="false">Anime</button>
+      </div>
+      <div id="cvSearchOverlayBody" class="cv-search-overlay-body"></div>
+    `;
+    document.body.appendChild(overlay);
+    return overlay;
+  }
+
+  let activeType = "0";
+  let hotCache = null;
+  let searchTimer = 0;
+  let reqSeq = 0;
+
+  async function fetchHot() {
+    if (hotCache) return hotCache;
+    try {
+      const r = await fetch("/api/movie-api/hot-search");
+      const d = await r.json();
+      hotCache = Array.isArray(d?.items) ? d.items.filter(x => typeof x === "string" || x?.title).slice(0, 14) : [];
+    } catch {
+      hotCache = ["Hindi", "Squid Game", "Anime", "K-Drama", "Action", "Bollywood"];
+    }
+    return hotCache;
+  }
+
+  function renderIdleState(body) {
+    const recent = loadRecent();
+    const hot = hotCache || [];
+    body.innerHTML = `
+      ${recent.length ? `
+        <div class="cv-recent-head">
+          <h3>Recent Searches</h3>
+          <button type="button" id="cvRecentClearBtn" class="cv-clear-btn">Clear</button>
+        </div>
+        <div class="cv-chip-wrap">
+          ${recent.map(q => `<button type="button" class="cv-search-chip" data-pick-query="${esc(q)}">${esc(q)}</button>`).join("")}
+        </div>
+      ` : ""}
+      <div class="cv-recent-head">
+        <h3>Trending Searches</h3>
+      </div>
+      <div class="cv-chip-wrap">
+        ${(hot.length ? hot : ["Hindi", "Action", "Anime", "K-Drama", "Comedy", "Thriller"])
+          .map(x => {
+            const q = typeof x === "string" ? x : String(x.title || x.word || "");
+            return q ? `<button type="button" class="cv-search-chip" data-pick-query="${esc(q)}">${esc(q)}</button>` : "";
+          })
+          .join("")}
+      </div>
+    `;
+  }
+
+  function renderResults(body, items, query) {
+    if (!items.length) {
+      body.innerHTML = `
+        <div class="cv-status-banner">
+          No results found for “${esc(query)}” in this filter. Try switching to <b>All</b> or searching another keyword.
+        </div>
+      `;
+      return;
+    }
+
+    body.innerHTML = `
+      <div class="cv-recent-head">
+        <h3>Results (${items.length})</h3>
+        <a class="cv-more-link" href="catalog.html?q=${encodeURIComponent(query)}">Full catalog ›</a>
+      </div>
+      <div class="cv-search-result-list">
+        ${items
+          .slice(0, 30)
+          .map(item => {
+            const img = safeImg(item.poster || item.previewImage || item.cover);
+            const path = item.path || "";
+            const href = path ? `watch.html?path=${encodeURIComponent(path)}&title=${encodeURIComponent(item.title || "")}` : `catalog.html?q=${encodeURIComponent(item.title || query)}`;
+            const rating = item.rating ? `<span class="cv-star">★ ${esc(item.rating)}</span>` : "";
+            const meta = [item.year, item.country, item.genre].filter(Boolean).slice(0, 3).map(esc);
+            const metaHtml = [rating, ...meta].filter(Boolean).join('<span aria-hidden="true">·</span>');
+            return `
+              <a class="cv-search-result-row" href="${esc(href)}">
+                ${img
+                  ? `<img class="cv-search-result-thumb" loading="lazy" referrerpolicy="no-referrer" src="${esc(img)}" alt="${esc(item.title || "Poster")}" onerror="this.style.visibility='hidden'">`
+                  : `<div class="cv-search-result-thumb"></div>`}
+                <div class="cv-search-result-copy">
+                  <b>${esc(item.title || "Untitled")}</b>
+                  <div class="cv-search-result-meta">
+                    <span>${esc(item.typeBadge || "Movie")}</span>
+                    ${metaHtml ? `<span aria-hidden="true">·</span>${metaHtml}` : ""}
+                  </div>
+                </div>
+                <span class="cv-search-play-circle" aria-hidden="true">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                </span>
+              </a>
+            `;
+          })
+          .join("")}
+      </div>
+    `;
+  }
+
+  async function runSearch(query, body) {
+    const q = String(query || "").trim();
+    if (q.length < 2) {
+      await fetchHot();
+      renderIdleState(body);
+      return;
+    }
+    const id = ++reqSeq;
+    body.innerHTML = `<div class="cv-status-banner">Searching “${esc(q)}”…</div>`;
+    try {
+      const r = await fetch(`/api/movie-api/search?q=${encodeURIComponent(q)}&subjectType=${encodeURIComponent(activeType)}`);
+      const d = await r.json();
+      if (id !== reqSeq) return;
+      const items = Array.isArray(d?.items) ? d.items : [];
+      renderResults(body, items, q);
+    } catch {
+      if (id !== reqSeq) return;
+      body.innerHTML = `<div class="cv-status-banner">Search could not complete right now. Please try again.</div>`;
+    }
+  }
+
+  function openSearchOverlay(initialQuery = "") {
+    const overlay = createOverlay();
+    const input = $("#cvSearchOverlayInput");
+    const clearBtn = $("#cvSearchOverlayClear");
+    const body = $("#cvSearchOverlayBody");
+
+    overlay.hidden = false;
+    document.body.style.overflow = "hidden";
+    if (initialQuery) input.value = initialQuery;
+    clearBtn.hidden = !input.value;
+    setTimeout(() => input.focus(), 40);
+
+    fetchHot().then(() => {
+      if (!overlay.hidden) {
+        if (input.value.trim().length >= 2) runSearch(input.value, body);
+        else renderIdleState(body);
+      }
+    });
+  }
+
+  function closeSearchOverlay() {
+    const overlay = $("#cvSearchOverlay");
+    if (!overlay) return;
+    overlay.hidden = true;
+    document.body.style.overflow = "";
+  }
+
+  function bindTriggers() {
+    const overlay = createOverlay();
+    const input = $("#cvSearchOverlayInput");
+    const clearBtn = $("#cvSearchOverlayClear");
+    const body = $("#cvSearchOverlayBody");
+
+    // Wire existing search inputs on page (Home, Watch, Catalog)
+    document.querySelectorAll("#movieApiSearch, #siteGlobalSearch, [data-open-search]").forEach(el => {
+      if (el.tagName === "INPUT") {
+        el.addEventListener("focus", () => openSearchOverlay(el.value));
+        el.addEventListener("click", () => openSearchOverlay(el.value));
+        el.form?.addEventListener("submit", e => {
+          e.preventDefault();
+          openSearchOverlay(el.value);
+        });
+      } else {
+        el.addEventListener("click", e => {
+          e.preventDefault();
+          openSearchOverlay("");
+        });
+      }
+    });
+
+    $("#cvSearchBack")?.addEventListener("click", closeSearchOverlay);
+
+    clearBtn?.addEventListener("click", () => {
+      input.value = "";
+      clearBtn.hidden = true;
+      input.focus();
+      renderIdleState(body);
+    });
+
+    $("#cvSearchOverlayForm")?.addEventListener("submit", e => {
+      e.preventDefault();
+      const q = input.value.trim();
+      if (!q) return;
+      saveRecent(q);
+      runSearch(q, body);
+    });
+
+    input?.addEventListener("input", () => {
+      clearBtn.hidden = !input.value;
+      clearTimeout(searchTimer);
+      const q = input.value.trim();
+      if (q.length < 2) {
+        renderIdleState(body);
+        return;
+      }
+      searchTimer = setTimeout(() => {
+        saveRecent(q);
+        runSearch(q, body);
+      }, 240);
+    });
+
+    overlay.addEventListener("click", e => {
+      const tab = e.target.closest("[data-search-type]");
+      if (tab) {
+        activeType = tab.dataset.searchType || "0";
+        overlay.querySelectorAll("[data-search-type]").forEach(t => {
+          const active = t === tab;
+          t.classList.toggle("active", active);
+          t.setAttribute("aria-selected", String(active));
+        });
+        runSearch(input.value, body);
+        return;
+      }
+      const pick = e.target.closest("[data-pick-query]");
+      if (pick) {
+        const q = pick.dataset.pickQuery || "";
+        input.value = q;
+        clearBtn.hidden = !q;
+        saveRecent(q);
+        runSearch(q, body);
+        return;
+      }
+      if (e.target.closest("#cvRecentClearBtn")) {
+        clearRecent();
+        renderIdleState(body);
+        return;
+      }
+      const row = e.target.closest(".cv-search-result-row");
+      if (row && input.value.trim()) {
+        saveRecent(input.value.trim());
+      }
+    });
+
+    document.addEventListener("keydown", e => {
+      if (e.key === "Escape" && !overlay.hidden) closeSearchOverlay();
+    });
+  }
+
+  window.CineVerseSearch = { open: openSearchOverlay, close: closeSearchOverlay };
+  bindTriggers();
 })();

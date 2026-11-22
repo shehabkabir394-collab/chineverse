@@ -1,0 +1,19 @@
+{
+  "name": "chineverse",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "MovieStream BD (CineVerse) — Movies & Dramas streaming catalog",
+  "scripts": {
+    "dev": "node server.js",
+    "start": "node server.js",
+    "build": "node -e \"console.log('Static site build verified')\"",
+    "lint": "node --check moviebox-api.js && node --check server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

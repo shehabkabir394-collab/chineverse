@@ -1,20 +1,107 @@
 <!doctype html>
-<html lang="en"><head><link rel="icon" type="image/svg+xml" href="favicon.svg">
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="theme-color" content="#09090d"><meta name="description" content="Browse all CineVerse movies and dramas by category, language and A–Z.">
-<title>All Movies & Dramas — CineVerse</title>
-<link rel="stylesheet" href="css/style.css"><link rel="stylesheet" href="css/movie-api.css"><link rel="stylesheet" href="css/moviestream-bd.css"><link rel="stylesheet" href="css/liquid-glass-red.css"><link rel="stylesheet" href="css/movie-api-catalog.css"><link rel="stylesheet" href="css/moviebox-app-ui.css?v=polished-2">
-<script defer src="js/movie-api-catalog.js?v=cinepulse-unified-20261122"></script>
-<link rel="stylesheet" href="css/movie-api-discovery.css?v=cinepulse-unified-20261122"></head><body>
-<header class="topbar"><a class="brand" href="./"><img src="images/moviestreambd-logo.svg" alt="MovieStreamBD" style="display:block;width:clamp(145px,19vw,220px);height:auto;max-height:48px;object-fit:contain"></a><nav><a href="./">HOME</a><a href="catalog.html">ALL MOVIES</a></nav><div class="actions"><a class="admin-link" href="admin.html">Admin</a></div><form class="site-global-search" action="catalog.html" method="get" role="search"><input id="siteGlobalSearch" name="q" type="search" placeholder="⌕ Search movies &amp; dramas..." aria-label="Search movies and dramas"><button type="submit" aria-label="Search">⌕</button></form></header>
-<main class="catalog-page">
-<section class="catalog catalog-api-page">
-<div class="section-head"><div><p class="eyebrow">CINEVERSE · COMPLETE API CATALOG</p><h1 id="catalogHeading">All Movies &amp; Dramas A–Z</h1><p class="muted">Select a category above or browse alphabetically. 24 titles per page.</p></div><button id="catalogRefresh" class="btn ghost" type="button">↻ Refresh</button></div>
-<div class="catalog-nav-title">CATEGORIES</div><nav id="catalogCategories" class="catalog-category-nav" aria-label="Movie categories"><a class="catalog-chip active" href="catalog.html">ALL A–Z</a></nav>
-<div class="catalog-nav-title">BROWSE A–Z</div><nav id="catalogAZ" class="catalog-az-nav" aria-label="Browse titles alphabetically"></nav>
-<div class="movie-api-tools"><select id="catalogLanguageFilter" aria-label="Filter language"><option value="">All languages</option></select><select id="catalogTypeFilter" aria-label="Filter type"><option value="">All types</option></select><select id="catalogGenreFilter" aria-label="Filter genre"><option value="">All genres</option></select><input id="catalogSearch" type="search" placeholder="Search all movies and dramas…" aria-label="Search titles"><button id="catalogSearchButton" class="btn primary" type="button">Search</button></div>
-<div id="catalogStatus" class="catalog-meta muted" aria-live="polite">Loading catalog…</div>
-<div id="catalogGrid" class="grid"></div><nav id="catalogPager" class="catalog-pagination" aria-label="Catalog pages"></nav>
-</section></main>
-<footer><a class="brand" href="./"><img src="images/moviestreambd-logo.svg" alt="MovieStreamBD" style="display:block;width:clamp(145px,19vw,220px);height:auto;max-height:48px;object-fit:contain"></a><span>Movies and dramas worth discovering.</span><a href="privacy.html">Privacy</a></footer><nav class="ms-mobile-nav" aria-label="Main navigation"><a href="./"><span>⌂</span><span>Home</span></a><a href="#catalogSearch"><span>⌕</span><span>Search</span></a><a class="active" href="catalog.html"><span>▦</span><span>Browse</span></a><a href="catalog.html?category=%2Flanguage%2Fkorean"><span>🇰🇷</span><span>K-Drama</span></a><a href="catalog.html?category=%2Ftype%2Fmovies"><span>▶</span><span>Movies</span></a></nav>
-</body></html>
+<html lang="en">
+<head>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#0b0d10">
+  <meta name="description" content="Browse all MovieStream BD movies and dramas by category, language and A–Z.">
+  <title>All Movies &amp; Dramas — MovieStream BD</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/movie-api.css">
+  <link rel="stylesheet" href="css/movie-api-catalog.css">
+  <link rel="stylesheet" href="css/cineverse-app-redesign.css?v=20261122-redesign-1">
+  <link rel="stylesheet" href="css/movie-api-account.css?v=20261122-redesign-1">
+  <script defer src="js/movie-api-catalog.js?v=cinepulse-unified-20261122"></script>
+  <script defer src="js/movie-api-discovery.js?v=20261122-redesign-1"></script>
+  <script defer src="js/movie-api-account.js?v=20261122-redesign-1"></script>
+</head>
+<body class="cv-home-body">
+  <header class="cv-topbar">
+    <div class="cv-topbar-inner">
+      <a class="cv-brand-link" href="./" aria-label="MovieStream BD Home">
+        <span class="cv-brand-mark" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+        </span>
+        <span class="cv-brand-wordmark">MovieStream BD</span>
+      </a>
+
+      <form class="cv-search-trigger-form" action="catalog.html" method="get" role="search">
+        <span class="cv-search-icon-prefix" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        </span>
+        <input id="siteGlobalSearch" name="q" type="search" placeholder="মুভি বা সিরিজ খুঁজুন…" aria-label="Search movies or series" autocomplete="off">
+        <button class="cv-search-submit-btn" type="submit" aria-label="Search">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        </button>
+      </form>
+
+      <div class="cv-header-actions">
+        <a class="cv-header-action-link cv-desktop-only" href="sports.html">Live Sports</a>
+        <button type="button" class="cv-header-action-link cv-desktop-only" data-open-me>My List</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="catalog-page" style="max-width:1360px;margin:0 auto;padding:18px 16px 96px">
+    <section class="catalog catalog-api-page" style="background:transparent;border:0;padding:0">
+      <div class="section-head" style="margin-bottom:14px">
+        <div>
+          <h1 id="catalogHeading" style="font-family:var(--cv-font-display);margin:0 0 4px">All Movies &amp; Dramas A–Z</h1>
+          <p class="muted" style="margin:0;color:var(--cv-text-muted)">Select a category, filter by language/genre, or browse alphabetically.</p>
+        </div>
+        <button id="catalogRefresh" class="cv-action-btn" type="button">↻ Refresh</button>
+      </div>
+      <div class="catalog-nav-title">CATEGORIES</div>
+      <nav id="catalogCategories" class="catalog-category-nav" aria-label="Movie categories"><a class="catalog-chip active" href="catalog.html">ALL A–Z</a></nav>
+      <div class="catalog-nav-title">BROWSE A–Z</div>
+      <nav id="catalogAZ" class="catalog-az-nav" aria-label="Browse titles alphabetically"></nav>
+      <div class="movie-api-tools" style="display:flex;flex-wrap:wrap;gap:10px;margin:14px 0">
+        <select id="catalogLanguageFilter" class="cv-select" aria-label="Filter language"><option value="">All languages</option></select>
+        <select id="catalogTypeFilter" class="cv-select" aria-label="Filter type"><option value="">All types</option></select>
+        <select id="catalogGenreFilter" class="cv-select" aria-label="Filter genre"><option value="">All genres</option></select>
+        <input id="catalogSearch" type="search" placeholder="Filter current catalog…" aria-label="Filter titles" style="flex:1 1 200px;min-height:44px;padding:0 14px;border-radius:10px;border:1px solid var(--cv-border-strong);background:var(--cv-surface);color:#fff">
+        <button id="catalogSearchButton" class="cv-action-btn" type="button" style="background:var(--cv-red);border-color:var(--cv-red)">Filter</button>
+      </div>
+      <div id="catalogStatus" class="cv-status-banner" aria-live="polite">Loading catalog…</div>
+      <div id="catalogGrid" class="grid"></div>
+      <nav id="catalogPager" class="catalog-pagination" aria-label="Catalog pages"></nav>
+    </section>
+  </main>
+
+  <footer class="cv-footer">
+    <span>MovieStream BD · Complete Catalog</span>
+    <div style="display:flex;gap:16px">
+      <a href="./">Home</a>
+      <a href="sports.html">Live Sports</a>
+      <a href="privacy.html">Privacy</a>
+    </div>
+  </footer>
+
+  <nav class="cv-bottom-bar" aria-label="App navigation">
+    <a class="cv-bottom-item" href="./">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+      <span>Home</span>
+    </a>
+    <a class="cv-bottom-item active" href="catalog.html">
+      <span class="cv-bottom-tag">HOT</span>
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg>
+      <span>Explore</span>
+    </a>
+    <a class="cv-bottom-center" href="sports.html" aria-label="Live Sports">
+      <span class="cv-bottom-center-btn">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+      </span>
+      <span>Sports</span>
+    </a>
+    <a class="cv-bottom-item" href="catalog.html?category=%2Ftype%2Fmovies">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      <span>Catalog</span>
+    </a>
+    <button type="button" class="cv-bottom-item" data-open-me>
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      <span>Me</span>
+    </button>
+  </nav>
+</body>
+</html>

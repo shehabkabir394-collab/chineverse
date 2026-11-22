@@ -31,21 +31,44 @@
   function revealControls(){wrap.classList.add("cv-ui-visible");clearTimeout(hideTimer);if(!video.paused&&!video.ended)hideTimer=setTimeout(()=>wrap.classList.remove("cv-ui-visible"),2800);}
   function showSkip(delta){skipHint.textContent=delta<0?"−10 seconds":"＋10 seconds";skipHint.classList.add("show");clearTimeout(showSkip.timer);showSkip.timer=setTimeout(()=>skipHint.classList.remove("show"),650);}
   const fmt=t=>{if(!Number.isFinite(t))return"0:00";const h=Math.floor(t/3600),m=Math.floor(t%3600/60),s=Math.floor(t%60);return h?h+":"+String(m).padStart(2,"0")+":"+String(s).padStart(2,"0"):m+":"+String(s).padStart(2,"0")};
-  let activeHls=null,sourceToken=0,activeSource=null,failedSources=new Set();
-  const errorNotice=document.createElement("div");errorNotice.className="cv-player-error";errorNotice.hidden=true;errorNotice.setAttribute("role","status");errorNotice.style.cssText="position:absolute;z-index:8;left:8%;right:8%;top:50%;transform:translateY(-50%);padding:14px 18px;border-radius:12px;background:rgba(12,18,30,.94);color:#fff;text-align:center;font:600 14px/1.5 system-ui;";wrap.appendChild(errorNotice);
-  function handleMediaError(){
-   const failed=activeSource;if(!failed)return;
+  let activeHls=null,sourceToken=0,activeSource=null,failedSources=new Set(),retriedUrls=new Set();
+  const errorNotice=document.createElement("div");errorNotice.className="cv-player-error";errorNotice.hidden=true;errorNotice.setAttribute("role","status");errorNotice.style.cssText="position:absolute;z-index:16;left:8%;right:8%;top:50%;transform:translateY(-50%);padding:14px 18px;border-radius:12px;background:rgba(12,18,30,.95);border:1px solid rgba(255,255,255,.16);color:#fff;text-align:center;font:600 14px/1.5 system-ui;";wrap.appendChild(errorNotice);
+  async function handleMediaError(){
+   const failed=activeSource,token=sourceToken;
+   if(!failed||!video.getAttribute("src"))return;
+   const code=video.error?.code||0,message=video.error?.message||"";
+   let probeInfo=null;
+   try{
+    const pr=await fetch(failed.url,{headers:{Range:"bytes=0-1023"},credentials:"same-origin",cache:"no-store"});
+    if(token!==sourceToken)return;
+    probeInfo={status:pr.status,contentType:pr.headers.get("content-type")||"",redirected:pr.redirected};
+    if((pr.status>=500||pr.status===429)&&!retriedUrls.has(failed.url)){
+     retriedUrls.add(failed.url);
+     const sep=failed.url.includes("?")?"&":"?";
+     const retrySrc={...failed,url:failed.url+sep+"_r="+Date.now()};
+     setTimeout(()=>{if(token===sourceToken)setSource(retrySrc,false,true);},600);
+     return;
+    }
+   }catch(e){
+    probeInfo={fetchError:e?.message||"network error"};
+   }
+   if(token!==sourceToken)return;
    failedSources.add(failed.url);
-   const next=ordered.find(x=>x&&x.url&&!failedSources.has(x.url));
-   if(next){console.warn("Video source failed; trying another source", {quality:failed.quality,code:video.error?.code});setSource(next,false,true);return;}
-   const code=video.error?.code||0;
-   errorNotice.textContent=code===4?"এই ভিডিও ফরম্যাটটি ব্রাউজারে চালানো যাচ্ছে না। অন্য সার্ভারও চেষ্টা করা হয়েছে।":"ভিডিও লোড করা যায়নি। অন্য সার্ভারও চেষ্টা করা হয়েছে।";
+   const remaining=ordered.filter(x=>x&&x.url&&!failedSources.has(x.url));
+   const next=remaining.find(x=>x.quality==="720p")||remaining.find(x=>x.quality==="480p")||remaining[remaining.length-1]||remaining[0];
+   if(next){console.warn("Video source failed; trying another source",{quality:failed.quality,code,probeInfo});setSource(next,false,true);return;}
+   const isHtmlAuth=probeInfo&&/text\/html/i.test(String(probeInfo.contentType||""));
+   const msg=isHtmlAuth
+    ?"ব্রাউজার সেশন বা কুকি অনুমোদনের কারণে ভিডিও স্ট্রিম লোড হয়নি। পেজটি রিলোড করুন বা নতুন ট্যাবে ওপেন করুন।"
+    :(code===4?"এই ভিডিওটি বর্তমানে লোড করা যায়নি। নিচের Retry বাটনে ক্লিক করে আবার চেষ্টা করুন।":"ভিডিও লোড করা যায়নি। ইন্টারনেট সংযোগ পরীক্ষা করে আবার চেষ্টা করুন।");
+   errorNotice.innerHTML="<div>"+esc(msg)+'</div><button type="button" style="margin-top:10px;padding:7px 14px;border-radius:8px;border:1px solid rgba(255,255,255,.28);background:#e50914;color:#fff;font-weight:700;cursor:pointer">↻ Retry Stream</button>';
+   errorNotice.querySelector("button")?.addEventListener("click",()=>{failedSources.clear();retriedUrls.clear();setSource(best()||ordered[0],false,true);});
    errorNotice.hidden=false;
-   console.error("All video sources failed", {code,message:video.error?.message,networkState:video.networkState,readyState:video.readyState});
+   console.error("All video sources failed",{code,message,networkState:video.networkState,readyState:video.readyState,probeInfo});
   }
-  video.addEventListener("error",handleMediaError);
+  video.addEventListener("error",()=>{handleMediaError();});
   function loadHlsLibrary(){if(window.Hls)return Promise.resolve(window.Hls);if(window.__odHlsPromise)return window.__odHlsPromise;window.__odHlsPromise=new Promise((resolve,reject)=>{const script=document.createElement("script");script.src="https://cdn.jsdelivr.net/npm/hls.js@1.6.15/dist/hls.min.js";script.onload=()=>resolve(window.Hls);script.onerror=reject;document.head.appendChild(script);});return window.__odHlsPromise;}
-  async function setSource(src,keep=true,autoplay=false){const token=++sourceToken,t=keep?video.currentTime:0,was=!video.paused;errorNotice.hidden=true;if(activeHls){activeHls.destroy();activeHls=null;}video.pause();activeSource=null;video.removeAttribute("src");video.load();activeSource=src;quality.value=src.quality||"auto";
+  async function setSource(src,keep=true,autoplay=false){const token=++sourceToken,t=keep?video.currentTime:0,was=!video.paused;errorNotice.hidden=true;if(activeHls){activeHls.destroy();activeHls=null;}video.pause();activeSource=src;quality.value=src.quality||"auto";
    const isHls=/\.m3u8(?:$|[?#])/i.test(src.url)||/mpegurl|m3u8|hls/i.test(String(src.mime||src.type||""));
    const ready=()=>{if(token!==sourceToken)return;if(t>0&&Number.isFinite(video.duration))video.currentTime=Math.min(t,Math.max(0,video.duration-2));if(was||autoplay)video.play().catch(()=>{});};
    if(isHls){
@@ -71,7 +94,9 @@
      }catch(e){console.warn("hls.js unavailable; trying native HLS",e);}
     }
    }
-   video.src=src.url;video.load();video.addEventListener("loadedmetadata",ready,{once:true});
+   video.preload="metadata";
+   video.src=src.url;
+   video.addEventListener("loadedmetadata",ready,{once:true});
   }
   setSource(initial,false,true);quality.value=initial?.quality||"720p";
   quality.addEventListener("change",()=>{const src=quality.value==="auto"?best():ordered.find(x=>x.quality===quality.value);if(src)setSource(src)});
@@ -154,7 +179,7 @@
    panel.querySelector(".cv-end-replay").addEventListener("click",()=>{video.currentTime=0;video.play().catch(()=>{});});
    if(video.ended)wrap.classList.add("cv-ended");
   }
-  function setSources(next){ordered=[...next].filter(x=>x&&x.url).map(x=>({...x,quality:String(x.quality||"Auto"),mime:String(x.mime||x.type||"")})).sort((a,b)=>qualityNumber(a)-qualityNumber(b));failedSources.clear();activeSource=null;errorNotice.hidden=true;quality.innerHTML="<option value=\"auto\">Auto</option>"+ordered.map(x=>"<option value=\""+esc(x.quality)+"\">"+esc(x.quality)+"</option>").join("");if(ordered.length){const preferred=ordered.find(x=>x.quality==="720p")||ordered[0];setSource(preferred,false,true);quality.value=preferred.quality;}}return {video,wrap,setSource,setSources,setSubtitles,setSuggestions};
+  function setSources(next){ordered=[...next].filter(x=>x&&x.url).map(x=>({...x,quality:String(x.quality||"Auto"),mime:String(x.mime||x.type||"")})).sort((a,b)=>qualityNumber(a)-qualityNumber(b));failedSources.clear();retriedUrls.clear();activeSource=null;errorNotice.hidden=true;quality.innerHTML="<option value=\"auto\">Auto</option>"+ordered.map(x=>"<option value=\""+esc(x.quality)+"\">"+esc(x.quality)+"</option>").join("");if(ordered.length){const preferred=best()||ordered[0];setSource(preferred,false,true);quality.value=preferred.quality;}}return {video,wrap,setSource,setSources,setSubtitles,setSuggestions};
  }
  window.CineVersePlayer={mount};
 })();

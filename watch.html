@@ -1,5 +1,61 @@
 <!doctype html>
-<html lang="en"><head><link rel="icon" type="image/svg+xml" href="favicon.svg"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#080b14"><meta name="description" content="Watch movies and drama episodes on MovieStream BD."><title>Watch — MovieStream BD</title><link rel="stylesheet" href="css/style.css"><link rel="stylesheet" href="css/only-drama.css"><link rel="stylesheet" href="css/movie-api.css"><link rel="stylesheet" href="css/moviestream-bd.css"><script defer src="js/player.js?v=android-hls-fallback-20261122"></script><script defer src="js/movie-api-watch.js?v=cinepulse-secure-media-universal-20261122-4"></script><link rel="stylesheet" href="css/liquid-glass-red.css"><link rel="stylesheet" href="css/watch-enhancements.css?v=multi-server-1"><link rel="stylesheet" href="css/moviebox-app-ui.css?v=app-shell-1"><link rel="stylesheet" href="css/movie-api-community.css?v=cinepulse-unified-20261122"></head>
-<body class="ms-watch-page"><header class="topbar"><a class="brand" href="./"><img src="images/moviestreambd-logo.svg" alt="MovieStreamBD" style="display:block;width:clamp(145px,19vw,220px);height:auto;max-height:48px;object-fit:contain"></a><nav><a href="./">HOME</a><a href="./#movieApiCatalog">MOVIES & DRAMAS</a></nav><form class="site-global-search" action="catalog.html" method="get" role="search"><input id="siteGlobalSearch" name="q" type="search" placeholder="⌕ Search movies &amp; dramas..." aria-label="Search movies and dramas"><button type="submit" aria-label="Search">⌕</button></form></header>
-<main class="ms-watch-main"><a class="ms-back" href="./">← Back to MovieStream BD</a><div id="movieWatchStatus" class="catalog-meta muted" aria-live="polite">Loading title details…</div><div id="movieWatchRoot"></div></main>
-<footer><a class="brand" href="./"><img src="images/moviestreambd-logo.svg" alt="MovieStreamBD" style="display:block;width:clamp(145px,19vw,220px);height:auto;max-height:48px;object-fit:contain"></a><span>Movies and dramas worth discovering.</span><a href="privacy.html">Privacy</a></footer><nav class="ms-mobile-nav" aria-label="Main navigation"><a href="./"><span>⌂</span><span>Home</span></a><a href="catalog.html"><span>⌕</span><span>Search</span></a><a href="catalog.html"><span>▦</span><span>Browse</span></a><a href="catalog.html?category=%2Flanguage%2Fkorean"><span>🇰🇷</span><span>K-Drama</span></a><a href="catalog.html?category=%2Ftype%2Fmovies"><span>▶</span><span>Movies</span></a></nav></body></html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#0b0d10">
+  <meta name="description" content="Watch movies and drama episodes on MovieStream BD.">
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <title>Watch — MovieStream BD</title>
+  <link rel="stylesheet" href="css/watch-enhancements.css?v=20261122-redesign-1">
+  <link rel="stylesheet" href="css/cineverse-app-redesign.css?v=20261122-redesign-1">
+  <script defer src="js/player.js?v=20261122-streamfix-1"></script>
+  <script defer src="js/movie-api-watch.js?v=20261122-streamfix-1"></script>
+  <script defer src="js/movie-api-discovery.js?v=20261122-redesign-1"></script>
+</head>
+<body>
+  <header class="cv-watch-topbar">
+    <div class="cv-watch-topbar-left">
+      <a class="cv-icon-btn" id="cvWatchBackBtn" href="./" aria-label="Back to home">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+      </a>
+      <a class="cv-brand-link" href="./" aria-label="MovieStream BD Home">
+        <span class="cv-brand-mark" aria-hidden="true">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+        </span>
+        <span class="cv-brand-wordmark">MovieStream BD</span>
+      </a>
+    </div>
+
+    <div class="cv-watch-topbar-right">
+      <button type="button" id="cvWatchTopList" class="cv-icon-btn" aria-label="Add to watchlist" title="Add to list">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 12H3"/><path d="M16 6H3"/><path d="M16 18H3"/><path d="M18 9v6"/><path d="M21 12h-6"/></svg>
+      </button>
+      <button type="button" id="cvWatchTopShare" class="cv-icon-btn" aria-label="Share title" title="Share">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+      </button>
+      <button type="button" class="cv-icon-btn" data-open-search aria-label="Search titles" title="Search">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+      </button>
+      <button type="button" id="cvWatchTopPip" class="cv-icon-btn" aria-label="Picture in Picture" title="Picture-in-Picture">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="15" rx="2"/><rect x="12" y="10" width="8" height="6" rx="1"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <main class="cv-watch-shell">
+    <div id="movieWatchStatus" class="cv-status-banner" style="margin:14px 16px" aria-live="polite">Loading title details…</div>
+    <div id="movieWatchRoot"></div>
+  </main>
+
+  <footer class="cv-footer">
+    <span>MovieStream BD · Stream &amp; download in HD.</span>
+    <div style="display:flex;gap:16px">
+      <a href="./">Home</a>
+      <a href="catalog.html">Catalog</a>
+      <a href="sports.html">Live Sports</a>
+      <a href="privacy.html">Privacy</a>
+    </div>
+  </footer>
+</body>
+</html>

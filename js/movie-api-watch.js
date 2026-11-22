@@ -1,358 +1,491 @@
 (() => {
- "use strict";
- const $=s=>document.querySelector(s),esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
- const safeImage=s=>/^https:\/\//i.test(s||"")?s:"";
- const params=new URLSearchParams(location.search),path=params.get("path")||"",requestedTitle=params.get("title")||"",root=$("#movieWatchRoot"),status=$("#movieWatchStatus");
- let episodes=[],playerApi=null,selected=-1,currentSources=[],currentDubs=[],watchDetail=null,streamRequest=0,currentSubtitles=[],currentSuggestedMarkup="";
- let embedFrame=null;
- function validEmbedUrl(value){try{const u=new URL(String(value||""));return u.protocol==="https:"?u.href:"";}catch{return "";}}
- function findEmbedUrl(value,depth=0){if(!value||typeof value!=="object"||depth>6)return "";if(Array.isArray(value)){for(const item of value){const found=findEmbedUrl(item,depth+1);if(found)return found;}return "";}for(const key of ["embedPlayerUrl","embed_player_url","embedUrl","embed_url","playerUrl","player_url"]){const found=validEmbedUrl(value[key]);if(found)return found;}for(const key of Object.keys(value)){const child=value[key];if(child&&typeof child==="object"){const found=findEmbedUrl(child,depth+1);if(found)return found;}}return "";}
- function showEmbedPlayer(value){
-  const src=validEmbedUrl(value);if(!src)return false;
-  const video=$("#movieWatchVideo"),message=$("#movieWatchMessage");
-  if(!embedFrame){
-   embedFrame=document.createElement("iframe");embedFrame.id="movieWatchEmbed";embedFrame.title="Movie and episode player";
-   embedFrame.allow="autoplay; fullscreen; encrypted-media; picture-in-picture";embedFrame.allowFullscreen=true;
-   embedFrame.referrerPolicy="strict-origin-when-cross-origin";
-   embedFrame.style.cssText="display:block;width:100%;aspect-ratio:16/9;min-height:240px;border:0;border-radius:14px;background:#000";
-   video?.parentNode?.insertBefore(embedFrame,video);
+  "use strict";
+  const $ = s => document.querySelector(s);
+  const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const safeImg = u => (/^https?:\/\//i.test(String(u || "")) ? String(u) : "");
+  const WATCHLIST_KEY = "cv_watchlist_v1";
+
+  const params = new URLSearchParams(location.search);
+  const path = params.get("path") || "";
+  const requestedTitle = params.get("title") || "";
+  const root = $("#movieWatchRoot");
+  const statusEl = $("#movieWatchStatus");
+
+  let watchDetail = null;
+  let episodes = [];
+  let currentDubs = [];
+  let playerApi = null;
+  let selectedEpIdx = 0;
+  let selectedSeasonNum = 0;
+  let showAllEpisodes = false;
+  let streamReqId = 0;
+
+  function showToast(msg) {
+    document.querySelector(".cv-toast")?.remove();
+    const t = document.createElement("div");
+    t.className = "cv-toast";
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(() => t.remove(), 2600);
   }
-  embedFrame.src=src;embedFrame.hidden=false;
-  if(video){
-   video.pause();video.removeAttribute("src");video.load();
-   video.hidden=true;video.setAttribute("hidden","");
-   video.style.setProperty("display","none","important");
-   const ownPlayer=video.closest(".cv-player");
-   if(ownPlayer){ownPlayer.hidden=true;ownPlayer.setAttribute("hidden","");ownPlayer.style.setProperty("display","none","important");}
-  }
-  // Hard-disable every CineVerse-built player surface; only the provider iframe remains visible.
-  document.querySelectorAll(".cv-player, #movieWatchVideo, video.movie-player").forEach(el=>{
-   el.hidden=true;el.setAttribute("hidden","");el.style.setProperty("display","none","important");
-  });
-  if(playerApi?.wrap){playerApi.wrap.hidden=true;playerApi.wrap.setAttribute("hidden","");playerApi.wrap.style.setProperty("display","none","important");}
-  if(message)message.textContent="Universal HD player loaded · Use Next Server inside the player to switch servers.";
-  return true;
- }
- function hideEmbedPlayer(){
-  if(embedFrame){embedFrame.src="about:blank";embedFrame.hidden=true;}
-  const video=$("#movieWatchVideo");if(video){video.hidden=false;video.removeAttribute("hidden");video.style.removeProperty("display");const ownPlayer=video.closest(".cv-player");if(ownPlayer){ownPlayer.hidden=false;ownPlayer.removeAttribute("hidden");ownPlayer.style.removeProperty("display");}}
-  if(playerApi?.wrap){playerApi.wrap.hidden=false;playerApi.wrap.removeAttribute("hidden");playerApi.wrap.style.removeProperty("display");}
- }
- const getLang=o=>String(o?.audioLanguage||o?.dubLanguage||o?.language||o?.lang||o?.audio||o?.label||o?.name||"").trim();
- const isHindi=s=>/^(hi|hin|hindi)([-_ ]|$)/i.test(String(s||"").trim())||/hindi|हिन्दी|हिंदी/i.test(String(s||""));
- const isHindiDubbed=item=>item?._hindiCatalog===true||[item?.language,item?.audioLanguage,item?.audioLanguages,item?.dubLanguage,item?.dubLanguages,item?.availableLanguages,item?.languages,item?.audio].some(v=>Array.isArray(v)?v.some(x=>isHindi(getLang(x)||x?.code)):isHindi(v));
- function isPlayableSource(url,type="") {try{const u=new URL(String(url||""),location.origin);const kind=String(type||"").toLowerCase();const trusted=u.protocol==="https:"||u.origin===location.origin&&u.pathname==="/api/cinepulse-media";return trusted&&(kind==="mp4"||kind==="m3u8"||kind.includes("mpegurl")||kind.includes("video/")||/\.(?:mp4|m3u8)(?:$|[?#])/i.test(u.pathname+u.search)||u.pathname==="/api/cinepulse-media");}catch{return false;}}
- function sourceUrl(s){
-  const proxy=String(s?.proxyUrl||s?.proxy_url||"");
-  if(proxy){try{const u=new URL(proxy);const token=u.searchParams.get("t");if(token)return "/api/cinepulse-media?t="+encodeURIComponent(token);}catch{}}
-  return s?.url||s?.downloadUrl||s?.download_url||s?.playUrl||s?.play_url||s?.src||s?.file||s?.streamUrl||s?.stream_url||"";
- }
- function getSources(ep){
-  return (Array.isArray(ep.sources)?ep.sources:[]).filter(s=>isPlayableSource(sourceUrl(s),s.type||s.mimeType||s.format)&&Number.parseInt(s.quality,10)>0)
-   .map(s=>({url:sourceUrl(s),quality:(String(s.quality).match(/\d+/)?.[0]||"720")+"p",provider:String(s.provider||"Movie API"),mime:/m3u8|hls/i.test(String(s.type||"")+" "+String(s.url||""))?"application/vnd.apple.mpegurl":"video/mp4",audioLanguage:getLang(s)}))
-   .sort((a,b)=>Number(isHindi(b.audioLanguage))-Number(isHindi(a.audioLanguage)));
- }
- function sourcesForLanguage(sources,language){
-  const chosen=String(language||"").trim();
-  const matched=chosen&&chosen!=="auto"?sources.filter(s=>String(s.audioLanguage||"").trim()===chosen):[];
-  return matched.length?matched:sources;
- }
- function getSubtitles(...objects){
-  const found=[],seen=new Set();
-  const add=value=>{if(!value)return;const list=Array.isArray(value)?value:[value];list.forEach((item,i)=>{
-   if(typeof item==="string"){if(/^https?:\/\//i.test(item)&&/\.(?:vtt|srt)(?:$|[?#])/i.test(item))push({url:item,label:"Subtitle "+(i+1),language:"und"});return;}
-   if(!item||typeof item!=="object")return;
-   const url=item.url||item.src||item.file||item.subtitleUrl||item.subtitle_url||item.captionUrl||item.caption_url||item.downloadUrl||item.download_url||item.webvtt||item.vtt||item.link;
-   if(!url)return;push({url,label:String(item.label||item.name||item.language||item.lang||item.title||("Subtitle "+(i+1))),language:String(item.language||item.lang||item.srclang||item.locale||"und")});
-  });};
-  const push=x=>{let absolute;try{absolute=new URL(x.url,location.origin).href;if(new URL(absolute).protocol!=="https:"&&location.protocol==="https:")return;}catch{return;}if(seen.has(absolute))return;seen.add(absolute);found.push({...x,url:absolute});};
-  const keys=["subtitles","subtitle","subtitleList","subtitle_list","subtitleTracks","subtitle_tracks","captions","caption","captionList","caption_tracks","tracks"];
-  objects.forEach(o=>{if(!o||typeof o!=="object")return;keys.forEach(k=>add(o[k]));["stream","data","result","detail","episode"].forEach(k=>{const nested=o[k];if(nested&&typeof nested==="object")keys.forEach(key=>add(nested[key]));});});
-  return found;
- }
- function audioOptions(sources){
-  const langs=[...new Set(sources.map(s=>s.audioLanguage).filter(Boolean))];
-  if(!langs.length)return "";
-  langs.sort((a,b)=>Number(isHindi(b))-Number(isHindi(a)));
-  const preferred=langs.find(isHindi)||langs[0];
-  return '<label class="ms-audio-choice">Audio Track <select id="movieWatchAudio">'+langs.map(l=>'<option value="'+esc(l)+'" '+(l===preferred?"selected":"")+'>'+esc(l)+'</option>').join("")+'</select></label>';
- }
- async function start(index){
-  const ep=episodes[index];if(!ep)return;
-  const video=$("#movieWatchVideo"),message=$("#movieWatchMessage");
-  selected=index;const requestId=++streamRequest;
-  message.textContent="Loading available stream sources…";
-  let sources=getSources(ep);
-  const detail=watchDetail||{};
-  currentSubtitles=getSubtitles(ep,detail);
-  const season=Number(ep.seasonNumber??ep.season??0)||0;
-  const episodeNumber=Number(ep.number??ep.episodeNumber??(index+1))||index+1;
-  try{
-   const query=new URLSearchParams({title:String(detail.title||""),se:String(season),ep:String(episodeNumber)});
-   if(!detail.title&&(detail.subjectId||detail.id))query.set("subjectId",String(detail.subjectId||detail.id));
-   if(detail.subjectId||detail.subject_id)query.set("subjectId",String(detail.subjectId||detail.subject_id));
-   if(detail.detailPath)query.set("detailPath",String(detail.detailPath));
-   if(detail.source)query.set("source",String(detail.source));
-   const response=await fetch("/api/movie-api/stream?"+query.toString(),{cache:"no-store"});
-   const payload=await response.json();
-   if(requestId!==streamRequest)return;
-   const streamRoot=payload.stream||payload.data||payload.result||payload;
-   const embedUrl=findEmbedUrl(payload)||findEmbedUrl(watchDetail);
-   // Restore the provider's universal embedded player as the primary player.
-   // Keep the built-in CineVerse video player hidden.
-   if(!sources.length&&embedUrl&&showEmbedPlayer(embedUrl)){
-    currentSources=[];currentSubtitles=getSubtitles(streamRoot,payload,ep,detail);
-    $("#movieWatchNow").textContent=ep.label||("Episode "+(ep.number||index+1));
-    root.querySelectorAll("[data-watch-episode]").forEach((b,i)=>b.classList.toggle("active",i===index));
-    const dl=$("#movieWatchDownload");if(dl)dl.href="download.html?path="+encodeURIComponent(path)+"&title="+encodeURIComponent(detail.title||"")+"&episode="+index;
-    const audioBox=$("#movieWatchAudioBox");if(audioBox)audioBox.hidden=true;
-    const unmute=$("#movieWatchUnmute");if(unmute)unmute.hidden=true;
-    return;
-   }
-   const streamItems=Array.isArray(streamRoot.sources)?streamRoot.sources:Array.isArray(streamRoot.streams)?streamRoot.streams:Array.isArray(streamRoot.urls)?streamRoot.urls:[];
-   currentSubtitles=getSubtitles(streamRoot,payload,ep,detail);
-   const normalized=streamItems.map(s=>({url:sourceUrl(s),quality:s.quality||s.resolution||s.label||"720p",provider:s.provider||s.name||"Movie API",type:s.type||s.format||s.mimeType||"",audioLanguage:getLang(s)})).filter(s=>isPlayableSource(s.url,s.type||s.mimeType||s.format));
-   if(normalized.length)sources=normalized.map(s=>({url:s.url,quality:(String(s.quality).match(/\d+/)?.[0]||"720")+"p",provider:s.provider,mime:/m3u8|hls/i.test(s.type+" "+s.url)?"application/vnd.apple.mpegurl":"video/mp4",audioLanguage:s.audioLanguage}));
-   // Direct sources are not used while the provider embed is available.
-   if(sources.length){
-    currentSources=sources;
-    currentSubtitles=getSubtitles(streamRoot,payload,ep,detail);
-    hideEmbedPlayer();
-    video.hidden=false;
-    const titleText=detail.title||"Now Playing";
-    if(playerApi){
-     playerApi.setSources(sourcesForLanguage(sources,sources.find(s=>isHindi(s.audioLanguage))?.audioLanguage||sources[0]?.audioLanguage));
-     playerApi.setSubtitles(currentSubtitles);
-    }else{
-     playerApi=window.CineVersePlayer?.mount({video,sources,storageKey:"cv-cinepulse-"+String(detail.subjectId||detail.id||path)+"-"+season+"-"+episodeNumber,subtitles:currentSubtitles,title:titleText,backUrl:"./"});
+
+  function getWatchlist() {
+    try {
+      const list = JSON.parse(localStorage.getItem(WATCHLIST_KEY) || "[]");
+      return Array.isArray(list) ? list : [];
+    } catch {
+      return [];
     }
-    $("#movieWatchNow").textContent=ep.label||("Episode "+(ep.number||index+1));
-    root.querySelectorAll("[data-watch-episode]").forEach((b,i)=>b.classList.toggle("active",i===index));
-    const dl=$("#movieWatchDownload");if(dl)dl.href="download.html?path="+encodeURIComponent(path)+"&title="+encodeURIComponent(detail.title||"")+"&episode="+index;
-    const audioBox=$("#movieWatchAudioBox");if(audioBox)audioBox.hidden=true;
-    const unmute=$("#movieWatchUnmute");if(unmute)unmute.hidden=true;
-    message.textContent="CineVerse Player · "+sources.map(s=>s.quality).join(" · ")+" · "+(sources.some(s=>isHindi(s.audioLanguage))?"Hindi Dub":"Direct stream");
-    return;
-   }
-   // No direct file source: use the provider embed as a fallback.
-   if(embedUrl&&showEmbedPlayer(embedUrl)){
-    currentSources=[];currentSubtitles=getSubtitles(payload,streamRoot,ep,detail);
-    $("#movieWatchNow").textContent=ep.label||("Episode "+(ep.number||index+1));
-    root.querySelectorAll("[data-watch-episode]").forEach((b,i)=>b.classList.toggle("active",i===index));
-    const dl=$("#movieWatchDownload");if(dl)dl.href="download.html?path="+encodeURIComponent(path)+"&title="+encodeURIComponent(detail.title||"")+"&episode="+index;
-    const audioBox=$("#movieWatchAudioBox");if(audioBox)audioBox.hidden=true;
-    const unmute=$("#movieWatchUnmute");if(unmute)unmute.hidden=true;
-    return;
-   }
-  }catch(err){console.warn("Stream endpoint unavailable",err);}
-  if(requestId!==streamRequest)return;
-  // If the stream endpoint failed, still try the embed URL returned by details.
-  const fallbackEmbed=findEmbedUrl(watchDetail);
-  if(fallbackEmbed&&showEmbedPlayer(fallbackEmbed)){
-   currentSources=[];currentSubtitles=getSubtitles(ep,watchDetail);
-   $("#movieWatchNow").textContent=ep.label||("Episode "+(ep.number||index+1));
-   root.querySelectorAll("[data-watch-episode]").forEach((b,i)=>b.classList.toggle("active",i===index));
-   const dl=$("#movieWatchDownload");if(dl)dl.href="download.html?path="+encodeURIComponent(path)+"&title="+encodeURIComponent(detail.title||"")+"&episode="+index;
-   const audioBox=$("#movieWatchAudioBox");if(audioBox)audioBox.hidden=true;
-   const unmute=$("#movieWatchUnmute");if(unmute)unmute.hidden=true;
-   return;
   }
-  if(!sources.length){message.textContent="Universal embedded player URL was not returned by the API. No compatible direct video source or provider player URL was returned by the API.";video.hidden=true;return;}
-  if(!currentSubtitles.length)currentSubtitles=getSubtitles(ep,detail);
-  currentSources=sources;
-  const downloadLink=$("#movieWatchDownload");if(downloadLink)downloadLink.href="download.html?path="+encodeURIComponent(path)+"&title="+encodeURIComponent(detail.title||"")+"&episode="+index;
-  $("#movieWatchNow").textContent=ep.label||("Episode "+(ep.number||index+1));
-  root.querySelectorAll("[data-watch-episode]").forEach((b,i)=>b.classList.toggle("active",i===index));
-  const audioBox=$("#movieWatchAudioBox");
-  const serverGroups=[...new Map(sources.map(s=>[String(s.provider||"Server").trim()||"Server",sources.filter(x=>(String(x.provider||"Server").trim()||"Server")===(String(s.provider||"Server").trim()||"Server"))])).entries()];
-  serverGroups.sort((a,b)=>Number(b[1].some(s=>isHindi(s.audioLanguage)))-Number(a[1].some(s=>isHindi(s.audioLanguage))));
-  let activeProvider=serverGroups[0]?.[0]||"Server";
-  message.textContent=serverGroups.length+" server"+(serverGroups.length===1?"":"s")+" available · Quality: "+sources.map(s=>s.quality).join(" · ")+(sources.some(s=>isHindi(s.audioLanguage))?" · Hindi audio available":"");
-  const renderServerControls=(applySource=true)=>{
-   const group=serverGroups.find(([name])=>name===activeProvider)?.[1]||sources;
-   if(audioBox){
-    const serverHtml='<div class="ms-server-picker"><span class="ms-server-label">STREAM SERVERS</span><div class="ms-server-buttons">'+serverGroups.map(([name,items],i)=>'<button type="button" class="ms-server-button '+(name===activeProvider?'active':'')+'" data-server="'+esc(name)+'"><small>SERVER '+(i+1)+'</small><b>'+esc(name)+'</b><em>'+items.length+' source'+(items.length===1?'':'s')+'</em></button>').join("")+'</div></div>';
-    audioBox.innerHTML=serverHtml+(audioOptions(group)||'<span class="muted">Audio track information not supplied by provider.</span>');
-   }
-   const audioSelect=$("#movieWatchAudio");
-   const chosenLang=group.find(s=>isHindi(s.audioLanguage))?.audioLanguage||group.find(s=>s.audioLanguage)?.audioLanguage||"auto";
-   if(audioSelect&&chosenLang!=="auto")audioSelect.value=chosenLang;
-   const active=sourcesForLanguage(group,audioSelect?.value||chosenLang);
-   if(playerApi&&applySource)playerApi.setSources(active);
-   if(audioSelect&&playerApi?.wrap){
-    const topRight=playerApi.wrap.querySelector(".cv-top-right");
-    topRight?.querySelector(".cv-audio-choice")?.remove();
-    const label=audioSelect.closest("label")||audioSelect;label.classList.add("cv-audio-choice");topRight?.appendChild(label);
-    audioSelect.addEventListener("change",()=>playerApi?.setSources(sourcesForLanguage(group,audioSelect.value)));
-   }
-  };
-  if(audioBox&&!audioBox.dataset.serverBound){
-   audioBox.dataset.serverBound="1";
-   audioBox.addEventListener("click",event=>{
-    const button=event.target.closest("[data-server]");if(!button)return;
-    activeProvider=button.dataset.server;renderServerControls();
-   });
-  }
-  const initialGroup=serverGroups.find(([name])=>name===activeProvider)?.[1]||sources;
-  const selectedLang=initialGroup.find(s=>isHindi(s.audioLanguage))?.audioLanguage||initialGroup.find(s=>s.audioLanguage)?.audioLanguage||"auto";
-  const activeSources=sourcesForLanguage(initialGroup,selectedLang);
-  // No playable provider URL was detected. Check the stream response and try another server.
-  video.pause();video.removeAttribute("src");video.load();video.hidden=true;
-  if(audioBox)audioBox.hidden=true;
-  $("#movieWatchUnmute").hidden=true;
-  message.textContent="Universal embedded player URL was not returned by the API. Please check the provider's stream response.";
- }
- const clean=s=>String(s||"").toLowerCase().replace(/[_-]+/g," ").replace(/\s+/g," ").trim();
- function suggestedGroup(item){
-  const sections=(item?._sections||[]).map(clean),type=clean(item?.typeBadge||item?.type),country=clean(item?.country);
-  if(sections.some(s=>s.includes("k drama")||s.includes("k-drama")))return ["kdrama","K-Drama"];
-  if(sections.some(s=>s.includes("c drama")||s.includes("c-drama")))return ["cdrama","C-Drama"];
-  if(sections.some(s=>s.includes("south indian")||s.includes("south movie")))return ["south","South Indian Movies"];
-  if(sections.some(s=>s.includes("bollywood")))return ["bollywood","Bollywood"];
-  if(sections.some(s=>s.includes("hollywood")))return ["hollywood","Hollywood"];
-  if(["united states","usa","us","united kingdom","uk","britain","american","british"].includes(country))return ["hollywood","Hollywood"];
-  if(type==="anime"||sections.some(s=>s.includes("anime")))return ["anime","Anime"];
-  if(type==="series"||type==="drama"||sections.some(s=>s.includes("drama")||s.includes("series")))return ["drama","Drama"];
-  if(type==="movie")return ["movie","Movies"];
-  return ["","More titles"];
- }
- async function loadSuggested(detail){
-  const box=$("#movieWatchSuggested"),grid=$("#movieWatchSuggestedGrid"),title=$("#movieWatchSuggestedTitle");
-  try{
-   const relatedQuery=new URLSearchParams({title:String(detail.title||"")});
-   const relatedId=detail.subjectId||detail.subject_id||detail.id;if(relatedId)relatedQuery.set("subjectId",String(relatedId));
-   const relatedResponse=await fetch("/api/movie-api/related?"+relatedQuery.toString());
-   const relatedPayload=await relatedResponse.json();
-   const relatedItems=Array.isArray(relatedPayload.items)?relatedPayload.items:Array.isArray(relatedPayload.related)?relatedPayload.related:Array.isArray(relatedPayload.results)?relatedPayload.results:[];
-   const usable=relatedItems.filter(x=>x&&typeof x==="object"&&/^\/(?:mb|movie|series)\//.test(String(x.path||""))&&x.path!==path&&!/nigeria|nollywood/i.test(String(x.country||"")+" "+String(x.language||""))).slice(0,12);
-   if(usable.length){
-    title.textContent="Related to "+(detail.title||"this title");
-    grid.innerHTML=usable.map(x=>'<a class="ms-suggested-card" href="watch.html?path='+encodeURIComponent(x.path)+'"><img loading="lazy" decoding="async" src="'+esc(safeImage(x.poster||x.previewImage))+'" alt="'+esc(x.title||"")+'"><span><b>'+esc(x.title||"Untitled")+'</b><small>'+esc(x.language||x.typeBadge||"")+'</small></span></a>').join("");
-    box.hidden=false;currentSuggestedMarkup=grid.innerHTML;playerApi?.setSuggestions?.(currentSuggestedMarkup);return;
-   }
-  }catch{}
-  const response=await fetch("/api/movie-api/home");if(!response.ok)throw new Error("Catalog API unavailable");
-  const api=await response.json();if(!api.ok)return;
-  const map=new Map();
-  const add=(x,section)=>{if(!x||typeof x!=="object")return;const p=String(x.path||"");if(!/^\/(?:mb|movie|series)\//.test(p))return;const k=p;if(!map.has(k))map.set(k,{...x,_sections:[]});if(section&&!map.get(k)._sections.includes(section))map.get(k)._sections.push(section);};
-  ["sections","allOfficialSections"].forEach(key=>(api[key]||[]).forEach(s=>(s.items||[]).forEach(x=>add(x,s.title))));
-  ["trending","comingSoon","banners"].forEach(key=>(api[key]||[]).forEach(x=>add(x,key)));
-  const current=[...map.values()].find(x=>x.path===path);
-  const synthetic={...detail,_sections:current?current._sections:[]};
-  let [group,label]=suggestedGroup(synthetic);
-  if(!group&&current){
-   const best=current._sections.find(s=>!/(trending|coming soon|featured)/i.test(s));
-   if(best){group="section";label=best;}
-  }
-  let list=[...map.values()].filter(x=>x.path!==path&&!/nigeria|nollywood/i.test(String(x.country||"")+" "+String(x.language||"")));
-  if(group==="section")list=list.filter(x=>x._sections.includes(label));
-  else if(group)list=list.filter(x=>suggestedGroup(x)[0]===group);
-  if(!list.length&&current?._sections?.length)list=[...map.values()].filter(x=>x.path!==path&&!/nigeria|nollywood/i.test(String(x.country||"")+" "+String(x.language||""))&&x._sections.some(s=>current._sections.includes(s)));
-  const hindi=x=>/hindi dubbed/i.test(String(x.language||""))||(/hindi/i.test(String(x.language||""))&&(x._sections||[]).some(s=>/south indian.*hindi dubbed|anime in hindi/i.test(s)));
-  list.sort((a,b)=>Number(hindi(b))-Number(hindi(a))||(Number(b.uploadedAtMs)||0)-(Number(a.uploadedAtMs)||0));
-  list.sort((a,b)=>Number(isHindiDubbed(b))-Number(isHindiDubbed(a))||(Number(b.uploadedAtMs)||0)-(Number(a.uploadedAtMs)||0));
-  list=list.slice(0,12);if(!list.length)return;
-  title.textContent="More "+label;
-  grid.innerHTML=list.map(x=>'<a class="ms-suggested-card" href="watch.html?path='+encodeURIComponent(x.path)+'"><img loading="lazy" decoding="async" src="'+esc(safeImage(x.poster||x.previewImage))+'" alt="'+esc(x.title||"")+'"><span><b>'+esc(x.title||"Untitled")+'</b><small>'+esc(x.language||x.typeBadge||"")+'</small></span></a>').join("");
-  box.hidden=false;currentSuggestedMarkup=grid.innerHTML;playerApi?.setSuggestions?.(currentSuggestedMarkup);
- }
 
- async function downloadSeasonZip(items,seasonName){
-  const progress=root.querySelector("#msZipProgress");
-  const setProgress=label=>{if(progress)progress.textContent=label;};
-  if(!items?.length)return;
-  const entries=[],failures=[],safeName=s=>String(s||"").replace(/[\\/:*?"<>|]/g," ").replace(/\s+/g," ").trim().slice(0,100)||"Episode";
-  const folder=safeName(seasonName),seasonFallback=items[0]?.ep?.seasonNumber??items[0]?.ep?.season??1;
-  for(let n=0;n<items.length;n++){
-   const {ep,index}=items[n],number=String(ep.number||ep.episodeNumber||index+1).padStart(2,"0");
-   setProgress("Downloading "+(n+1)+"/"+items.length+" episodes…");
-   try{
-    const query=new URLSearchParams({se:String(Number(ep.seasonNumber??ep.season??seasonFallback)||0),ep:String(Number(ep.number??ep.episodeNumber??(index+1))||index+1),quality:"best"});
-    const sid=watchDetail?.subjectId||watchDetail?.subject_id||watchDetail?.commentSubjectId||watchDetail?.comment_subject_id||watchDetail?.contentId||watchDetail?.id||watchDetail?._id;
-    if(sid!=null)query.set("subjectId",String(sid));if(watchDetail?.title)query.set("title",String(watchDetail.title));if(watchDetail?.source)query.set("source",String(watchDetail.source));
-    const response=await fetch("/api/movie-api/download-file?"+query.toString(),{cache:"no-store"});
-    if(!response.ok)throw new Error("HTTP "+response.status);
-    const blob=await response.blob();if(!blob.size)throw new Error("Empty file");
-    entries.push({name:folder+"/E"+number+" - "+safeName(ep.title||ep.label||("Episode "+number))+".mp4",data:new Uint8Array(await blob.arrayBuffer())});
-   }catch(error){failures.push("Episode "+number+": "+(error.message||"Unavailable"));}
+  function isInWatchlist() {
+    return getWatchlist().some(x => x.path === path);
   }
-  if(!entries.length){setProgress("No downloadable MP4 files were available for this season.");return;}
-  const table=downloadSeasonZip.crcTable||(downloadSeasonZip.crcTable=(()=>{const t=new Uint32Array(256);for(let n=0;n<256;n++){let x=n;for(let k=0;k<8;k++)x=(x&1)?(0xedb88320^(x>>>1)):(x>>>1);t[n]=x>>>0;}return t;})());
-  const crc32=data=>{let x=0xffffffff;for(const b of data)x=table[(x^b)&255]^(x>>>8);return (x^0xffffffff)>>>0;};
-  const enc=new TextEncoder(),locals=[],centrals=[];let offset=0;
-  for(const entry of entries){
-   const name=enc.encode(entry.name),data=entry.data,crc=crc32(data),local=new Uint8Array(30+name.length),lv=new DataView(local.buffer);
-   lv.setUint32(0,0x04034b50,true);lv.setUint16(4,20,true);lv.setUint16(6,0x0800,true);lv.setUint32(14,crc,true);lv.setUint32(18,data.length,true);lv.setUint32(22,data.length,true);lv.setUint16(26,name.length,true);local.set(name,30);locals.push(local,data);
-   const central=new Uint8Array(46+name.length),cv=new DataView(central.buffer);
-   cv.setUint32(0,0x02014b50,true);cv.setUint16(4,20,true);cv.setUint16(6,20,true);cv.setUint16(8,0x0800,true);cv.setUint32(16,crc,true);cv.setUint32(20,data.length,true);cv.setUint32(24,data.length,true);cv.setUint16(28,name.length,true);cv.setUint32(42,offset,true);central.set(name,46);centrals.push(central);offset+=local.length+data.length;
+
+  function toggleWatchlist() {
+    const list = getWatchlist();
+    const exists = list.some(x => x.path === path);
+    const next = exists
+      ? list.filter(x => x.path !== path)
+      : [{ path, title: watchDetail?.title || requestedTitle || "Saved Title", poster: watchDetail?.poster || "" }, ...list].slice(0, 40);
+    try {
+      localStorage.setItem(WATCHLIST_KEY, JSON.stringify(next));
+    } catch {}
+    syncWatchlistButtons();
+    showToast(exists ? "Removed from your list" : "Added to your list");
   }
-  const centralSize=centrals.reduce((n,x)=>n+x.length,0),end=new Uint8Array(22),ev=new DataView(end.buffer);
-  ev.setUint32(0,0x06054b50,true);ev.setUint16(8,entries.length,true);ev.setUint16(10,entries.length,true);ev.setUint32(12,centralSize,true);ev.setUint32(16,offset,true);
-  const zip=new Blob([...locals,...centrals,end],{type:"application/zip"}),url=URL.createObjectURL(zip),a=document.createElement("a");
-  a.href=url;a.download=safeName((watchDetail?.title||"Series")+" - "+folder)+".zip";document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);
-  setProgress("ZIP ready: "+entries.length+" episode(s)"+(failures.length?" · "+failures.length+" unavailable":"")+".");
-  if(failures.length)alert("ZIP তৈরি হয়েছে, তবে কিছু Episode পাওয়া যায়নি:\n"+failures.join("\n"));
- }
 
- async function load(){
-  if(!/^\/(?:mb|movie|series)\/[a-zA-Z0-9_./-]{1,300}$/.test(path)){status.textContent="Invalid title link.";return;}
-  try{
-   const response=await fetch("/api/movie-api/details?path="+encodeURIComponent(path)+"&title="+encodeURIComponent(requestedTitle),{cache:"no-store",signal:AbortSignal.timeout(25000)});
-   const data=await response.json();
-   if(!response.ok)throw new Error(data.error||("Details API HTTP "+response.status));
-   // Accept both proxy-normalized {detail:{...}} and the original CinePulse upstream
-   // top-level {ok:true, subjectId, embedPlayerUrl, ...} response.
-   const candidates=[data.detail,data.data?.detail,data.data?.movie,data.data?.item,data.data,data.result?.detail,data.result?.movie,data.result?.item,data.result,data.movie,data.item,data].filter(x=>x&&typeof x==="object"&&!Array.isArray(x));
-   const d=candidates.find(x=>x.title||x.subjectId||x.subject_id||x.episodes||x.totalEpisodes||x.embedPlayerUrl)||data;
-   if(!d||typeof d!=="object"||(!d.title&&!d.subjectId&&!d.subject_id&&!d.id&&!d.episodes&&!d.totalEpisodes))throw new Error(data.error||"Details API returned no usable title data.");
-   watchDetail=d;episodes=Array.isArray(d.episodes)?d.episodes:[];
-   if(!episodes.length&&Array.isArray(d.seasons))episodes=d.seasons.flatMap((season,si)=>{
-    const list=Array.isArray(season.episodes)?season.episodes:Array.isArray(season.items)?season.items:[];
-    return list.map((ep,ei)=>({...ep,seasonNumber:ep.seasonNumber??season.seasonNumber??season.number??si+1,number:ep.number??ep.episodeNumber??ei+1,seasonName:ep.seasonName||season.name||season.title||("Season "+(si+1))}));
-   });
-   if(!episodes.length)episodes=Array.isArray(d.episodeList)?d.episodeList:Array.isArray(d.videoList)?d.videoList:[];
-   currentDubs=Array.isArray(d.dubs)?d.dubs:[];
-   // Single movies may have no episode array or embed URL in Details.
-   // Still create one playable version so the Stream endpoint is queried.
-   const detailType=[d.type,d.mediaType,d.typeBadge,d.category,d.categoryPath].join(" ").toLowerCase();
-   const explicitlySeries=/series|tv show|drama|serial|season|web\s*series/.test(detailType)||Number(d.totalEpisodes||0)>1;
-   const isSingleMovie=/\b(movie|film|feature film)\b/.test(detailType)||d.isMovie===true||(!explicitlySeries&&Boolean(d.subjectId||d.subject_id||d.id));
-   if(!episodes.length&&(findEmbedUrl(d)||isSingleMovie))episodes=[{label:"Play Movie",number:1,seasonNumber:0,episodeNumber:1}];
-   const poster=safeImage(d.poster),typeHint=[d.type,d.mediaType,d.typeBadge,d.category,d.categoryPath].join(" ").toLowerCase();
-   const isDrama=/series|tv|drama|show|serial|web\s*series/.test(typeHint)||episodes.some(e=>/episode|season|ep\s*\d|s\d+\s*e\d+/i.test(String(e.kind||e.label||"")));
-   const listTitle=isDrama?"Episodes":"Available Versions";
-   const seasonKey=ep=>String(ep.seasonName||ep.seasonTitle||(ep.seasonNumber!=null?"Season "+ep.seasonNumber:(ep.season!=null?(typeof ep.season==="number"?"Season "+ep.season:String(ep.season)):"Season 1")));
-   const seasonMap=new Map();episodes.forEach((ep,i)=>{const key=seasonKey(ep);if(!seasonMap.has(key))seasonMap.set(key,[]);seasonMap.get(key).push({ep,i});});
-   const episodeRows=[...seasonMap.entries()].map(([season,items],si)=>'<section class="ms-season-card"><div class="ms-season-heading" role="button" tabindex="0" aria-expanded="'+(si===0?"true":"false")+'"><span class="ms-season-name">'+esc(season)+'</span><small>'+items.length+' Episodes</small><button type="button" class="ms-season-download" data-download-season="'+si+'">⬇ Download Season ZIP</button><b class="ms-season-chevron">⌄</b></div><div class="ms-season-episodes ms-episode-strip" '+(si===0?"":"hidden")+'>'+items.map(({ep,i})=>{const number=String(ep.number||i+1).padStart(2,"0"),image=safeImage(ep.thumbnail||ep.image||ep.poster||ep.cover||poster),label=ep.label||("Episode "+(ep.number||i+1)),quality=getSources(ep).map(s=>s.quality).join(" · ");return '<button class="movie-api-episode ms-episode-button" type="button" data-watch-episode="'+i+'" aria-label="Play '+esc(label)+'"><span class="ms-episode-thumb">'+(image?'<img loading="lazy" decoding="async" src="'+esc(image)+'" alt="">':'<span class="ms-episode-thumb-fallback">EP</span>')+'<span class="ms-episode-play">▶</span><span class="ms-episode-number">EP '+number+'</span></span><span class="ms-episode-info"><b>'+esc(label)+'</b><small>'+(quality?esc(quality):esc(ep.kind||"Episode "+number))+'</small></span></button>';}).join("")+'</div></section>').join("")||'<p class="muted">No episodes or video versions were returned.</p>';
-   const dubLabels=currentDubs.map(x=>getLang(x)).filter(Boolean);
-   const hindiDub=dubLabels.some(isHindi)||episodes.some(e=>isHindi(getLang(e))||getSources(e).some(s=>isHindi(s.audioLanguage)));
-   document.title=(d.title||"Watch")+" — MovieStream BD";
-   root.innerHTML='<section class="ms-title-detail">'+(poster?'<img class="ms-title-poster" src="'+esc(poster)+'" alt="'+esc(d.title||"Poster")+'">':'')+'<div class="ms-title-copy"><p class="eyebrow">MOVIESTREAM BD · '+(isDrama?"DRAMA SERIES":"MOVIE")+'</p><h1>'+esc(d.title||"Untitled")+'</h1><p class="muted">'+esc(d.releaseDate||"")+' · '+esc(d.quality||d.resolution||"")+' · '+esc(d.language||"")+'</p><p>'+esc(d.storyline||"")+'</p><p><b>Genre:</b> '+esc(d.genre||"Not specified")+'</p><p><b>Audio Languages:</b> '+esc(dubLabels.join(", ")||d.language||"Not listed")+'</p><p><b>Hindi Audio:</b> '+(hindiDub?"Available":"Not confirmed by source metadata")+'</p></div></section><section class="ms-watch-player"><div class="video-heading"><div><p class="eyebrow">NOW PLAYING</p><h2 id="movieWatchNow">Loading first '+(isDrama?"episode":"version")+'…</h2></div><button class="btn ghost" id="movieWatchUnmute" type="button" hidden>🔊 Turn Sound On</button></div><div id="movieWatchAudioBox" class="ms-audio-box"></div><p id="movieWatchMessage" class="muted" aria-live="polite">Preparing video…</p><video id="movieWatchVideo" class="movie-player" hidden controls playsinline preload="none" '+(poster?'poster="'+esc(poster)+'"':'')+'></video><a id="movieWatchDownload" class="ms-download-entry" href="download.html?path='+encodeURIComponent(path)+'&title='+encodeURIComponent(d.title||"")+'&episode=0"><span>⬇</span><span><b>Download</b><small>Select quality and download</small></span><span class="ms-download-arrow">›</span></a></section><section class="ms-episode-section" '+(isDrama?'':'hidden')+'><div class="section-head"><div><p class="eyebrow">'+(isDrama?"SEASON & EPISODE GUIDE":"PLAYBACK OPTIONS")+'</p><h2>'+listTitle+' <em>('+episodes.length+')</em></h2></div></div><div id="msZipProgress" class="muted" aria-live="polite"></div><div class="movie-api-episodes">'+episodeRows+'</div></section><section id="movieWatchSuggested" class="ms-suggested-section" hidden><div class="section-head"><div><p class="eyebrow">KEEP WATCHING</p><h2 id="movieWatchSuggestedTitle">Suggested for you</h2></div></div><div id="movieWatchSuggestedGrid" class="ms-suggested-grid"></div></section>';
-   status.textContent="Details loaded successfully.";
-   const extras=document.createElement("section");extras.className="cv-watch-community";extras.innerHTML='<section id="cvComments"><h2>Comments</h2><p class="muted">Loading comments…</p></section><section id="cvCast"><h2>Cast &amp; Crew</h2><p class="muted">Loading cast…</p></section>';root.appendChild(extras);
-   const safeText=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-   const subjectId=d.subjectId||d.subject_id||d.commentSubjectId||d.comment_subject_id||d.contentId||d.id||d._id;
-   if(subjectId!=null){
-    fetch("/api/movie-api/comments?subjectId="+encodeURIComponent(subjectId)+"&page=1").then(r=>r.json()).then(payload=>{
-     const rows=Array.isArray(payload.comments)?payload.comments:Array.isArray(payload.items)?payload.items:Array.isArray(payload.list)?payload.list:[];
-     $("#cvComments").innerHTML='<h2>Comments</h2>'+(rows.length?rows.slice(0,20).map(x=>'<article class="cv-comment"><b>'+safeText(x.userName||x.username||x.user||"Viewer")+'</b><p>'+safeText(x.content||x.comment||x.text||"")+'</p><small>'+safeText(x.createdAt||x.time||"")+'</small></article>').join(""):'<p class="muted">No comments available.</p>');
-    }).catch(()=>{$("#cvComments").innerHTML='<h2>Comments</h2><p class="muted">Comments are unavailable right now.</p>';});
-   }else $("#cvComments").innerHTML='<h2>Comments</h2><p class="muted">Comments are not available for this title.</p>';
-   const staffList=[...(Array.isArray(d.staff)?d.staff:[]),...(Array.isArray(d.cast)?d.cast:[]),...(Array.isArray(d.actors)?d.actors:[]),...(Array.isArray(d.crew)?d.crew:[])];
-   const uniqueStaff=[...new Map(staffList.filter(x=>x&&typeof x==="object"&&(x.staffId||x.staff_id||x.personId||x.actorId||x.id)).map(x=>[String(x.staffId||x.id),x])).values()].slice(0,10);
-   if(uniqueStaff.length){
-    $("#cvCast").innerHTML='<h2>Cast &amp; Crew</h2><div class="cv-cast-grid">'+uniqueStaff.map(x=>'<button type="button" class="cv-cast-person" data-staff-id="'+safeText(x.staffId||x.id)+'"><b>'+safeText(x.name||x.title||"Cast member")+'</b><small>'+safeText(x.role||x.character||x.job||"")+'</small></button>').join("")+'</div>';
-    $("#cvCast").addEventListener("click",async e=>{const b=e.target.closest("[data-staff-id]");if(!b)return;try{const r=await fetch("/api/movie-api/staff?staffId="+encodeURIComponent(b.dataset.staffId)+"&page=1");const payload=await r.json();const detail=payload.staff||payload.person||payload.data||{};b.insertAdjacentHTML("afterend",'<p class="cv-staff-detail">'+safeText(detail.biography||detail.description||detail.name||"No additional biography available.")+'</p>');b.disabled=true;}catch{}});
-   }else $("#cvCast").innerHTML='<h2>Cast &amp; Crew</h2><p class="muted">No cast details supplied for this title.</p>';
+  function syncWatchlistButtons() {
+    const active = isInWatchlist();
+    const topBtn = $("#cvWatchTopList");
+    const actionBtn = $("#cvWatchActionList");
+    if (topBtn) topBtn.classList.toggle("active", active);
+    if (actionBtn) {
+      actionBtn.classList.toggle("active", active);
+      actionBtn.innerHTML = active
+        ? `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><polyline points="20 6 9 17 4 12"/></svg><span>In my list</span>`
+        : `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 12H3"/><path d="M16 6H3"/><path d="M16 18H3"/><path d="M18 9v6"/><path d="M21 12h-6"/></svg><span>Add to list</span>`;
+    }
+  }
 
-   loadSuggested(d).catch(e=>console.warn("Suggested titles unavailable",e));
-   root.addEventListener("click",e=>{const zipButton=e.target.closest("[data-download-season]");if(zipButton){e.preventDefault();e.stopPropagation();const group=[...seasonMap.values()][Number(zipButton.dataset.downloadSeason)];if(group?.length){zipButton.disabled=true;zipButton.textContent="Preparing ZIP…";downloadSeasonZip(group,seasonKey(group[0].ep)).finally(()=>{zipButton.disabled=false;zipButton.textContent="⬇ Download Season ZIP";});}return;}const season=e.target.closest(".ms-season-heading");if(season){const panel=season.nextElementSibling,open=season.getAttribute("aria-expanded")==="true";season.setAttribute("aria-expanded",String(!open));panel.hidden=open;return;}const b=e.target.closest("[data-watch-episode]");if(b)start(Number(b.dataset.watchEpisode));});
-   $("#movieWatchUnmute").addEventListener("click",()=>{const v=$("#movieWatchVideo");v.muted=false;v.volume=1;$("#movieWatchUnmute").textContent="Sound On";});
-   if(episodes.length){
-    const hindiIndex=episodes.findIndex(ep=>isHindi(getLang(ep))||getSources(ep).some(s=>isHindi(s.audioLanguage)));
-    start(hindiIndex>=0?hindiIndex:0);
-   }else status.textContent="Details loaded, but no playable episodes were found.";
-  }catch(error){console.error("Movie details loading failed:",error);status.textContent=(error.name==="TimeoutError"||error.name==="AbortError")?"Movie details request timed out. Check the Movie API server and Cloudflare deployment.":(error.message||"Could not load this title.");}
- }
- load();
+  async function shareCurrentTitle() {
+    const title = watchDetail?.title || requestedTitle || "MovieStream BD";
+    const url = location.href;
+    if (navigator.share) {
+      try {
+        await navigator.share({ title, url });
+        return;
+      } catch {}
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      showToast("Watch link copied to clipboard");
+    } catch {
+      showToast("Copy link from your browser address bar");
+    }
+  }
+
+  function renderEpisodeButtons(seasonGroups) {
+    const strip = $("#cvEpisodeStrip");
+    if (!strip) return;
+    const activeGroup = seasonGroups.get(selectedSeasonNum) || [...seasonGroups.values()][0] || [];
+    strip.classList.toggle("expanded", showAllEpisodes);
+
+    const allBtn =
+      activeGroup.length > 1
+        ? `<button type="button" class="cv-ep-btn ${showAllEpisodes ? "active" : ""}" id="cvToggleAllEps">All</button>`
+        : "";
+    const btns = activeGroup
+      .map(({ ep, idx }) => {
+        const labelNum = String(ep.episodeNumber || ep.number || idx + 1).padStart(2, "0");
+        return `<button type="button" class="cv-ep-btn ${idx === selectedEpIdx ? "active" : ""}" data-watch-ep="${idx}" aria-label="Play episode ${labelNum}">${labelNum}</button>`;
+      })
+      .join("");
+
+    strip.innerHTML = activeGroup.length <= 1 && watchDetail?.isMovie ? `<button type="button" class="cv-ep-btn active" data-watch-ep="0">Full Movie</button>` : allBtn + btns;
+  }
+
+  async function playEpisode(idx) {
+    const ep = episodes[idx];
+    if (!ep) return;
+    selectedEpIdx = idx;
+    const reqId = ++streamReqId;
+    const video = $("#movieWatchVideo");
+    const streamMsg = $("#cvStreamStatusText");
+    if (streamMsg) streamMsg.textContent = "Loading video stream…";
+
+    root.querySelectorAll("[data-watch-ep]").forEach(b => b.classList.toggle("active", Number(b.dataset.watchEp) === idx));
+    const dlBtn = $("#movieWatchDownload");
+    if (dlBtn) {
+      dlBtn.href = `download.html?path=${encodeURIComponent(path)}&title=${encodeURIComponent(watchDetail?.title || "")}&episode=${idx}`;
+    }
+
+    const se = Number(ep.seasonNumber ?? ep.se ?? 0) || 0;
+    const epNum = ep.ep != null ? Number(ep.ep) : Number(ep.episodeNumber ?? ep.number ?? 1);
+
+    try {
+      const qs = new URLSearchParams({
+        subjectId: String(watchDetail?.subjectId || watchDetail?.id || ""),
+        detailPath: String(watchDetail?.detailPath || ""),
+        title: String(watchDetail?.title || ""),
+        se: String(se),
+        ep: String(epNum)
+      });
+      const r = await fetch(`/api/movie-api/stream?${qs.toString()}`, { cache: "no-store" });
+      const payload = await r.json();
+      if (reqId !== streamReqId) return;
+
+      const streamRoot = payload.stream || payload;
+      const rawSources = Array.isArray(streamRoot.sources) ? streamRoot.sources : [];
+      const sources = rawSources
+        .filter(s => s?.url)
+        .map(s => ({
+          url: s.url,
+          quality: String(s.quality || s.resolution || "720p"),
+          provider: s.provider || "MovieBox Direct",
+          mime: s.type || "video/mp4",
+          audioLanguage: s.audioLanguage || ""
+        }));
+
+      const subtitles = Array.isArray(streamRoot.subtitles) ? streamRoot.subtitles : [];
+
+      if (!sources.length) {
+        if (streamMsg) streamMsg.textContent = "No playable MP4 source was returned for this episode.";
+        return;
+      }
+
+      if (streamMsg) {
+        streamMsg.textContent = `${sources.map(s => s.quality).join(" · ")}${subtitles.length ? ` · ${subtitles.length} subtitles` : ""}`;
+      }
+
+      if (playerApi) {
+        playerApi.setSources(sources);
+        playerApi.setSubtitles(subtitles);
+      } else if (video && window.CineVersePlayer) {
+        video.hidden = false;
+        playerApi = window.CineVersePlayer.mount({
+          video,
+          sources,
+          subtitles,
+          storageKey: `cv-mb-${watchDetail?.subjectId || path}-${se}-${epNum}`,
+          title: watchDetail?.title || "Now Playing",
+          backUrl: "./"
+        });
+      }
+    } catch {
+      if (reqId === streamReqId && streamMsg) {
+        streamMsg.textContent = "Stream temporarily unavailable. Try another episode or version.";
+      }
+    }
+  }
+
+  async function loadRelated(detail) {
+    const grid = $("#cvForYouGrid");
+    if (!grid) return;
+    let items = [];
+    try {
+      const r = await fetch(`/api/movie-api/related?subjectId=${encodeURIComponent(detail.subjectId || "")}&title=${encodeURIComponent(detail.title || "")}`);
+      const d = await r.json();
+      items = Array.isArray(d?.items) ? d.items : [];
+    } catch {}
+
+    if (!items.length) {
+      try {
+        const hr = await fetch("/api/movie-api/home");
+        const hd = await hr.json();
+        items = [...(hd?.trending || []), ...(hd?.sections?.[0]?.items || [])];
+      } catch {}
+    }
+
+    const usable = items.filter(x => x?.path && x.path !== path).slice(0, 12);
+    if (!usable.length) {
+      grid.innerHTML = `<div class="cv-status-banner">No related recommendations available.</div>`;
+      return;
+    }
+
+    grid.innerHTML = usable
+      .map(x => {
+        const poster = safeImg(x.poster || x.previewImage || x.cover);
+        const lang = String(x.language || x.typeBadge || "").split("·")[0].trim();
+        const rate = x.rating && Number(x.rating) > 0 ? `★ ${esc(x.rating)}` : "";
+        return `
+          <a class="cv-card" href="watch.html?path=${encodeURIComponent(x.path)}&title=${encodeURIComponent(x.title || "")}">
+            <div class="cv-card-thumb">
+              ${poster
+                ? `<img loading="lazy" referrerpolicy="no-referrer" src="${esc(poster)}" alt="${esc(x.title || "")}" onerror="this.style.display='none';this.nextElementSibling.hidden=false"><div class="cv-card-fallback" hidden>${esc(x.title || "")}</div>`
+                : `<div class="cv-card-fallback">${esc(x.title || "")}</div>`}
+              <div class="cv-card-top">
+                ${lang ? `<span class="cv-card-lang">${esc(lang)}</span>` : ""}
+                ${rate ? `<span class="cv-card-rate">${rate}</span>` : ""}
+              </div>
+            </div>
+            <h3 class="cv-card-title">${esc(x.title || "Untitled")}</h3>
+          </a>
+        `;
+      })
+      .join("");
+  }
+
+  async function loadComments(detail) {
+    const box = $("#cvReviewsPanel");
+    if (!box || !detail?.subjectId) return;
+    try {
+      const r = await fetch(`/api/movie-api/comments?subjectId=${encodeURIComponent(detail.subjectId)}&page=1`);
+      const d = await r.json();
+      const rows = Array.isArray(d?.comments) ? d.comments : [];
+      box.innerHTML = rows.length
+        ? rows
+            .slice(0, 20)
+            .map(
+              c => `<article class="cv-comment-item">
+                <b>${esc(c.userName || "Viewer")}</b>
+                <p>${esc(c.content || "")}</p>
+                ${c.createdAt ? `<small>${esc(c.createdAt)}</small>` : ""}
+              </article>`
+            )
+            .join("")
+        : `<div class="cv-status-banner">No viewer reviews posted yet for this title.</div>`;
+    } catch {
+      box.innerHTML = `<div class="cv-status-banner">Reviews are currently unavailable.</div>`;
+    }
+  }
+
+  async function load() {
+    if (!/^\/(?:mb|movie|series)\/[a-zA-Z0-9_./-]{1,300}$/.test(path)) {
+      statusEl.textContent = "Invalid title URL. Returning to home or select another title.";
+      return;
+    }
+
+    try {
+      const r = await fetch(`/api/movie-api/details?path=${encodeURIComponent(path)}&title=${encodeURIComponent(requestedTitle)}`, {
+        cache: "no-store"
+      });
+      const data = await r.json();
+      if (!r.ok || !data?.detail) throw new Error(data?.error || "Title details unavailable.");
+
+      const d = data.detail;
+      watchDetail = d;
+      episodes = Array.isArray(d.episodes) && d.episodes.length ? d.episodes : [{ label: d.title || "Play", number: 1, seasonNumber: 0, episodeNumber: 1, se: 0, ep: 0 }];
+      currentDubs = Array.isArray(d.dubs) ? d.dubs : [];
+      document.title = `${d.title || "Watch"} — MovieStream BD`;
+
+      const seasonGroups = new Map();
+      episodes.forEach((ep, idx) => {
+        const sNum = Number(ep.seasonNumber ?? ep.se ?? 0) || 0;
+        if (!seasonGroups.has(sNum)) seasonGroups.set(sNum, []);
+        seasonGroups.get(sNum).push({ ep, idx });
+      });
+      const seasonKeys = [...seasonGroups.keys()].sort((a, b) => a - b);
+      selectedSeasonNum = seasonKeys[0] ?? 0;
+
+      const isSeries = seasonKeys.some(k => k > 0) || episodes.length > 1;
+      const seasonsLabel = isSeries ? `${seasonKeys.filter(k => k > 0).length || 1} season${seasonKeys.length > 1 ? "s" : ""}` : "Feature Film";
+      const metaItems = [
+        d.rating ? `<span class="cv-star">★ ${esc(d.rating)}</span>` : "",
+        d.year ? `<span>${esc(d.year)}</span>` : "",
+        d.language ? `<span>${esc(String(d.language).split("·")[0].trim())}</span>` : "",
+        d.genre ? `<span>${esc(String(d.genre).split(",")[0].trim())}</span>` : "",
+        `<span>${esc(seasonsLabel)}</span>`
+      ].filter(Boolean);
+
+      const dubChoices = currentDubs.filter(x => x?.path);
+      const dubSelectHtml =
+        dubChoices.length > 1
+          ? `<select id="cvDubSelect" class="cv-select" aria-label="Select audio language">
+              ${dubChoices.map(x => `<option value="${esc(x.path)}" ${x.path === path ? "selected" : ""}>${esc(x.language || x.lanName || "Audio")}</option>`).join("")}
+            </select>`
+          : `<select id="cvDubSelect" class="cv-select" aria-label="Audio language">
+              <option value="${esc(path)}">${esc(d.language || "Original Audio")}</option>
+            </select>`;
+
+      const seasonSelectHtml =
+        seasonKeys.length > 1 || (seasonKeys.length === 1 && seasonKeys[0] > 0)
+          ? `<select id="cvSeasonSelect" class="cv-select" aria-label="Select season">
+              ${seasonKeys.map(s => `<option value="${s}" ${s === selectedSeasonNum ? "selected" : ""}>Season ${String(s || 1).padStart(2, "0")}</option>`).join("")}
+            </select>`
+          : "";
+
+      const staffList = Array.isArray(d.staff) ? d.staff.slice(0, 12) : [];
+      const poster = safeImg(d.poster);
+
+      statusEl.hidden = true;
+      root.innerHTML = `
+        <div class="cv-watch-grid">
+          <div class="cv-watch-primary-col">
+            <div class="cv-player-stage ms-watch-player">
+              <video id="movieWatchVideo" class="movie-player" controls playsinline preload="metadata" ${poster ? `poster="${esc(poster)}"` : ""}></video>
+            </div>
+
+            <div class="cv-watch-info-pad">
+              <div class="cv-watch-title-row">
+                <h1 class="cv-watch-title">${esc(d.title || "Untitled")}</h1>
+                <button type="button" id="cvToggleInfoBtn" class="cv-info-toggle" aria-expanded="false">Info ›</button>
+              </div>
+
+              <div class="cv-watch-meta-line">
+                <span aria-hidden="true">📺</span>
+                ${metaItems.map(m => `<span aria-hidden="true">|</span>${m}`).join("")}
+              </div>
+
+              <div id="cvSynopsisBox" class="cv-watch-synopsis" hidden>
+                <p style="margin:0 0 8px">${esc(d.storyline || d.description || "No synopsis available for this title.")}</p>
+                <div style="font-size:12px;color:#98a2b3">
+                  ${[d.country ? `Country: ${d.country}` : "", d.genre ? `Genre: ${d.genre}` : "", d.releaseDate ? `Released: ${d.releaseDate}` : ""].filter(Boolean).join(" · ")}
+                </div>
+              </div>
+
+              <div class="cv-watch-actions-row">
+                <button type="button" id="cvWatchActionList" class="cv-action-btn"></button>
+                <button type="button" id="cvWatchActionShare" class="cv-action-btn">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+                  <span>Share</span>
+                </button>
+                <a id="movieWatchDownload" class="cv-action-btn" href="download.html?path=${encodeURIComponent(path)}&title=${encodeURIComponent(d.title || "")}&episode=0">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                  <span>Download</span>
+                </a>
+              </div>
+              <div id="cvStreamStatusText" style="margin-top:8px;font-size:12px;color:#98a2b3" aria-live="polite">Preparing stream…</div>
+            </div>
+          </div>
+
+          <aside class="cv-resources-panel">
+            <div class="cv-resources-head">
+              <h2>Resources</h2>
+              <span>Verified · MovieBox Direct</span>
+            </div>
+            <div class="cv-resources-selects">
+              ${dubSelectHtml}
+              ${seasonSelectHtml}
+            </div>
+            <div id="cvEpisodeStrip" class="cv-ep-strip"></div>
+          </aside>
+        </div>
+
+        <div class="cv-watch-tabs-bar" role="tablist" aria-label="Related titles, cast and reviews">
+          <button type="button" class="cv-watch-tab-btn active" data-watch-tab="foryou" role="tab" aria-selected="true">For you</button>
+          <button type="button" class="cv-watch-tab-btn" data-watch-tab="cast" role="tab" aria-selected="false">Info &amp; Cast</button>
+          <button type="button" class="cv-watch-tab-btn" data-watch-tab="reviews" role="tab" aria-selected="false">Reviews ${d.rating ? `<span class="cv-star">★ ${esc(d.rating)}</span>` : ""}</button>
+        </div>
+
+        <section id="cvForYouPanel" class="cv-watch-tab-panel">
+          <div id="cvForYouGrid" class="cv-poster-grid"><div class="cv-status-banner">Loading recommendations…</div></div>
+        </section>
+
+        <section id="cvCastPanel" class="cv-watch-tab-panel" hidden>
+          <div style="margin-bottom:18px;font-size:14px;line-height:1.65;color:#d5dce6">
+            ${esc(d.storyline || d.description || "Explore cast and production credits below.")}
+          </div>
+          ${
+            staffList.length
+              ? `<div class="cv-cast-grid-clean">
+                  ${staffList
+                    .map(
+                      st => `<button type="button" class="cv-cast-card" data-staff-id="${esc(st.staffId || "")}">
+                        ${safeImg(st.avatarUrl) ? `<img loading="lazy" referrerpolicy="no-referrer" src="${esc(st.avatarUrl)}" alt="${esc(st.name || "")}">` : `<img alt="" src="favicon.svg">`}
+                        <div><b>${esc(st.name || "Cast Member")}</b><small>${esc(st.role || "Actor")}</small></div>
+                      </button>`
+                    )
+                    .join("")}
+                </div>
+                <div id="cvStaffBioBox" class="cv-status-banner" hidden></div>`
+              : `<div class="cv-status-banner">Cast details were not supplied for this title.</div>`
+          }
+        </section>
+
+        <section id="cvReviewsPanel" class="cv-watch-tab-panel" hidden>
+          <div class="cv-status-banner">Loading viewer reviews…</div>
+        </section>
+      `;
+
+      syncWatchlistButtons();
+      renderEpisodeButtons(seasonGroups);
+
+      // Wire controls
+      $("#cvToggleInfoBtn")?.addEventListener("click", e => {
+        const box = $("#cvSynopsisBox");
+        const open = !box.hidden;
+        box.hidden = open;
+        e.currentTarget.setAttribute("aria-expanded", String(!open));
+      });
+
+      $("#cvWatchActionList")?.addEventListener("click", toggleWatchlist);
+      $("#cvWatchTopList")?.addEventListener("click", toggleWatchlist);
+      $("#cvWatchActionShare")?.addEventListener("click", shareCurrentTitle);
+      $("#cvWatchTopShare")?.addEventListener("click", shareCurrentTitle);
+      $("#cvWatchTopPip")?.addEventListener("click", async () => {
+        const v = $("#movieWatchVideo");
+        if (!v) return;
+        try {
+          if (document.pictureInPictureElement) await document.exitPictureInPicture();
+          else await v.requestPictureInPicture();
+        } catch {
+          showToast("Picture-in-Picture is unavailable until video starts");
+        }
+      });
+
+      $("#cvDubSelect")?.addEventListener("change", e => {
+        const targetPath = e.target.value;
+        if (targetPath && targetPath !== path) {
+          location.href = `watch.html?path=${encodeURIComponent(targetPath)}&title=${encodeURIComponent(d.title || "")}`;
+        }
+      });
+
+      $("#cvSeasonSelect")?.addEventListener("change", e => {
+        selectedSeasonNum = Number(e.target.value);
+        const firstInSeason = seasonGroups.get(selectedSeasonNum)?.[0];
+        renderEpisodeButtons(seasonGroups);
+        if (firstInSeason) playEpisode(firstInSeason.idx);
+      });
+
+      root.addEventListener("click", async e => {
+        if (e.target.closest("#cvToggleAllEps")) {
+          showAllEpisodes = !showAllEpisodes;
+          renderEpisodeButtons(seasonGroups);
+          return;
+        }
+        const epBtn = e.target.closest("[data-watch-ep]");
+        if (epBtn) {
+          playEpisode(Number(epBtn.dataset.watchEp));
+          return;
+        }
+        const tabBtn = e.target.closest("[data-watch-tab]");
+        if (tabBtn) {
+          const target = tabBtn.dataset.watchTab;
+          root.querySelectorAll("[data-watch-tab]").forEach(t => {
+            const active = t === tabBtn;
+            t.classList.toggle("active", active);
+            t.setAttribute("aria-selected", String(active));
+          });
+          $("#cvForYouPanel").hidden = target !== "foryou";
+          $("#cvCastPanel").hidden = target !== "cast";
+          $("#cvReviewsPanel").hidden = target !== "reviews";
+          return;
+        }
+        const castCard = e.target.closest("[data-staff-id]");
+        if (castCard && castCard.dataset.staffId) {
+          const bio = $("#cvStaffBioBox");
+          if (!bio) return;
+          bio.hidden = false;
+          bio.textContent = "Loading actor profile…";
+          try {
+            const sr = await fetch(`/api/movie-api/staff?staffId=${encodeURIComponent(castCard.dataset.staffId)}&page=1`);
+            const sd = await sr.json();
+            bio.textContent = sd?.staff?.biography || `${sd?.staff?.name || "Actor"} — No additional details.`;
+          } catch {
+            bio.textContent = "Profile unavailable right now.";
+          }
+        }
+      });
+
+      playEpisode(0);
+      loadRelated(d);
+      loadComments(d);
+    } catch (err) {
+      statusEl.hidden = false;
+      statusEl.textContent = err?.message || "Could not load this title. Try selecting another movie or series.";
+    }
+  }
+
+  load();
 })();
