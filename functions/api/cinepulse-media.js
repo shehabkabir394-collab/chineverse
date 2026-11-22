@@ -33,6 +33,9 @@ export async function onRequest({ request, env }) {
       const value = upstream.headers.get(name);
       if (value) responseHeaders.set(name, value);
     }
+    if (incoming.searchParams.get("download") === "1") {
+      responseHeaders.set("content-disposition", "attachment; filename=CineVerse-Download.mp4");
+    }
     responseHeaders.set("cache-control", "private, no-store");
     responseHeaders.set("x-content-type-options", "nosniff");
     return new Response(request.method === "HEAD" ? null : upstream.body, {
