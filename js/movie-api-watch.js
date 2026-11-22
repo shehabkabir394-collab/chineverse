@@ -297,7 +297,12 @@
    // top-level {ok:true, subjectId, embedPlayerUrl, ...} response.
    const d=data.detail||data.data?.detail||data.data||data.result||data;
    if(!d||typeof d!=="object"||(!d.title&&!d.subjectId&&!d.embedPlayerUrl&&!d.episodes&&!d.totalEpisodes))throw new Error(data.error||"Details API returned no usable title data.");
-   watchDetail=d;episodes=Array.isArray(d.episodes)?d.episodes:[];if(!episodes.length&&findEmbedUrl(d))episodes=[{label:"Play Movie",number:1,seasonNumber:0}];currentDubs=Array.isArray(d.dubs)?d.dubs:[];
+   watchDetail=d;episodes=Array.isArray(d.episodes)?d.episodes:[];currentDubs=Array.isArray(d.dubs)?d.dubs:[];
+   // Single movies may have no episode array or embed URL in Details.
+   // Still create one playable version so the Stream endpoint is queried.
+   const detailType=[d.type,d.mediaType,d.typeBadge,d.category,d.categoryPath].join(" ").toLowerCase();
+   const isSingleMovie=/\b(movie|film|feature film)\b/.test(detailType)||d.isMovie===true;
+   if(!episodes.length&&(findEmbedUrl(d)||isSingleMovie))episodes=[{label:"Play Movie",number:1,seasonNumber:0,episodeNumber:1}];
    const poster=safeImage(d.poster),typeHint=[d.type,d.mediaType,d.typeBadge,d.category,d.categoryPath].join(" ").toLowerCase();
    const isDrama=/series|tv|drama|show|serial|web\s*series/.test(typeHint)||episodes.some(e=>/episode|season|ep\s*\d|s\d+\s*e\d+/i.test(String(e.kind||e.label||"")));
    const listTitle=isDrama?"Episodes":"Available Versions";
