@@ -80,7 +80,9 @@ export async function onRequest({request,env,params}){
   if(endpoint==="details"){
    const pathValue=p.get("path")||"",info=pathInfo(pathValue);
    const title=p.get("title")||titleFromPath(pathValue);
+   const source=p.get("source")||(pathValue.startsWith("/mb/")?"moviebox":pathValue? "movielinkbd":"all");
    if(title)p.set("title",title);
+   if(source)p.set("source",source);
    if(info.subjectId&&!p.has("subjectId"))p.set("subjectId",info.subjectId);
    if(info.detailPath&&!p.has("detailPath"))p.set("detailPath",info.detailPath);
    p.delete("path");
@@ -88,7 +90,7 @@ export async function onRequest({request,env,params}){
    const detail=data?.detail||data?.data?.detail||data?.data||data?.result||data;
    const subjectId=data?.subjectId||data?.subject_id||detail?.subjectId||detail?.subject_id||info.subjectId;
    const detailPath=data?.detailPath||detail?.detailPath||info.detailPath;
-   const normalizedDetail={...detail,...(subjectId?{subjectId}:{}),...(detailPath?{detailPath}:{}),...(title&&!detail?.title?{title}:{})};
+   const normalizedDetail={...detail,...(subjectId?{subjectId}:{}),...(detailPath?{detailPath}:{}),...(source?{source}:{}),...(title&&!detail?.title?{title}:{})};
    return json(secureTree({...data,ok:data?.ok!==false,detail:normalizedDetail}),r.status);
   }
   if(endpoint==="catalog"){
