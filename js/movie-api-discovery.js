@@ -35,7 +35,7 @@
   const cards=items.length ? items.slice(0,12).map((x,i)=>{
    const p=pathOf(x),img=imageOf(x),title=titleOf(x,i),sub=x.language||x.categoryName||x.category||x.league||x.sport||x.type||x.description||"";
    const stream=x.stream||x.channel||x.event||{};
-   const href=p?"watch.html?path="+encodeURIComponent(p):safeUrl(x.url||x.link||x.playUrl||x.play_url||x.streamUrl||x.stream_url||x.m3u8||x.webUrl||stream.url||stream.playUrl||stream.streamUrl);
+   const href=p?"watch.html?path="+encodeURIComponent(p)+"&title="+encodeURIComponent(title):safeUrl(x.url||x.link||x.playUrl||x.play_url||x.streamUrl||x.stream_url||x.m3u8||x.webUrl||stream.url||stream.playUrl||stream.streamUrl);
    return '<a class="cv-extra-card" href="'+esc(href||"#")+'" '+(!href?'aria-disabled="true"':'')+'>'+(img?'<img loading="lazy" src="'+esc(img)+'" alt="">':'<span class="cv-extra-placeholder">▶</span>')+'<span class="cv-extra-copy"><b>'+esc(title)+'</b><small>'+esc(sub)+'</small></span></a>';
   }).join("") : '<div class="cv-extra-empty">No live channels are available right now. Please refresh later.</div>';
   return '<section class="cv-extra-section" id="'+esc(id)+'"><div class="section-head"><div><p class="eyebrow">'+esc(eyebrow)+'</p><h2>'+esc(title)+'</h2></div></div><div class="cv-extra-grid">'+cards+'</div></section>';
