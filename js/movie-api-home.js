@@ -26,8 +26,8 @@
   return explicitShelf||explicitDubFlag||audioFields.some(containsHindi);
  };
  const pathOf=item=>{
-  if(typeof item.path==="string"&&item.path.startsWith("/mb/"))return item.path;
-  try{const p=new URL(item.detailsEndpoint).searchParams.get("path");return p?.startsWith("/mb/")?p:"";}catch{return "";}
+  if(typeof item.path==="string"&&/^\/(?:mb|movie|series)\//.test(item.path))return item.path;
+  try{const p=new URL(item.detailsEndpoint).searchParams.get("path");return p&&/^\/(?:mb|movie|series)\//.test(p)?p:"";}catch{return "";}
  };
  const posterOf=item=>{
   for(const value of [item?.poster,item?.previewImage,item?.posterUrl,item?.poster_url,item?.image,item?.imageUrl,item?.cover,item?.coverImage,item?.thumbnail,item?.thumb]){
