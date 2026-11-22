@@ -413,7 +413,7 @@
  function normalizeHomePayload(payload){
   // CinePulse v1 returns independent source objects (moviebox / movielinkbd),
   // while the existing CineVerse UI consumes the legacy unified shape.
-  if(!payload?.separated||(!payload.moviebox&&!payload.movielinkbd))return payload;
+  if(!payload||(!payload.moviebox&&!payload.movielinkbd))return payload;
   const sources=[payload.moviebox,payload.movielinkbd].filter(source=>source&&typeof source==="object");
   const sections=sources.flatMap(source=>(Array.isArray(source.shelves)?source.shelves:[]).map(shelf=>({
    ...shelf,
@@ -423,14 +423,17 @@
    items:Array.isArray(shelf.items)?shelf.items:[]
   })));
   const banners=sources.flatMap(source=>Array.isArray(source.heroSlideshow)?source.heroSlideshow:[]);
+  const allShelfItems=sections.flatMap(section=>Array.isArray(section.items)?section.items:[]);
   const trending=sources.flatMap(source=>[
    ...(Array.isArray(source.trending)?source.trending:[]),
-   ...(Array.isArray(source.topTen)?source.topTen:[])
+   ...(Array.isArray(source.topTen)?source.topTen:[]),
+   ...(Array.isArray(source.featured)?source.featured:[])
   ]);
+  const uniqueTrending=[...new Map([...trending,...allShelfItems].map(item=>[String(item.path||item.subjectId||item.id||item.title||""),item]).filter(([key])=>key)).values()];
   const categories=sources.flatMap(source=>Array.isArray(source.categories)?source.categories:[]);
   const collections=sources.flatMap(source=>Array.isArray(source.collections)?source.collections:[]);
   const upcoming=sources.flatMap(source=>Array.isArray(source.upcoming)?source.upcoming:[]);
-  return {...payload,sections,banners,trending,categories,collections,upcoming};
+  return {...payload,sections,banners,trending:uniqueTrending,categories,collections,upcoming,_topTen:trending};
  }
  async function load(){
   status.textContent="Loading MovieStream BD…";
