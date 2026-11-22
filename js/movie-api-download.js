@@ -1,6 +1,6 @@
 (()=> {
 "use strict";
-const $=s=>document.querySelector(s),params=new URLSearchParams(location.search),path=params.get("path")||"",requested=Math.max(0,Number(params.get("episode"))||0);
+const $=s=>document.querySelector(s),params=new URLSearchParams(location.search),path=params.get("path")||"",requestedTitle=params.get("title")||"",requested=Math.max(0,Number(params.get("episode"))||0);
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const safeName=s=>String(s||"MovieStreamBD").replace(/[\\/:*?"<>|]+/g," ").replace(/\s+/g," ").trim().slice(0,100)||"MovieStreamBD";
 let episodes=[],selected=requested,detail=null,downloadable=[],busy=false;
@@ -40,7 +40,7 @@ function updateSources(){
 async function loadStreamSources(index){
  const ep=episodes[index],subjectId=subjectIdOf();if(!subjectId)return;
  for(const c of episodeCoords(ep,index)){
-  try{const r=await fetch("/api/movie-api/stream?subjectId="+encodeURIComponent(subjectId)+"&se="+c.se+"&ep="+c.ep,{cache:"no-store"});const data=await r.json();if(!r.ok||data?.ok===false)continue;
+  try{const r=await fetch("/api/movie-api/stream?subjectId="+encodeURIComponent(subjectId)+"&title="+encodeURIComponent(detail?.title||"")+"&detailPath="+encodeURIComponent(detail?.detailPath||"")+"&se="+c.se+"&ep="+c.ep,{cache:"no-store"});const data=await r.json();if(!r.ok||data?.ok===false)continue;
    const incoming=getSources(data);if(incoming.length){ep.sources=[...(ep.sources||[]),...incoming];ep.downloadButtons=[];return;}
   }catch(e){console.warn("Stream source lookup",e);}
  }
@@ -98,7 +98,7 @@ $("#downloadZip").addEventListener("click",async()=>{
 $("#downloadAction").addEventListener("click",e=>{if($("#downloadAction").getAttribute("aria-disabled")==="true")e.preventDefault();});
 async function load(){
  if(!/^\/(?:mb|movie|series)\/[a-zA-Z0-9_./-]{1,300}$/.test(path)){$("#downloadStatus").textContent="Invalid title link.";return;}
- try{const r=await fetch("/api/movie-api/details?path="+encodeURIComponent(path),{cache:"no-store"}),data=await r.json();if(!r.ok||!data.detail)throw new Error(data.error||"Title details unavailable.");
+ try{const r=await fetch("/api/movie-api/details?path="+encodeURIComponent(path)+"&title="+encodeURIComponent(requestedTitle),{cache:"no-store"}),data=await r.json();if(!r.ok||!data.detail)throw new Error(data.error||"Title details unavailable.");
   detail=data.detail;episodes=Array.isArray(detail.episodes)?detail.episodes:[];if(!episodes.length)throw new Error("No versions or episodes were returned.");
   selected=Math.min(requested,episodes.length-1);$("#downloadTitle").textContent=detail.title||"Download";$("#downloadSubtitle").textContent=episodes[selected].label||("Episode "+(selected+1));
   $("#downloadCount").textContent=episodes.length+" Episodes / Versions";$("#downloadType").textContent=episodes.length>1?"Full Drama":"Single Video";
