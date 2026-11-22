@@ -72,8 +72,8 @@
  };
  const badge=item=>isHindiDubbed(item)?"HINDI DUBBED":"";
  const pathOf=item=>{
-  if(typeof item.path==="string"&&item.path.startsWith("/mb/"))return item.path;
-  try{const u=new URL(item.detailsEndpoint);const p=u.searchParams.get("path");return p?.startsWith("/mb/")?p:"";}catch{return "";}
+  if(typeof item.path==="string"&&/^\/(?:mb|movie|series)\//.test(item.path))return item.path;
+  try{const u=new URL(item.detailsEndpoint);const p=u.searchParams.get("path");return p&&/^\/(?:mb|movie|series)\//.test(p)?p:"";}catch{return "";}
  };
  function flatten(d){
   const map=new Map();
