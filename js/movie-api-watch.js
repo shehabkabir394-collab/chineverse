@@ -35,14 +35,15 @@
  }
  function hideEmbedPlayer(){
   if(embedFrame){embedFrame.src="about:blank";embedFrame.hidden=true;}
-  const video=$("#movieWatchVideo");if(video)video.hidden=false;
-  if(playerApi?.wrap)playerApi.wrap.hidden=false;
+  const video=$("#movieWatchVideo");if(video){video.hidden=false;video.removeAttribute("hidden");video.style.removeProperty("display");const ownPlayer=video.closest(".cv-player");if(ownPlayer){ownPlayer.hidden=false;ownPlayer.removeAttribute("hidden");ownPlayer.style.removeProperty("display");}}
+  if(playerApi?.wrap){playerApi.wrap.hidden=false;playerApi.wrap.removeAttribute("hidden");playerApi.wrap.style.removeProperty("display");}
  }
  const getLang=o=>String(o?.audioLanguage||o?.dubLanguage||o?.language||o?.lang||o?.audio||o?.label||o?.name||"").trim();
  const isHindi=s=>/^(hi|hin|hindi)([-_ ]|$)/i.test(String(s||"").trim())||/hindi|हिन्दी|हिंदी/i.test(String(s||""));
  const isHindiDubbed=item=>item?._hindiCatalog===true||[item?.language,item?.audioLanguage,item?.audioLanguages,item?.dubLanguage,item?.dubLanguages,item?.availableLanguages,item?.languages,item?.audio].some(v=>Array.isArray(v)?v.some(x=>isHindi(getLang(x)||x?.code)):isHindi(v));
+ function isPlayableSource(url,type="") {try{const u=new URL(String(url||""));const kind=String(type||"").toLowerCase();return u.protocol==="https:"&&(kind==="mp4"||kind==="m3u8"||kind.includes("mpegurl")||kind.includes("video/")||/\.(?:mp4|m3u8)(?:$|[?#])/i.test(u.pathname+u.search));}catch{return false;}}
  function getSources(ep){
-  return (Array.isArray(ep.sources)?ep.sources:[]).filter(s=>{try{const u=new URL(s.url);return u.protocol==="https:"&&(u.hostname==="hd-w0l1.onrender.com"||u.hostname==="hd-hcfs.onrender.com"||u.hostname==="mb-stream.rahamanabduar2.workers.dev")&&Number(s.quality)>0;}catch{return false;}})
+  return (Array.isArray(ep.sources)?ep.sources:[]).filter(s=>isPlayableSource(s.url,s.type||s.mimeType||s.format)&&Number.parseInt(s.quality,10)>0)
    .map(s=>({url:s.url,quality:Number(s.quality)+"p",provider:String(s.provider||"Movie API"),mime:s.type==="m3u8"?"application/vnd.apple.mpegurl":"video/mp4",audioLanguage:getLang(s)}))
    .sort((a,b)=>Number(isHindi(b.audioLanguage))-Number(isHindi(a.audioLanguage)));
  }
@@ -102,10 +103,10 @@
    }
    const streamItems=Array.isArray(streamRoot.sources)?streamRoot.sources:Array.isArray(streamRoot.streams)?streamRoot.streams:Array.isArray(streamRoot.urls)?streamRoot.urls:[];
    currentSubtitles=getSubtitles(streamRoot,payload,ep,detail);
-   const normalized=streamItems.map(s=>({url:s.url||s.playUrl||s.play_url||s.src||s.file||s.streamUrl||s.stream_url,quality:s.quality||s.resolution||s.label||"720p",provider:s.provider||s.name||"Movie API",type:s.type||s.format||s.mimeType||"",audioLanguage:getLang(s)})).filter(s=>{try{const u=new URL(s.url);const kind=String(s.type||"").toLowerCase();return u.protocol==="https:"&&(u.hostname==="hd-w0l1.onrender.com"||u.hostname==="hd-hcfs.onrender.com"||u.hostname==="mb-stream.rahamanabduar2.workers.dev")&&(kind==="mp4"||kind==="m3u8"||kind.includes("mpegurl")||/\/api\/mb-stream\.mp4|\.m3u8(?:$|[?#])/i.test(u.pathname+u.search));}catch{return false;}});
+   const normalized=streamItems.map(s=>({url:s.url||s.playUrl||s.play_url||s.src||s.file||s.streamUrl||s.stream_url,quality:s.quality||s.resolution||s.label||"720p",provider:s.provider||s.name||"Movie API",type:s.type||s.format||s.mimeType||"",audioLanguage:getLang(s)})).filter(s=>{try{const u=new URL(s.url);const kind=String(s.type||"").toLowerCase();return isPlayableSource(s.url,kind||s.mimeType||s.format);}catch{return false;}});
    if(normalized.length)sources=normalized.map(s=>({url:s.url,quality:(String(s.quality).match(/\d+/)?.[0]||"720")+"p",provider:s.provider,mime:/m3u8|hls/i.test(s.type+" "+s.url)?"application/vnd.apple.mpegurl":"video/mp4",audioLanguage:s.audioLanguage}));
    // Direct sources are not used while the provider embed is available.
-   if(false&&sources.length){
+   if(sources.length){
     currentSources=sources;
     currentSubtitles=getSubtitles(streamRoot,payload,ep,detail);
     hideEmbedPlayer();
@@ -148,7 +149,7 @@
    const unmute=$("#movieWatchUnmute");if(unmute)unmute.hidden=true;
    return;
   }
-  if(!sources.length){message.textContent="Universal embedded player URL was not returned by the API. The built-in CineVerse player is disabled as requested.";video.hidden=true;return;}
+  if(!sources.length){message.textContent="Universal embedded player URL was not returned by the API. No compatible direct video source or provider player URL was returned by the API.";video.hidden=true;return;}
   if(!currentSubtitles.length)currentSubtitles=getSubtitles(ep,detail);
   currentSources=sources;
   const downloadLink=$("#movieWatchDownload");if(downloadLink)downloadLink.href="download.html?path="+encodeURIComponent(path)+"&episode="+index;
@@ -187,7 +188,7 @@
   const initialGroup=serverGroups.find(([name])=>name===activeProvider)?.[1]||sources;
   const selectedLang=initialGroup.find(s=>isHindi(s.audioLanguage))?.audioLanguage||initialGroup.find(s=>s.audioLanguage)?.audioLanguage||"auto";
   const activeSources=sourcesForLanguage(initialGroup,selectedLang);
-  // The native CineVerse player is intentionally not mounted or shown.
+  // No playable provider URL was detected. Check the stream response and try another server.
   video.pause();video.removeAttribute("src");video.load();video.hidden=true;
   if(audioBox)audioBox.hidden=true;
   $("#movieWatchUnmute").hidden=true;
