@@ -69,6 +69,7 @@ export async function onRequest({request,env,params}){
  const endpoint=path.replace(/^\/+|\/+$/g,"");
  if(!ENDPOINTS.has(endpoint)&&!["download-file","shorts","sports","me"].includes(endpoint))return json({ok:false,error:"CinePulse endpoint is not supported"},404);
  const incoming=new URL(request.url),p=new URLSearchParams(incoming.searchParams);
+ if(["search","suggest","catalog","updates-24h","trending","ranking","filter","platform","upcoming","reels"].includes(endpoint)&&!p.has("source"))p.set("source","all");
  try{
   if(endpoint==="home"){
    const [h,c]=await Promise.all([upstream("home",p,env,request),upstream("categories",new URLSearchParams(),env,request)]);
