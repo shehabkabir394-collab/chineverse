@@ -44,7 +44,7 @@
  function isPlayableSource(url,type="") {try{const u=new URL(String(url||""));const kind=String(type||"").toLowerCase();return u.protocol==="https:"&&(kind==="mp4"||kind==="m3u8"||kind.includes("mpegurl")||kind.includes("video/")||/\.(?:mp4|m3u8)(?:$|[?#])/i.test(u.pathname+u.search));}catch{return false;}}
  function getSources(ep){
   return (Array.isArray(ep.sources)?ep.sources:[]).filter(s=>isPlayableSource(s.url,s.type||s.mimeType||s.format)&&Number.parseInt(s.quality,10)>0)
-   .map(s=>({url:s.url,quality:Number(s.quality)+"p",provider:String(s.provider||"Movie API"),mime:s.type==="m3u8"?"application/vnd.apple.mpegurl":"video/mp4",audioLanguage:getLang(s)}))
+   .map(s=>({url:s.url,quality:(String(s.quality).match(/\d+/)?.[0]||"720")+"p",provider:String(s.provider||"Movie API"),mime:/m3u8|hls/i.test(String(s.type||"")+" "+String(s.url||""))?"application/vnd.apple.mpegurl":"video/mp4",audioLanguage:getLang(s)}))
    .sort((a,b)=>Number(isHindi(b.audioLanguage))-Number(isHindi(a.audioLanguage)));
  }
  function sourcesForLanguage(sources,language){
@@ -92,7 +92,7 @@
    const embedUrl=findEmbedUrl(payload)||findEmbedUrl(watchDetail);
    // Restore the provider's universal embedded player as the primary player.
    // Keep the built-in CineVerse video player hidden.
-   if(embedUrl&&showEmbedPlayer(embedUrl)){
+   if(!sources.length&&embedUrl&&showEmbedPlayer(embedUrl)){
     currentSources=[];currentSubtitles=getSubtitles(streamRoot,payload,ep,detail);
     $("#movieWatchNow").textContent=ep.label||("Episode "+(ep.number||index+1));
     root.querySelectorAll("[data-watch-episode]").forEach((b,i)=>b.classList.toggle("active",i===index));
