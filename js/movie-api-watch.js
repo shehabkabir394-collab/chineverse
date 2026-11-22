@@ -98,7 +98,7 @@
     currentSources=[];currentSubtitles=getSubtitles(streamRoot,payload,ep,detail);
     $("#movieWatchNow").textContent=ep.label||("Episode "+(ep.number||index+1));
     root.querySelectorAll("[data-watch-episode]").forEach((b,i)=>b.classList.toggle("active",i===index));
-    const dl=$("#movieWatchDownload");if(dl)dl.href="download.html?path="+encodeURIComponent(path)+"&episode="+index;
+    const dl=$("#movieWatchDownload");if(dl)dl.href="download.html?path="+encodeURIComponent(path)+"&title="+encodeURIComponent(detail.title||"")+"&episode="+index;
     const audioBox=$("#movieWatchAudioBox");if(audioBox)audioBox.hidden=true;
     const unmute=$("#movieWatchUnmute");if(unmute)unmute.hidden=true;
     return;
@@ -122,7 +122,7 @@
     }
     $("#movieWatchNow").textContent=ep.label||("Episode "+(ep.number||index+1));
     root.querySelectorAll("[data-watch-episode]").forEach((b,i)=>b.classList.toggle("active",i===index));
-    const dl=$("#movieWatchDownload");if(dl)dl.href="download.html?path="+encodeURIComponent(path)+"&episode="+index;
+    const dl=$("#movieWatchDownload");if(dl)dl.href="download.html?path="+encodeURIComponent(path)+"&title="+encodeURIComponent(detail.title||"")+"&episode="+index;
     const audioBox=$("#movieWatchAudioBox");if(audioBox)audioBox.hidden=true;
     const unmute=$("#movieWatchUnmute");if(unmute)unmute.hidden=true;
     message.textContent="CineVerse Player · "+sources.map(s=>s.quality).join(" · ")+" · "+(sources.some(s=>isHindi(s.audioLanguage))?"Hindi Dub":"Direct stream");
@@ -133,7 +133,7 @@
     currentSources=[];currentSubtitles=getSubtitles(payload,streamRoot,ep,detail);
     $("#movieWatchNow").textContent=ep.label||("Episode "+(ep.number||index+1));
     root.querySelectorAll("[data-watch-episode]").forEach((b,i)=>b.classList.toggle("active",i===index));
-    const dl=$("#movieWatchDownload");if(dl)dl.href="download.html?path="+encodeURIComponent(path)+"&episode="+index;
+    const dl=$("#movieWatchDownload");if(dl)dl.href="download.html?path="+encodeURIComponent(path)+"&title="+encodeURIComponent(detail.title||"")+"&episode="+index;
     const audioBox=$("#movieWatchAudioBox");if(audioBox)audioBox.hidden=true;
     const unmute=$("#movieWatchUnmute");if(unmute)unmute.hidden=true;
     return;
@@ -146,7 +146,7 @@
    currentSources=[];currentSubtitles=getSubtitles(ep,watchDetail);
    $("#movieWatchNow").textContent=ep.label||("Episode "+(ep.number||index+1));
    root.querySelectorAll("[data-watch-episode]").forEach((b,i)=>b.classList.toggle("active",i===index));
-   const dl=$("#movieWatchDownload");if(dl)dl.href="download.html?path="+encodeURIComponent(path)+"&episode="+index;
+   const dl=$("#movieWatchDownload");if(dl)dl.href="download.html?path="+encodeURIComponent(path)+"&title="+encodeURIComponent(detail.title||"")+"&episode="+index;
    const audioBox=$("#movieWatchAudioBox");if(audioBox)audioBox.hidden=true;
    const unmute=$("#movieWatchUnmute");if(unmute)unmute.hidden=true;
    return;
@@ -154,7 +154,7 @@
   if(!sources.length){message.textContent="Universal embedded player URL was not returned by the API. No compatible direct video source or provider player URL was returned by the API.";video.hidden=true;return;}
   if(!currentSubtitles.length)currentSubtitles=getSubtitles(ep,detail);
   currentSources=sources;
-  const downloadLink=$("#movieWatchDownload");if(downloadLink)downloadLink.href="download.html?path="+encodeURIComponent(path)+"&episode="+index;
+  const downloadLink=$("#movieWatchDownload");if(downloadLink)downloadLink.href="download.html?path="+encodeURIComponent(path)+"&title="+encodeURIComponent(detail.title||"")+"&episode="+index;
   $("#movieWatchNow").textContent=ep.label||("Episode "+(ep.number||index+1));
   root.querySelectorAll("[data-watch-episode]").forEach((b,i)=>b.classList.toggle("active",i===index));
   const audioBox=$("#movieWatchAudioBox");
