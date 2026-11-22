@@ -86,7 +86,10 @@ export async function onRequest({request,env,params}){
    p.delete("path");
    const r=await upstream("details",p,env,request);const data=await r.json();
    const detail=data?.detail||data?.data?.detail||data?.data||data?.result||data;
-   return json(secureTree({...data,ok:data?.ok!==false,detail}),r.status);
+   const subjectId=data?.subjectId||data?.subject_id||detail?.subjectId||detail?.subject_id||info.subjectId;
+   const detailPath=data?.detailPath||detail?.detailPath||info.detailPath;
+   const normalizedDetail={...detail,...(subjectId?{subjectId}:{}),...(detailPath?{detailPath}:{}),...(title&&!detail?.title?{title}:{})};
+   return json(secureTree({...data,ok:data?.ok!==false,detail:normalizedDetail}),r.status);
   }
   if(endpoint==="catalog"){
    const cat=p.get("category")||p.get("path");p.delete("path");p.delete("category");if(cat)p.set("category",cat);
