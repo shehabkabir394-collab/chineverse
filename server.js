@@ -4,6 +4,7 @@ import { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import {
   MOVIEBOX_PLAYER_REFERER,
+  MOVIEBOX_REFERER,
   MOVIEBOX_UA,
   handleMovieBoxRoute,
   signMediaToken,
@@ -73,7 +74,88 @@ app.get("/sitemap.xml", (req, res) => {
   res.send(sitemap);
 });
 
-// Subtitle proxy for MovieBox .srt captions (avoids browser CORS issues)
+function convertSrtToVtt(rawText) {
+  const clean = String(rawText || "").replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n").trim();
+  if (!clean) return "WEBVTT\n\n";
+  if (/^WEBVTT(?:\s|$)/i.test(clean)) return clean;
+
+  const normalizeTs = ts => {
+    const m = /^(?:(\d+):)?(\d{1,2}):(\d{1,2})[,.](\d{1,3})$/.exec(ts.trim());
+    if (!m) return ts.trim();
+    const h = String(Number(m[1] || 0)).padStart(2, "0");
+    const min = String(Number(m[2])).padStart(2, "0");
+    const sec = String(Number(m[3])).padStart(2, "0");
+    const ms = String(m[4]).padEnd(3, "0").slice(0, 3);
+    return `${h}:${min}:${sec}.${ms}`;
+  };
+
+  const blocks = clean.split(/\n{2,}/);
+  const cues = [];
+  for (const block of blocks) {
+    const lines = block.split("\n").map(l => l.trimEnd()).filter(Boolean);
+    if (!lines.length) continue;
+    let timeIdx = lines.findIndex(l => l.includes("-->"));
+    if (timeIdx < 0) continue;
+    const timingLine = lines[timeIdx];
+    const parts = timingLine.split("-->");
+    if (parts.length < 2) continue;
+    const start = normalizeTs(parts[0]);
+    const restParts = parts[1].trim().split(/\s+/);
+    const end = normalizeTs(restParts[0] || "");
+    const settings = restParts.slice(1).join(" ");
+    const payloadLines = lines.slice(timeIdx + 1).map(l => l.replace(/\{\\an\d+\}/gi, "").trim());
+    if (!payloadLines.length) continue;
+    cues.push(`${start} --> ${end}${settings ? ` ${settings}` : ""}\n${payloadLines.join("\n")}`);
+  }
+  return `WEBVTT\n\n${cues.join("\n\n")}\n`;
+}
+
+// Image proxy for MovieBox posters, avatars & sports logos (bypasses ISP/hotlink blocks)
+app.get("/api/moviebox-image/:file", async (req, res) => {
+  const targetUrl = verifyMediaToken(req.query.t);
+  if (!targetUrl) {
+    return res.status(400).send("Invalid or missing image token");
+  }
+  const referer = /aisports/i.test(targetUrl) ? "https://aisports.mobi/" : MOVIEBOX_REFERER;
+  try {
+    const upstream = await fetchMediaWithRetry(
+      targetUrl,
+      "GET",
+      {
+        "User-Agent": MOVIEBOX_UA,
+        Referer: referer,
+        Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8"
+      },
+      null,
+      1
+    );
+    if (!upstream.ok) {
+      return res.status(upstream.status).send("Image unavailable");
+    }
+    const ct = upstream.headers.get("content-type") || "image/jpeg";
+    res.setHeader("Content-Type", ct);
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    if (!upstream.body) return res.end();
+    const nodeStream = Readable.fromWeb(upstream.body);
+    res.on("close", () => {
+      if (!res.writableFinished) {
+        try {
+          nodeStream.destroy();
+        } catch {}
+      }
+    });
+    nodeStream.on("error", () => {
+      if (!res.headersSent) res.status(502).end();
+      else res.end();
+    });
+    nodeStream.pipe(res);
+  } catch {
+    return res.status(502).send("Image upstream unavailable");
+  }
+});
+
+// Subtitle proxy for MovieBox captions (converts .srt cleanly to WebVTT + bypasses CORS)
 app.get("/api/moviebox-subtitle/:file", async (req, res) => {
   const targetUrl = verifyMediaToken(req.query.t);
   if (!targetUrl) {
@@ -90,11 +172,17 @@ app.get("/api/moviebox-subtitle/:file", async (req, res) => {
     if (!upstream.ok) {
       return res.status(upstream.status).send("Subtitle unavailable");
     }
-    const text = await upstream.text();
-    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+    const rawText = await upstream.text();
+    const wantVtt = req.query.vtt === "1" || /\.vtt$/i.test(req.params.file);
+    res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Cache-Control", "public, max-age=3600");
     res.setHeader("X-Content-Type-Options", "nosniff");
-    return res.send(text);
+    if (wantVtt) {
+      res.setHeader("Content-Type", "text/vtt; charset=utf-8");
+      return res.send(convertSrtToVtt(rawText));
+    }
+    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+    return res.send(rawText);
   } catch {
     return res.status(502).send("Subtitle upstream unavailable");
   }
@@ -107,64 +195,87 @@ app.get("/api/sports-hls/:file", async (req, res) => {
     return res.status(400).send("Invalid or missing sports stream token");
   }
   try {
+    const reqHeaders = {
+      "User-Agent": MOVIEBOX_UA,
+      Referer: "https://aisports.mobi/",
+      Accept: "*/*"
+    };
+    const range = req.get("range");
+    if (range) reqHeaders.Range = range;
+
     const upstream = await fetch(targetUrl, {
-      headers: {
-        "User-Agent": MOVIEBOX_UA,
-        Referer: "https://aisports.mobi/",
-        Accept: "*/*"
-      },
+      headers: reqHeaders,
       redirect: "follow",
       signal: AbortSignal.timeout(20000)
     });
-    if (!upstream.ok) {
+    if (!upstream.ok && upstream.status !== 206) {
       return res.status(upstream.status).send("Live sports stream unavailable");
     }
     const ct = (upstream.headers.get("content-type") || "").toLowerCase();
-    const isPlaylist =
+    const cl = Number(upstream.headers.get("content-length") || 0);
+    const maybePlaylist =
       ct.includes("mpegurl") ||
+      ct.includes("text/plain") ||
       /\.m3u8(?:$|[?#])/i.test(targetUrl) ||
-      req.params.file.endsWith(".m3u8");
+      req.params.file.endsWith(".m3u8") ||
+      (cl > 0 && cl < 524288 && !ct.includes("mp2t") && !ct.includes("video/"));
 
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("X-Content-Type-Options", "nosniff");
 
-    if (isPlaylist) {
-      const raw = await upstream.text();
-      if (!raw.trim().startsWith("#EXTM3U")) {
-        res.setHeader("Content-Type", ct || "application/octet-stream");
-        return res.send(raw);
-      }
-      const rewritten = raw
-        .split(/\r?\n/)
-        .map(line => {
-          const trimmed = line.trim();
-          if (!trimmed) return line;
-          if (trimmed.startsWith("#")) {
-            return line.replace(/URI="([^"]+)"/gi, (_, uri) => {
-              try {
-                const abs = new URL(uri, targetUrl).href;
-                const ext = /\.m3u8(?:$|[?#])/i.test(abs) ? "sub.m3u8" : "key.bin";
-                return `URI="/api/sports-hls/${ext}?t=${encodeURIComponent(signMediaToken(abs))}"`;
-              } catch {
-                return `URI="${uri}"`;
+    if (maybePlaylist) {
+      const buf = Buffer.from(await upstream.arrayBuffer());
+      const raw = buf.toString("utf8");
+      if (raw.trimStart().startsWith("#EXTM3U")) {
+        let nextIsVariant = false;
+        const rewritten = raw
+          .split(/\r?\n/)
+          .map(line => {
+            const trimmed = line.trim();
+            if (!trimmed) return line;
+            if (trimmed.startsWith("#")) {
+              if (/^#EXT-X-(?:STREAM-INF|I-FRAME-STREAM-INF)/i.test(trimmed)) {
+                nextIsVariant = true;
               }
-            });
-          }
-          try {
-            const abs = new URL(trimmed, targetUrl).href;
-            const ext = /\.m3u8(?:$|[?#])/i.test(abs) ? "sub.m3u8" : "seg.ts";
-            return `/api/sports-hls/${ext}?t=${encodeURIComponent(signMediaToken(abs))}`;
-          } catch {
-            return line;
-          }
-        })
-        .join("\n");
-      res.setHeader("Content-Type", "application/vnd.apple.mpegurl; charset=utf-8");
-      return res.send(rewritten);
+              return line.replace(/URI="([^"]+)"/gi, (_, uri) => {
+                try {
+                  const abs = new URL(uri, upstream.url || targetUrl).href;
+                  const isSubM3u8 = /\.m3u8(?:$|[?#])/i.test(abs) || /#EXT-X-MEDIA/i.test(trimmed);
+                  const ext = isSubM3u8 ? "sub.m3u8" : "key.bin";
+                  return `URI="/api/sports-hls/${ext}?t=${encodeURIComponent(signMediaToken(abs))}"`;
+                } catch {
+                  return `URI="${uri}"`;
+                }
+              });
+            }
+            try {
+              const abs = new URL(trimmed, upstream.url || targetUrl).href;
+              const isSubM3u8 = nextIsVariant || /\.m3u8(?:$|[?#])/i.test(abs);
+              nextIsVariant = false;
+              const ext = isSubM3u8 ? "sub.m3u8" : "seg.ts";
+              return `/api/sports-hls/${ext}?t=${encodeURIComponent(signMediaToken(abs))}`;
+            } catch {
+              nextIsVariant = false;
+              return line;
+            }
+          })
+          .join("\n");
+        res.setHeader("Content-Type", "application/vnd.apple.mpegurl; charset=utf-8");
+        return res.send(rewritten);
+      }
+      res.setHeader("Content-Type", ct || "video/mp2t");
+      return res.status(upstream.status).send(buf);
     }
 
     res.setHeader("Content-Type", ct || "video/mp2t");
+    if (upstream.headers.get("content-range")) {
+      res.setHeader("Content-Range", upstream.headers.get("content-range"));
+    }
+    if (upstream.headers.get("content-length")) {
+      res.setHeader("Content-Length", upstream.headers.get("content-length"));
+    }
+    res.status(upstream.status);
     if (!upstream.body) return res.end();
     const nodeStream = Readable.fromWeb(upstream.body);
     res.on("close", () => {

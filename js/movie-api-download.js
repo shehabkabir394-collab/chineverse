@@ -104,7 +104,7 @@ async function load(){
   detail=data.detail;episodes=Array.isArray(detail.episodes)?detail.episodes:[];if(!episodes.length)throw new Error("No versions or episodes were returned.");
   selected=Math.min(requested,episodes.length-1);$("#downloadTitle").textContent=detail.title||"Download";$("#downloadSubtitle").textContent=episodes[selected].label||("Episode "+(selected+1));
   $("#downloadCount").textContent=episodes.length+" Episodes / Versions";$("#downloadType").textContent=episodes.length>1?"Full Drama":"Single Video";
-  if(detail.poster&&/^https:\/\//i.test(detail.poster)){const p=$("#downloadPoster");p.src=detail.poster;p.hidden=false;}
+  if(detail.poster&&/^(?:https?:\/\/|\/api\/)/i.test(detail.poster)){const p=$("#downloadPoster");p.src=detail.poster;p.hidden=false;}
   $("#downloadBack").href="watch.html?path="+encodeURIComponent(path);
   renderEpisodeList();
   await loadStreamSources(selected);updateSources();renderEpisodeList();

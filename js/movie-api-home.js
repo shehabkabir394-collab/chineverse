@@ -2,7 +2,7 @@
   "use strict";
   const $ = s => document.querySelector(s);
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-  const safeImg = u => (/^https?:\/\//i.test(String(u || "")) ? String(u) : "");
+  const safeImg = u => (/^(?:https?:\/\/|\/api\/)/i.test(String(u || "")) ? String(u) : "");
   const isNigerian = item =>
     /nigeria|nigerian|nollywood|naija/i.test(
       [item?.country, item?.title, item?.language, item?.description].filter(Boolean).join(" ")

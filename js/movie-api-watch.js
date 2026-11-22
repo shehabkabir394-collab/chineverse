@@ -1,19 +1,21 @@
 (() => {
   "use strict";
   const $ = s => document.querySelector(s);
-  const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-  const safeImg = u => (/^https?:\/\//i.test(String(u || "")) ? String(u) : "");
+  const esc = s =>
+    String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const safeImg = u => (/^(?:https?:\/\/|\/api\/)/i.test(String(u || "")) ? String(u) : "");
   const WATCHLIST_KEY = "cv_watchlist_v1";
 
   const params = new URLSearchParams(location.search);
-  const path = params.get("path") || "";
-  const requestedTitle = params.get("title") || "";
+  let path = params.get("path") || "";
+  let requestedTitle = params.get("title") || "";
   const root = $("#movieWatchRoot");
   const statusEl = $("#movieWatchStatus");
 
   let watchDetail = null;
   let episodes = [];
   let currentDubs = [];
+  let seasonGroups = new Map();
   let playerApi = null;
   let selectedEpIdx = 0;
   let selectedSeasonNum = 0;
@@ -45,9 +47,17 @@
   function toggleWatchlist() {
     const list = getWatchlist();
     const exists = list.some(x => x.path === path);
-    const next = exists
-      ? list.filter(x => x.path !== path)
-      : [{ path, title: watchDetail?.title || requestedTitle || "Saved Title", poster: watchDetail?.poster || "" }, ...list].slice(0, 40);
+    const entry = {
+      path,
+      title: watchDetail?.title || requestedTitle || "Saved Title",
+      poster: watchDetail?.poster || "",
+      rating: watchDetail?.rating || "",
+      year: watchDetail?.year || "",
+      typeBadge: watchDetail?.typeBadge || (watchDetail?.isMovie ? "Movie" : "Series"),
+      folder: "watchLater",
+      addedAt: Date.now()
+    };
+    const next = exists ? list.filter(x => x.path !== path) : [entry, ...list].slice(0, 60);
     try {
       localStorage.setItem(WATCHLIST_KEY, JSON.stringify(next));
     } catch {}
@@ -85,10 +95,10 @@
     }
   }
 
-  function renderEpisodeButtons(seasonGroups) {
+  function renderEpisodeButtons(groups) {
     const strip = $("#cvEpisodeStrip");
     if (!strip) return;
-    const activeGroup = seasonGroups.get(selectedSeasonNum) || [...seasonGroups.values()][0] || [];
+    const activeGroup = groups.get(selectedSeasonNum) || [...groups.values()][0] || [];
     strip.classList.toggle("expanded", showAllEpisodes);
 
     const allBtn =
@@ -102,10 +112,241 @@
       })
       .join("");
 
-    strip.innerHTML = activeGroup.length <= 1 && watchDetail?.isMovie ? `<button type="button" class="cv-ep-btn active" data-watch-ep="0">Full Movie</button>` : allBtn + btns;
+    strip.innerHTML =
+      activeGroup.length <= 1 && watchDetail?.isMovie
+        ? `<button type="button" class="cv-ep-btn active" data-watch-ep="0">Full Movie</button>`
+        : allBtn + btns;
   }
 
-  async function playEpisode(idx) {
+  function syncPlayerUiState() {
+    if (!playerApi) return;
+    const st = playerApi.getState();
+
+    // Update utility strip buttons below player
+    const boostChip = $("#cvUtilBoost");
+    const subChip = $("#cvUtilSub");
+    const qualChip = $("#cvUtilQual");
+    if (boostChip) {
+      boostChip.classList.toggle("boosted", st.soundBoost > 100);
+      boostChip.innerHTML = `<span aria-hidden="true">🔊</span> Sound Boost: ${st.soundBoost}%`;
+    }
+    if (subChip) {
+      const activeSub = st.activeSubtitleIdx >= 0 ? st.subtitles[st.activeSubtitleIdx] : null;
+      subChip.classList.toggle("active", Boolean(activeSub));
+      subChip.textContent = activeSub ? `CC: ${activeSub.label}` : "Subtitles (CC)";
+    }
+    if (qualChip) {
+      const qualText = st.preferredQuality === "auto" ? `Auto (${st.activeQuality})` : st.activeQuality;
+      qualChip.textContent = qualText;
+    }
+
+    // Update Settings modal if open
+    const modal = $("#cvPlayerSettingsModal");
+    if (!modal || modal.hidden) return;
+
+    const qualGrid = $("#cvModalQualGrid");
+    if (qualGrid) {
+      const autoLabel = `Auto (${st.activeQuality})`;
+      const pills = [
+        `<button type="button" class="cv-qs-btn ${st.preferredQuality === "auto" ? "active" : ""}" data-set-quality="auto">${esc(autoLabel)}${st.preferredQuality === "auto" ? " <span>✓</span>" : ""}</button>`,
+        ...st.qualities
+          .slice()
+          .sort((a, b) => Number.parseInt(b, 10) - Number.parseInt(a, 10))
+          .map(q => {
+            const active = st.preferredQuality === q;
+            return `<button type="button" class="cv-qs-btn ${active ? "active" : ""}" data-set-quality="${esc(q)}">${esc(q)} HD${active ? " <span>✓</span>" : ""}</button>`;
+          })
+      ];
+      qualGrid.innerHTML = pills.join("");
+    }
+
+    const boostVal = $("#cvModalBoostVal");
+    const boostRange = $("#cvModalBoostRange");
+    if (boostVal) boostVal.innerHTML = `${st.soundBoost}%${st.soundBoost > 100 ? " 🔥" : ""}`;
+    if (boostRange && Number(boostRange.value) !== st.soundBoost) boostRange.value = String(st.soundBoost);
+    modal.querySelectorAll("[data-boost-preset]").forEach(btn => {
+      btn.classList.toggle("active", Number(btn.dataset.boostPreset) === st.soundBoost);
+    });
+
+    const brightVal = $("#cvModalBrightVal");
+    const brightRange = $("#cvModalBrightRange");
+    if (brightVal) brightVal.textContent = `${st.brightness}%`;
+    if (brightRange && Number(brightRange.value) !== st.brightness) brightRange.value = String(st.brightness);
+
+    const bnToggleVal = $("#cvModalBnSubVal");
+    if (bnToggleVal) {
+      const activeSub = st.activeSubtitleIdx >= 0 ? st.subtitles[st.activeSubtitleIdx] : null;
+      bnToggleVal.textContent = activeSub ? `${activeSub.label} ✓` : st.subtitles.length ? "OFF" : "Unavailable";
+      bnToggleVal.classList.toggle("on", Boolean(activeSub));
+    }
+
+    const subPicker = $("#cvModalSubTracks");
+    if (subPicker) {
+      if (st.subtitles.length) {
+        subPicker.hidden = false;
+        subPicker.innerHTML = [
+          `<button type="button" class="cv-sub-pill ${st.activeSubtitleIdx < 0 ? "active" : ""}" data-set-sub="-1">OFF</button>`,
+          ...st.subtitles.map(
+            s => `<button type="button" class="cv-sub-pill ${st.activeSubtitleIdx === s.index ? "active" : ""}" data-set-sub="${s.index}">${esc(s.label)}</button>`
+          )
+        ].join("");
+      } else {
+        subPicker.hidden = true;
+      }
+    }
+
+    const speedVal = $("#cvModalSpeedVal");
+    if (speedVal) speedVal.textContent = `${st.speed}x`;
+    modal.querySelectorAll("[data-set-speed]").forEach(btn => {
+      btn.classList.toggle("active", Number(btn.dataset.setSpeed) === st.speed);
+    });
+  }
+
+  function ensureSettingsModal() {
+    let modal = $("#cvPlayerSettingsModal");
+    if (modal) return modal;
+
+    modal = document.createElement("div");
+    modal.id = "cvPlayerSettingsModal";
+    modal.className = "cv-ps-backdrop";
+    modal.hidden = true;
+    modal.innerHTML = `
+      <div class="cv-ps-card" role="dialog" aria-modal="true" aria-label="Player Settings">
+        <div class="cv-ps-head">
+          <span class="cv-ps-head-title">VIDEO QUALITY (কোয়ালিটি সিলেক্ট করুন)</span>
+          <button type="button" class="cv-ps-close" aria-label="Close settings">×</button>
+        </div>
+        <div id="cvModalQualGrid" class="cv-qs-grid"></div>
+
+        <div class="cv-ps-section">
+          <div class="cv-ps-row-head">
+            <span>🔊 Ultra Sound Boost (সাউন্ড বুস্ট)</span>
+            <b id="cvModalBoostVal" class="cv-ps-boost-val">100%</b>
+          </div>
+          <input id="cvModalBoostRange" class="cv-ps-slider cv-ps-slider-red" type="range" min="100" max="400" step="5" value="100" aria-label="Ultra Sound Boost percentage">
+          <div class="cv-boost-presets">
+            <button type="button" data-boost-preset="100">100%</button>
+            <button type="button" data-boost-preset="150">150%</button>
+            <button type="button" data-boost-preset="200">200%</button>
+            <button type="button" data-boost-preset="300">300%</button>
+            <button type="button" data-boost-preset="400">400% 🔥</button>
+          </div>
+        </div>
+
+        <div class="cv-ps-section">
+          <div class="cv-ps-row-head">
+            <span>☀ Brightness (ব্রাইটনেস)</span>
+            <b id="cvModalBrightVal" class="cv-ps-bright-val">100%</b>
+          </div>
+          <input id="cvModalBrightRange" class="cv-ps-slider cv-ps-slider-gold" type="range" min="30" max="180" step="5" value="100" aria-label="Screen brightness percentage">
+        </div>
+
+        <div class="cv-ps-section">
+          <div class="cv-ps-subhead">SCREEN &amp; PIP MODE</div>
+          <div class="cv-screen-grid">
+            <button type="button" class="cv-screen-btn" data-screen-mode="portrait">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M12 18h.01"/></svg>
+              <span>Portrait</span>
+            </button>
+            <button type="button" class="cv-screen-btn" data-screen-mode="landscape">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+              <span>Landscape</span>
+            </button>
+            <button type="button" class="cv-screen-btn" data-screen-mode="pip">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="15" rx="2"/><rect x="12" y="10" width="8" height="6" rx="1"/></svg>
+              <span>PiP Mode</span>
+            </button>
+          </div>
+        </div>
+
+        <button type="button" id="cvModalBnSubBtn" class="cv-ps-action-row">
+          <span>বাংলা Subtitle</span>
+          <b id="cvModalBnSubVal">OFF</b>
+        </button>
+        <div id="cvModalSubTracks" class="cv-sub-pill-strip" hidden></div>
+
+        <div class="cv-ps-action-row cv-ps-speed-row">
+          <span>Playback Speed</span>
+          <b id="cvModalSpeedVal" class="cv-ps-speed-val">1x</b>
+        </div>
+        <div class="cv-speed-pills">
+          <button type="button" data-set-speed="0.5">0.5x</button>
+          <button type="button" data-set-speed="0.75">0.75x</button>
+          <button type="button" data-set-speed="1">1x</button>
+          <button type="button" data-set-speed="1.25">1.25x</button>
+          <button type="button" data-set-speed="1.5">1.5x</button>
+          <button type="button" data-set-speed="2">2x</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+
+    modal.addEventListener("click", e => {
+      if (e.target === modal || e.target.closest(".cv-ps-close")) {
+        modal.hidden = true;
+        $("#cvWatchTopSettings")?.classList.remove("active");
+        return;
+      }
+      const qBtn = e.target.closest("[data-set-quality]");
+      if (qBtn && playerApi) {
+        playerApi.selectQuality(qBtn.dataset.setQuality);
+        syncPlayerUiState();
+        return;
+      }
+      const boostBtn = e.target.closest("[data-boost-preset]");
+      if (boostBtn && playerApi) {
+        playerApi.setSoundBoost(Number(boostBtn.dataset.boostPreset));
+        syncPlayerUiState();
+        return;
+      }
+      const modeBtn = e.target.closest("[data-screen-mode]");
+      if (modeBtn && playerApi) {
+        playerApi.setScreenMode(modeBtn.dataset.screenMode);
+        modal.hidden = true;
+        $("#cvWatchTopSettings")?.classList.remove("active");
+        return;
+      }
+      if (e.target.closest("#cvModalBnSubBtn") && playerApi) {
+        const res = playerApi.toggleBanglaSubtitle();
+        if (res < 0 && !playerApi.getState().subtitles.length) {
+          showToast("No subtitle tracks available for this episode");
+        }
+        syncPlayerUiState();
+        return;
+      }
+      const subBtn = e.target.closest("[data-set-sub]");
+      if (subBtn && playerApi) {
+        playerApi.setActiveSubtitle(Number(subBtn.dataset.setSub));
+        syncPlayerUiState();
+        return;
+      }
+      const spdBtn = e.target.closest("[data-set-speed]");
+      if (spdBtn && playerApi) {
+        playerApi.setSpeed(Number(spdBtn.dataset.setSpeed));
+        syncPlayerUiState();
+      }
+    });
+
+    $("#cvModalBoostRange")?.addEventListener("input", e => {
+      playerApi?.setSoundBoost(Number(e.target.value));
+      syncPlayerUiState();
+    });
+    $("#cvModalBrightRange")?.addEventListener("input", e => {
+      playerApi?.setBrightness(Number(e.target.value));
+      syncPlayerUiState();
+    });
+
+    return modal;
+  }
+
+  function openSettingsModal() {
+    const modal = ensureSettingsModal();
+    modal.hidden = false;
+    $("#cvWatchTopSettings")?.classList.add("active");
+    syncPlayerUiState();
+  }
+
+  async function playEpisode(idx, opts = {}) {
     const ep = episodes[idx];
     if (!ep) return;
     selectedEpIdx = idx;
@@ -158,24 +399,117 @@
         streamMsg.textContent = `${sources.map(s => s.quality).join(" · ")}${subtitles.length ? ` · ${subtitles.length} subtitles` : ""}`;
       }
 
+      const historyMeta = {
+        path,
+        title: watchDetail?.title || "Untitled",
+        poster: watchDetail?.poster || "",
+        isSeries: !watchDetail?.isMovie,
+        se,
+        ep: epNum
+      };
+      const storageKey = `cv-mb-${watchDetail?.subjectId || path}-${se}-${epNum}`;
+
       if (playerApi) {
-        playerApi.setSources(sources);
-        playerApi.setSubtitles(subtitles);
+        playerApi.setSources(sources, {
+          seekTo: opts.seekTo || 0,
+          autoplay: opts.autoplay !== false,
+          storageKey,
+          title: watchDetail?.title || "Now Playing",
+          historyMeta
+        });
+        await playerApi.setSubtitles(subtitles);
+        syncPlayerUiState();
       } else if (video && window.CineVersePlayer) {
         video.hidden = false;
         playerApi = window.CineVersePlayer.mount({
           video,
           sources,
           subtitles,
-          storageKey: `cv-mb-${watchDetail?.subjectId || path}-${se}-${epNum}`,
+          storageKey,
           title: watchDetail?.title || "Now Playing",
-          backUrl: "./"
+          backUrl: "./",
+          historyMeta,
+          onOpenSettings: openSettingsModal,
+          onStateChange: syncPlayerUiState
         });
+        syncPlayerUiState();
       }
     } catch {
       if (reqId === streamReqId && streamMsg) {
         streamMsg.textContent = "Stream temporarily unavailable. Try another episode or version.";
       }
+    }
+  }
+
+  async function switchDubInPlace(targetPath, selectedLabel) {
+    if (!targetPath || targetPath === path) return;
+    const video = $("#movieWatchVideo");
+    const currentEp = episodes[selectedEpIdx];
+    const targetSe = Number(currentEp?.seasonNumber ?? currentEp?.se ?? 0) || 0;
+    const targetEpNum = Number(currentEp?.episodeNumber ?? currentEp?.number ?? 1) || 1;
+    const resumeTime = video && Number.isFinite(video.currentTime) ? video.currentTime : 0;
+
+    // Trigger immediate play unlock inside user change gesture when supported
+    if (video && video.paused && video.src) {
+      video.play().catch(() => {});
+    }
+
+    const streamMsg = $("#cvStreamStatusText");
+    if (streamMsg) streamMsg.textContent = `Switching audio to ${selectedLabel || "selected dub"}…`;
+
+    try {
+      const r = await fetch(
+        `/api/movie-api/details?path=${encodeURIComponent(targetPath)}&title=${encodeURIComponent(watchDetail?.title || requestedTitle)}`,
+        { cache: "no-store" }
+      );
+      const data = await r.json();
+      if (!r.ok || !data?.detail) throw new Error(data?.error || "Dub version unavailable");
+
+      path = targetPath;
+      const d = data.detail;
+      watchDetail = d;
+      requestedTitle = d.title || requestedTitle;
+      episodes =
+        Array.isArray(d.episodes) && d.episodes.length
+          ? d.episodes
+          : [{ label: d.title || "Play", number: 1, seasonNumber: 0, episodeNumber: 1, se: 0, ep: 0 }];
+      currentDubs = Array.isArray(d.dubs) ? d.dubs : currentDubs;
+
+      history.replaceState(
+        null,
+        "",
+        `watch.html?path=${encodeURIComponent(path)}&title=${encodeURIComponent(d.title || "")}`
+      );
+      document.title = `${d.title || "Watch"} — MovieStream BD`;
+
+      const titleHeading = root.querySelector(".cv-watch-title");
+      if (titleHeading) titleHeading.textContent = d.title || "Untitled";
+
+      seasonGroups = new Map();
+      episodes.forEach((ep, idx) => {
+        const sNum = Number(ep.seasonNumber ?? ep.se ?? 0) || 0;
+        if (!seasonGroups.has(sNum)) seasonGroups.set(sNum, []);
+        seasonGroups.get(sNum).push({ ep, idx });
+      });
+
+      const matchIdx = Math.max(
+        0,
+        episodes.findIndex(
+          ep =>
+            (Number(ep.seasonNumber ?? ep.se ?? 0) || 0) === targetSe &&
+            (Number(ep.episodeNumber ?? ep.number ?? 1) || 1) === targetEpNum
+        )
+      );
+      selectedSeasonNum = Number(episodes[matchIdx]?.seasonNumber ?? episodes[matchIdx]?.se ?? 0) || 0;
+      const seasonSel = $("#cvSeasonSelect");
+      if (seasonSel) seasonSel.value = String(selectedSeasonNum);
+
+      renderEpisodeButtons(seasonGroups);
+      syncWatchlistButtons();
+      await playEpisode(matchIdx, { seekTo: resumeTime, autoplay: true });
+      showToast(`Audio switched: ${selectedLabel || d.language || "Updated"}`);
+    } catch (err) {
+      showToast(err?.message || "Could not switch dub version");
     }
   }
 
@@ -269,7 +603,7 @@
       currentDubs = Array.isArray(d.dubs) ? d.dubs : [];
       document.title = `${d.title || "Watch"} — MovieStream BD`;
 
-      const seasonGroups = new Map();
+      seasonGroups = new Map();
       episodes.forEach((ep, idx) => {
         const sNum = Number(ep.seasonNumber ?? ep.se ?? 0) || 0;
         if (!seasonGroups.has(sNum)) seasonGroups.set(sNum, []);
@@ -332,6 +666,12 @@
                 <div style="font-size:12px;color:#98a2b3">
                   ${[d.country ? `Country: ${d.country}` : "", d.genre ? `Genre: ${d.genre}` : "", d.releaseDate ? `Released: ${d.releaseDate}` : ""].filter(Boolean).join(" · ")}
                 </div>
+              </div>
+
+              <div class="cv-utility-strip" aria-label="Player sound boost, subtitles and quality">
+                <button type="button" id="cvUtilBoost" class="cv-util-pill"><span aria-hidden="true">🔊</span> Sound Boost: 100%</button>
+                <button type="button" id="cvUtilSub" class="cv-util-pill">Subtitles (CC)</button>
+                <button type="button" id="cvUtilQual" class="cv-util-pill">Auto</button>
               </div>
 
               <div class="cv-watch-actions-row">
@@ -413,6 +753,11 @@
       $("#cvWatchTopList")?.addEventListener("click", toggleWatchlist);
       $("#cvWatchActionShare")?.addEventListener("click", shareCurrentTitle);
       $("#cvWatchTopShare")?.addEventListener("click", shareCurrentTitle);
+      $("#cvWatchTopSettings")?.addEventListener("click", openSettingsModal);
+      $("#cvUtilBoost")?.addEventListener("click", openSettingsModal);
+      $("#cvUtilSub")?.addEventListener("click", openSettingsModal);
+      $("#cvUtilQual")?.addEventListener("click", openSettingsModal);
+
       $("#cvWatchTopPip")?.addEventListener("click", async () => {
         const v = $("#movieWatchVideo");
         if (!v) return;
@@ -426,8 +771,9 @@
 
       $("#cvDubSelect")?.addEventListener("change", e => {
         const targetPath = e.target.value;
+        const optLabel = e.target.selectedOptions?.[0]?.textContent || "";
         if (targetPath && targetPath !== path) {
-          location.href = `watch.html?path=${encodeURIComponent(targetPath)}&title=${encodeURIComponent(d.title || "")}`;
+          switchDubInPlace(targetPath, optLabel);
         }
       });
 

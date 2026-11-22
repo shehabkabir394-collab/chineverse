@@ -92,6 +92,20 @@ export function verifyMediaToken(token) {
   }
 }
 
+export function proxyImageUrl(rawUrl, filename = "poster.jpg") {
+  const clean = String(rawUrl || "").trim();
+  if (!clean) return "";
+  if (clean.startsWith("/api/moviebox-image/")) return clean;
+  try {
+    const parsed = new URL(clean);
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return "";
+    const safeName = String(filename || "poster.jpg").replace(/[^a-zA-Z0-9._-]/g, "");
+    return `/api/moviebox-image/${safeName || "poster.jpg"}?t=${encodeURIComponent(signMediaToken(parsed.href))}`;
+  } catch {
+    return "";
+  }
+}
+
 async function mbFetch(url, options = {}, ttlMs = 0) {
   const method = (options.method || "GET").toUpperCase();
   const cacheKey = `${method}:${url}:${options.body || ""}`;
@@ -159,11 +173,18 @@ export function normalizeSubject(raw, extra = {}) {
           ? "Short Drama"
           : "Movie";
 
-  const poster =
+  const rawPoster =
     s.cover?.url ||
+    s.cover?.thumbnail ||
+    (typeof s.cover === "string" ? s.cover : "") ||
+    s.verticalPoster?.url ||
+    s.horizontalCover?.url ||
     s.image?.url ||
-    (typeof s.poster === "string" ? s.poster : "") ||
+    (typeof s.image === "string" ? s.image : "") ||
+    (typeof s.poster === "string" ? s.poster : s.poster?.url || "") ||
+    (Array.isArray(s.stills) && s.stills[0]?.url ? s.stills[0].url : "") ||
     "";
+  const poster = proxyImageUrl(rawPoster, "poster.jpg");
   const path = subjectId
     ? `/mb/${subjectId}/${detailPath || subjectId}`
     : detailPath
@@ -797,7 +818,7 @@ export async function handleMovieBoxRoute(legacy, query) {
         staffId: String(st.staffId || ""),
         name: st.name || "",
         role: st.character || "",
-        avatarUrl: st.avatarUrl || "",
+        avatarUrl: proxyImageUrl(st.avatarUrl || "", "avatar.jpg"),
         detailPath: st.detailPath || ""
       }));
 
@@ -895,25 +916,70 @@ export async function handleMovieBoxRoute(legacy, query) {
         })
         .sort((a, b) => Number.parseInt(b.quality, 10) - Number.parseInt(a.quality, 10));
 
-      let subtitles = [];
-      const firstStreamId = rawStreams[0]?.id;
-      if (firstStreamId) {
-        try {
-          const capUrl = `${MOVIEBOX_API}/wefeed-h5api-bff/subject/caption?format=MP4&id=${encodeURIComponent(firstStreamId)}&subjectId=${encodeURIComponent(subjectId)}&detailPath=${encodeURIComponent(detailPath)}`;
-          const capJson = await mbFetch(capUrl, { headers: { Referer: referer } }, 60000);
-          const caps = Array.isArray(capJson?.data?.captions) ? capJson.data.captions : [];
-          subtitles = caps
-            .filter(c => c?.url)
-            .map((c, idx) => ({
-              id: String(c.id || idx),
-              url: `/api/moviebox-subtitle/sub-${idx}.srt?t=${encodeURIComponent(signMediaToken(c.url))}`,
-              label: c.lanName || c.lan || `Subtitle ${idx + 1}`,
-              language: c.lan || "und",
-              delay: Number(c.delay || 0)
-            }));
-        } catch {
-          subtitles = [];
+      const fetchCaptionsForStreams = async (targetSubjectId, targetDetailPath, streamsList, targetReferer) => {
+        for (const st of streamsList) {
+          if (!st?.id) continue;
+          try {
+            const capUrl = `${MOVIEBOX_API}/wefeed-h5api-bff/subject/caption?format=MP4&id=${encodeURIComponent(st.id)}&subjectId=${encodeURIComponent(targetSubjectId)}&detailPath=${encodeURIComponent(targetDetailPath)}`;
+            const capJson = await mbFetch(capUrl, { headers: { Referer: targetReferer } }, 60000);
+            const caps = Array.isArray(capJson?.data?.captions) ? capJson.data.captions : [];
+            if (caps.length) {
+              return caps
+                .filter(c => c?.url)
+                .map((c, idx) => ({
+                  id: String(c.id || idx),
+                  url: `/api/moviebox-subtitle/sub-${idx}.vtt?vtt=1&t=${encodeURIComponent(signMediaToken(c.url))}`,
+                  label: c.lanName || c.lan || `Subtitle ${idx + 1}`,
+                  language: c.lan || "und",
+                  delay: Number(c.delay || 0)
+                }));
+            }
+          } catch {}
         }
+        return [];
+      };
+
+      let subtitles = await fetchCaptionsForStreams(subjectId, detailPath, rawStreams, referer);
+
+      // Many MovieBox dubbed versions omit subtitles on the dub entry while keeping them on Original Audio / sub entries
+      if (!subtitles.length) {
+        try {
+          const cachedItem = subjectIndex.get(subjectId);
+          let dubs = Array.isArray(cachedItem?.dubs) ? cachedItem.dubs : [];
+          if (!dubs.length) {
+            const detJson = await mbFetch(
+              `${MOVIEBOX_API}/wefeed-h5api-bff/detail?subjectId=${encodeURIComponent(subjectId)}`,
+              {},
+              300000
+            );
+            dubs = Array.isArray(detJson?.data?.dubs)
+              ? detJson.data.dubs
+              : Array.isArray(detJson?.data?.subject?.dubs)
+                ? detJson.data.subject.dubs
+                : [];
+          }
+          const fallbackDubs = dubs
+            .filter(d => d?.subjectId && String(d.subjectId) !== subjectId)
+            .sort((a, b) => {
+              const score = x =>
+                (x.original || /original/i.test(x.lanName || "") ? 0 : /english sub/i.test(x.lanName || "") ? 1 : 2);
+              return score(a) - score(b);
+            })
+            .slice(0, 3);
+
+          for (const altDub of fallbackDubs) {
+            const altSid = String(altDub.subjectId);
+            const altDp = String(altDub.detailPath || altSid);
+            const altRef = `${MOVIEBOX_PLAYER_REFERER}movies/${altDp}?id=${altSid}`;
+            const altPlayUrl = `${MOVIEBOX_API}/wefeed-h5api-bff/subject/play?subjectId=${encodeURIComponent(altSid)}&se=${se}&ep=${ep}&detailPath=${encodeURIComponent(altDp)}&streamSignType=1`;
+            const altPlayJson = await mbFetch(altPlayUrl, { headers: { Referer: altRef } }, 60000);
+            const altStreams = Array.isArray(altPlayJson?.data?.streams) ? altPlayJson.data.streams : [];
+            if (altStreams.length) {
+              subtitles = await fetchCaptionsForStreams(altSid, altDp, altStreams, altRef);
+              if (subtitles.length) break;
+            }
+          }
+        } catch {}
       }
 
       return {
@@ -940,7 +1006,7 @@ export async function handleMovieBoxRoute(legacy, query) {
         id: String(c.id || idx),
         lan: c.lan || "und",
         lanName: c.lanName || c.lan || "Subtitle",
-        url: `/api/moviebox-subtitle/sub-${idx}.srt?t=${encodeURIComponent(signMediaToken(c.url))}`,
+        url: `/api/moviebox-subtitle/sub-${idx}.vtt?vtt=1&t=${encodeURIComponent(signMediaToken(c.url))}`,
         delay: Number(c.delay || 0)
       }));
       return { ok: true, captions };
@@ -1022,9 +1088,9 @@ export async function handleMovieBoxRoute(legacy, query) {
           id: String(m.id || ""),
           name: `${t1} vs ${t2}${scoreText}`,
           title: `${t1} vs ${t2}${scoreText}`,
-          logo: m.team1?.avatar || m.team2?.avatar || "",
-          team1Logo: m.team1?.avatar || "",
-          team2Logo: m.team2?.avatar || "",
+          logo: proxyImageUrl(m.team1?.avatar || m.team2?.avatar || "", "team.png"),
+          team1Logo: proxyImageUrl(m.team1?.avatar || "", "team1.png"),
+          team2Logo: proxyImageUrl(m.team2?.avatar || "", "team2.png"),
           streamUrl: proxiedUrl,
           playUrl: proxiedUrl,
           url: proxiedUrl,

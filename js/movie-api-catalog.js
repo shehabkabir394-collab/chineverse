@@ -158,7 +158,7 @@
   return true;
  }
  function card(item){
-  const p=/^https:\/\//i.test(item.poster||item.previewImage||"")?(item.poster||item.previewImage):"";
+  const p=/^(?:https?:\/\/|\/api\/)/i.test(item.poster||item.previewImage||"")?(item.poster||item.previewImage):"";
   const title=text(item.title)||"Untitled",path=pathOf(item),b=badge(item);
   return '<article class="movie-card movie-api-card"><button class="movie-api-poster" type="button" data-path="'+esc(path)+'" data-title="'+esc(title)+'" '+(!path?"disabled":"")+' aria-label="Open '+esc(title)+'">'+(p?'<img loading="lazy" decoding="async" src="'+esc(p)+'" alt="'+esc(title)+' poster">':'<span class="movie-api-placeholder">CINEVERSE</span>')+'<span class="quality">'+esc(item.quality||item.typeBadge||"HD")+'</span>'+(b?'<span class="movie-api-language-badge">'+b+'</span>':"")+'<span class="overlay">▶<small>View details &amp; watch</small></span></button><div class="movie-info"><h3>'+esc(title)+'</h3><p>'+esc(item.language||item.country||item.typeBadge||"")+'</p></div></article>';
  }
