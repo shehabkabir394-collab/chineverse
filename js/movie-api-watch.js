@@ -2,7 +2,7 @@
  "use strict";
  const $=s=>document.querySelector(s),esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
  const safeImage=s=>/^https:\/\//i.test(s||"")?s:"";
- const params=new URLSearchParams(location.search),path=params.get("path")||"",root=$("#movieWatchRoot"),status=$("#movieWatchStatus");
+ const params=new URLSearchParams(location.search),path=params.get("path")||"",requestedTitle=params.get("title")||"",root=$("#movieWatchRoot"),status=$("#movieWatchStatus");
  let episodes=[],playerApi=null,selected=-1,currentSources=[],currentDubs=[],watchDetail=null,streamRequest=0,currentSubtitles=[],currentSuggestedMarkup="";
  let embedFrame=null;
  function validEmbedUrl(value){try{const u=new URL(String(value||""));return u.protocol==="https:"?u.href:"";}catch{return "";}}
@@ -216,7 +216,7 @@
    const relatedResponse=await fetch("/api/movie-api/related?title="+encodeURIComponent(detail.title||""));
    const relatedPayload=await relatedResponse.json();
    const relatedItems=Array.isArray(relatedPayload.items)?relatedPayload.items:Array.isArray(relatedPayload.related)?relatedPayload.related:Array.isArray(relatedPayload.results)?relatedPayload.results:[];
-   const usable=relatedItems.filter(x=>x&&typeof x==="object"&&/^\\/(?:mb|movie|series)\\//.test(String(x.path||""))&&x.path!==path&&!/nigeria|nollywood/i.test(String(x.country||"")+" "+String(x.language||""))).slice(0,12);
+   const usable=relatedItems.filter(x=>x&&typeof x==="object"&&/^\/(?:mb|movie|series)\//.test(String(x.path||""))&&x.path!==path&&!/nigeria|nollywood/i.test(String(x.country||"")+" "+String(x.language||""))).slice(0,12);
    if(usable.length){
     title.textContent="Related to "+(detail.title||"this title");
     grid.innerHTML=usable.map(x=>'<a class="ms-suggested-card" href="watch.html?path='+encodeURIComponent(x.path)+'"><img loading="lazy" decoding="async" src="'+esc(safeImage(x.poster||x.previewImage))+'" alt="'+esc(x.title||"")+'"><span><b>'+esc(x.title||"Untitled")+'</b><small>'+esc(x.language||x.typeBadge||"")+'</small></span></a>').join("");
@@ -226,7 +226,7 @@
   const response=await fetch("/api/movie-api/home");if(!response.ok)throw new Error("Catalog API unavailable");
   const api=await response.json();if(!api.ok)return;
   const map=new Map();
-  const add=(x,section)=>{if(!x||typeof x!=="object")return;const p=String(x.path||"");if(!/^\\/(?:mb|movie|series)\\//.test(p))return;const k=p;if(!map.has(k))map.set(k,{...x,_sections:[]});if(section&&!map.get(k)._sections.includes(section))map.get(k)._sections.push(section);};
+  const add=(x,section)=>{if(!x||typeof x!=="object")return;const p=String(x.path||"");if(!/^\/(?:mb|movie|series)\//.test(p))return;const k=p;if(!map.has(k))map.set(k,{...x,_sections:[]});if(section&&!map.get(k)._sections.includes(section))map.get(k)._sections.push(section);};
   ["sections","allOfficialSections"].forEach(key=>(api[key]||[]).forEach(s=>(s.items||[]).forEach(x=>add(x,s.title))));
   ["trending","comingSoon","banners"].forEach(key=>(api[key]||[]).forEach(x=>add(x,key)));
   const current=[...map.values()].find(x=>x.path===path);
@@ -289,7 +289,7 @@
  async function load(){
   if(!/^\/(?:mb|movie|series)\/[a-zA-Z0-9_./-]{1,300}$/.test(path)){status.textContent="Invalid title link.";return;}
   try{
-   const response=await fetch("/api/movie-api/details?path="+encodeURIComponent(path),{cache:"no-store",signal:AbortSignal.timeout(25000)});
+   const response=await fetch("/api/movie-api/details?path="+encodeURIComponent(path)+"&title="+encodeURIComponent(requestedTitle),{cache:"no-store",signal:AbortSignal.timeout(25000)});
    const data=await response.json();
    if(!response.ok)throw new Error(data.error||("Details API HTTP "+response.status));
    // Accept both proxy-normalized {detail:{...}} and the original MovieBox
