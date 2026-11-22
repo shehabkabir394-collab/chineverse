@@ -42,9 +42,14 @@
  const isHindi=s=>/^(hi|hin|hindi)([-_ ]|$)/i.test(String(s||"").trim())||/hindi|हिन्दी|हिंदी/i.test(String(s||""));
  const isHindiDubbed=item=>item?._hindiCatalog===true||[item?.language,item?.audioLanguage,item?.audioLanguages,item?.dubLanguage,item?.dubLanguages,item?.availableLanguages,item?.languages,item?.audio].some(v=>Array.isArray(v)?v.some(x=>isHindi(getLang(x)||x?.code)):isHindi(v));
  function isPlayableSource(url,type="") {try{const u=new URL(String(url||""),location.origin);const kind=String(type||"").toLowerCase();const trusted=u.protocol==="https:"||u.origin===location.origin&&u.pathname==="/api/cinepulse-media";return trusted&&(kind==="mp4"||kind==="m3u8"||kind.includes("mpegurl")||kind.includes("video/")||/\.(?:mp4|m3u8)(?:$|[?#])/i.test(u.pathname+u.search)||u.pathname==="/api/cinepulse-media");}catch{return false;}}
+ function sourceUrl(s){
+  const proxy=String(s?.proxyUrl||s?.proxy_url||"");
+  if(proxy){try{const u=new URL(proxy);const token=u.searchParams.get("t");if(token)return "/api/cinepulse-media?t="+encodeURIComponent(token);}catch{}}
+  return s?.url||s?.downloadUrl||s?.download_url||s?.playUrl||s?.play_url||s?.src||s?.file||s?.streamUrl||s?.stream_url||"";
+ }
  function getSources(ep){
-  return (Array.isArray(ep.sources)?ep.sources:[]).filter(s=>isPlayableSource(s.url||s.proxyUrl||s.downloadUrl,s.type||s.mimeType||s.format)&&Number.parseInt(s.quality,10)>0)
-   .map(s=>({url:s.url||s.proxyUrl||s.downloadUrl,quality:(String(s.quality).match(/\d+/)?.[0]||"720")+"p",provider:String(s.provider||"Movie API"),mime:/m3u8|hls/i.test(String(s.type||"")+" "+String(s.url||""))?"application/vnd.apple.mpegurl":"video/mp4",audioLanguage:getLang(s)}))
+  return (Array.isArray(ep.sources)?ep.sources:[]).filter(s=>isPlayableSource(sourceUrl(s),s.type||s.mimeType||s.format)&&Number.parseInt(s.quality,10)>0)
+   .map(s=>({url:sourceUrl(s),quality:(String(s.quality).match(/\d+/)?.[0]||"720")+"p",provider:String(s.provider||"Movie API"),mime:/m3u8|hls/i.test(String(s.type||"")+" "+String(s.url||""))?"application/vnd.apple.mpegurl":"video/mp4",audioLanguage:getLang(s)}))
    .sort((a,b)=>Number(isHindi(b.audioLanguage))-Number(isHindi(a.audioLanguage)));
  }
  function sourcesForLanguage(sources,language){
@@ -106,7 +111,7 @@
    }
    const streamItems=Array.isArray(streamRoot.sources)?streamRoot.sources:Array.isArray(streamRoot.streams)?streamRoot.streams:Array.isArray(streamRoot.urls)?streamRoot.urls:[];
    currentSubtitles=getSubtitles(streamRoot,payload,ep,detail);
-   const normalized=streamItems.map(s=>({url:s.url||s.proxyUrl||s.downloadUrl||s.playUrl||s.play_url||s.src||s.file||s.streamUrl||s.stream_url,quality:s.quality||s.resolution||s.label||"720p",provider:s.provider||s.name||"Movie API",type:s.type||s.format||s.mimeType||"",audioLanguage:getLang(s)})).filter(s=>isPlayableSource(s.url,s.type||s.mimeType||s.format));
+   const normalized=streamItems.map(s=>({url:sourceUrl(s),quality:s.quality||s.resolution||s.label||"720p",provider:s.provider||s.name||"Movie API",type:s.type||s.format||s.mimeType||"",audioLanguage:getLang(s)})).filter(s=>isPlayableSource(s.url,s.type||s.mimeType||s.format));
    if(normalized.length)sources=normalized.map(s=>({url:s.url,quality:(String(s.quality).match(/\d+/)?.[0]||"720")+"p",provider:s.provider,mime:/m3u8|hls/i.test(s.type+" "+s.url)?"application/vnd.apple.mpegurl":"video/mp4",audioLanguage:s.audioLanguage}));
    // Direct sources are not used while the provider embed is available.
    if(sources.length){
@@ -214,7 +219,9 @@
  async function loadSuggested(detail){
   const box=$("#movieWatchSuggested"),grid=$("#movieWatchSuggestedGrid"),title=$("#movieWatchSuggestedTitle");
   try{
-   const relatedResponse=await fetch("/api/movie-api/related?title="+encodeURIComponent(detail.title||""));
+   const relatedQuery=new URLSearchParams({title:String(detail.title||"")});
+   const relatedId=detail.subjectId||detail.subject_id||detail.id;if(relatedId)relatedQuery.set("subjectId",String(relatedId));
+   const relatedResponse=await fetch("/api/movie-api/related?"+relatedQuery.toString());
    const relatedPayload=await relatedResponse.json();
    const relatedItems=Array.isArray(relatedPayload.items)?relatedPayload.items:Array.isArray(relatedPayload.related)?relatedPayload.related:Array.isArray(relatedPayload.results)?relatedPayload.results:[];
    const usable=relatedItems.filter(x=>x&&typeof x==="object"&&/^\/(?:mb|movie|series)\//.test(String(x.path||""))&&x.path!==path&&!/nigeria|nollywood/i.test(String(x.country||"")+" "+String(x.language||""))).slice(0,12);
@@ -295,13 +302,15 @@
    if(!response.ok)throw new Error(data.error||("Details API HTTP "+response.status));
    // Accept both proxy-normalized {detail:{...}} and the original CinePulse upstream
    // top-level {ok:true, subjectId, embedPlayerUrl, ...} response.
-   const d=data.detail||data.data?.detail||data.data||data.result||data;
-   if(!d||typeof d!=="object"||(!d.title&&!d.subjectId&&!d.embedPlayerUrl&&!d.episodes&&!d.totalEpisodes))throw new Error(data.error||"Details API returned no usable title data.");
+   const candidates=[data.detail,data.data?.detail,data.data?.movie,data.data?.item,data.data,data.result?.detail,data.result?.movie,data.result?.item,data.result,data.movie,data.item,data].filter(x=>x&&typeof x==="object"&&!Array.isArray(x));
+   const d=candidates.find(x=>x.title||x.subjectId||x.subject_id||x.episodes||x.totalEpisodes||x.embedPlayerUrl)||data;
+   if(!d||typeof d!=="object"||(!d.title&&!d.subjectId&&!d.subject_id&&!d.id&&!d.episodes&&!d.totalEpisodes))throw new Error(data.error||"Details API returned no usable title data.");
    watchDetail=d;episodes=Array.isArray(d.episodes)?d.episodes:[];currentDubs=Array.isArray(d.dubs)?d.dubs:[];
    // Single movies may have no episode array or embed URL in Details.
    // Still create one playable version so the Stream endpoint is queried.
    const detailType=[d.type,d.mediaType,d.typeBadge,d.category,d.categoryPath].join(" ").toLowerCase();
-   const isSingleMovie=/\b(movie|film|feature film)\b/.test(detailType)||d.isMovie===true;
+   const explicitlySeries=/series|tv show|drama|serial|season|web\s*series/.test(detailType)||Number(d.totalEpisodes||0)>1;
+   const isSingleMovie=/\b(movie|film|feature film)\b/.test(detailType)||d.isMovie===true||(!explicitlySeries&&Boolean(d.subjectId||d.subject_id||d.id));
    if(!episodes.length&&(findEmbedUrl(d)||isSingleMovie))episodes=[{label:"Play Movie",number:1,seasonNumber:0,episodeNumber:1}];
    const poster=safeImage(d.poster),typeHint=[d.type,d.mediaType,d.typeBadge,d.category,d.categoryPath].join(" ").toLowerCase();
    const isDrama=/series|tv|drama|show|serial|web\s*series/.test(typeHint)||episodes.some(e=>/episode|season|ep\s*\d|s\d+\s*e\d+/i.test(String(e.kind||e.label||"")));
