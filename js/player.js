@@ -3,7 +3,8 @@
  function mount({video,sources=[],storageKey="cv-player",subtitles=[],title="Now Playing",backUrl="./"}){
   if(!video||!sources.length)return;
   const wrap=document.createElement("div");wrap.className="cv-player";video.parentNode.insertBefore(wrap,video);wrap.appendChild(video);video.controls=false;video.playsInline=true;video.muted=false;
-  let ordered=[...sources].filter(x=>x&&x.url).sort((a,b)=>Number(a.quality.replace(/p/i,""))-Number(b.quality.replace(/p/i,"")));
+  const qualityNumber=x=>Number(String(x?.quality||"").match(/\d+/)?.[0]||0);
+ let ordered=[...sources].filter(x=>x&&x.url).map(x=>({...x,quality:String(x.quality||"Auto"),mime:String(x.mime||x.type||"")})).sort((a,b)=>qualityNumber(a)-qualityNumber(b));
   const best=()=>{const c=navigator.connection||{};const down=Number(c.downlink)||0;const verySlow=!!c.saveData||/2g|slow-2g/i.test(c.effectiveType||"")||(down>0&&down<1.5);const q=verySlow?"low":((!c.effectiveType&&!down)||(down>=4)||c.effectiveType==="4g"?"1080p":"720p");return (verySlow?ordered[0]:null)||ordered.find(x=>x.quality===q)||ordered.find(x=>x.quality==="720p")||ordered[0]};
   const initial=best(),saved=Number(localStorage.getItem(storageKey)||0),savedVolume=Number(localStorage.getItem("cv-player-volume")||1);
   video.volume=Math.max(0,Math.min(1,savedVolume));
@@ -33,7 +34,7 @@
   let activeHls=null,sourceToken=0,activeSource=null,failedSources=new Set();
   const errorNotice=document.createElement("div");errorNotice.className="cv-player-error";errorNotice.hidden=true;errorNotice.setAttribute("role","status");errorNotice.style.cssText="position:absolute;z-index:8;left:8%;right:8%;top:50%;transform:translateY(-50%);padding:14px 18px;border-radius:12px;background:rgba(12,18,30,.94);color:#fff;text-align:center;font:600 14px/1.5 system-ui;";wrap.appendChild(errorNotice);
   function handleMediaError(){
-   const failed=activeSource;if(!failed||failedSources.has(failed.url))return;
+   const failed=activeSource;if(!failed)return;
    failedSources.add(failed.url);
    const next=ordered.find(x=>x&&x.url&&!failedSources.has(x.url));
    if(next){console.warn("Video source failed; trying another source", {quality:failed.quality,code:video.error?.code});setSource(next,false,true);return;}
@@ -47,9 +48,28 @@
   async function setSource(src,keep=true,autoplay=false){const token=++sourceToken,t=keep?video.currentTime:0,was=!video.paused;errorNotice.hidden=true;if(activeHls){activeHls.destroy();activeHls=null;}video.pause();activeSource=null;video.removeAttribute("src");video.load();activeSource=src;quality.value=src.quality||"auto";
    const isHls=/\.m3u8(?:$|[?#])/i.test(src.url)||/mpegurl|m3u8|hls/i.test(String(src.mime||src.type||""));
    const ready=()=>{if(token!==sourceToken)return;if(t>0&&Number.isFinite(video.duration))video.currentTime=Math.min(t,Math.max(0,video.duration-2));if(was||autoplay)video.play().catch(()=>{});};
-   if(isHls&&!video.canPlayType("application/vnd.apple.mpegurl")){
-    try{const Hls=await loadHlsLibrary();if(token!==sourceToken)return;if(Hls&&Hls.isSupported()){activeHls=new Hls({enableWorker:true});activeHls.loadSource(src.url);activeHls.attachMedia(video);activeHls.on(Hls.Events.MANIFEST_PARSED,ready);activeHls.on(Hls.Events.ERROR,(_,data)=>{if(data.fatal){$(".cv-buffer").hidden=true;video.dispatchEvent(new Event("error"));}});return;}}
-    catch(e){console.error("HLS player could not load",e);}
+   if(isHls){
+    // Prefer hls.js on Chromium/Android. Some Chromium builds report native HLS
+    // support but still fail to decode the playlist; Safari keeps native playback.
+    const ua=navigator.userAgent||"",isSafari=/Safari/i.test(ua)&&!/Chrome|Chromium|CriOS|Edg|Android/i.test(ua);
+    if(!isSafari){
+     try{
+      const Hls=await loadHlsLibrary();if(token!==sourceToken)return;
+      if(Hls&&Hls.isSupported()){
+       activeHls=new Hls({enableWorker:true,lowLatencyMode:false,backBufferLength:90});
+       activeHls.on(Hls.Events.MEDIA_ATTACHED,()=>{if(token===sourceToken)activeHls.loadSource(src.url);});
+       activeHls.on(Hls.Events.MANIFEST_PARSED,ready);
+       activeHls.on(Hls.Events.ERROR,(_,data)=>{
+        if(data.fatal&&token===sourceToken){
+         console.warn("Fatal HLS playback error; trying next source",data);
+         $(".cv-buffer").hidden=true;
+         video.dispatchEvent(new Event("error"));
+        }
+       });
+       activeHls.attachMedia(video);return;
+      }
+     }catch(e){console.warn("hls.js unavailable; trying native HLS",e);}
+    }
    }
    video.src=src.url;video.load();video.addEventListener("loadedmetadata",ready,{once:true});
   }
@@ -134,7 +154,7 @@
    panel.querySelector(".cv-end-replay").addEventListener("click",()=>{video.currentTime=0;video.play().catch(()=>{});});
    if(video.ended)wrap.classList.add("cv-ended");
   }
-  function setSources(next){ordered=[...next].filter(x=>x&&x.url).sort((a,b)=>Number(a.quality.replace(/p/i,""))-Number(b.quality.replace(/p/i,"")));failedSources.clear();activeSource=null;errorNotice.hidden=true;quality.innerHTML="<option value=\"auto\">Auto</option>"+ordered.map(x=>"<option value=\""+esc(x.quality)+"\">"+esc(x.quality)+"</option>").join("");if(ordered.length){const preferred=ordered.find(x=>x.quality==="720p")||ordered[0];setSource(preferred,false,true);quality.value=preferred.quality;}}return {video,wrap,setSource,setSources,setSubtitles,setSuggestions};
+  function setSources(next){ordered=[...next].filter(x=>x&&x.url).map(x=>({...x,quality:String(x.quality||"Auto"),mime:String(x.mime||x.type||"")})).sort((a,b)=>qualityNumber(a)-qualityNumber(b));failedSources.clear();activeSource=null;errorNotice.hidden=true;quality.innerHTML="<option value=\"auto\">Auto</option>"+ordered.map(x=>"<option value=\""+esc(x.quality)+"\">"+esc(x.quality)+"</option>").join("");if(ordered.length){const preferred=ordered.find(x=>x.quality==="720p")||ordered[0];setSource(preferred,false,true);quality.value=preferred.quality;}}return {video,wrap,setSource,setSources,setSubtitles,setSuggestions};
  }
  window.CineVersePlayer={mount};
 })();
