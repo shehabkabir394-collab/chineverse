@@ -410,15 +410,36 @@
   if(e.key==="Enter")location.href="catalog.html?q="+encodeURIComponent(search.value.trim());
  });
  $("#movieApiRefresh")?.addEventListener("click",load);
+ function normalizeHomePayload(payload){
+  // CinePulse v1 returns independent source objects (moviebox / movielinkbd),
+  // while the existing CineVerse UI consumes the legacy unified shape.
+  if(!payload?.separated||(!payload.moviebox&&!payload.movielinkbd))return payload;
+  const sources=[payload.moviebox,payload.movielinkbd].filter(source=>source&&typeof source==="object");
+  const sections=sources.flatMap(source=>(Array.isArray(source.shelves)?source.shelves:[]).map(shelf=>({
+   ...shelf,
+   title:text(shelf.title)||"Discover",
+   badge:text(shelf.badge)||"",
+   categoryPath:text(shelf.categoryPath)||text(shelf.path)||"",
+   items:Array.isArray(shelf.items)?shelf.items:[]
+  })));
+  const banners=sources.flatMap(source=>Array.isArray(source.heroSlideshow)?source.heroSlideshow:[]);
+  const trending=sources.flatMap(source=>[
+   ...(Array.isArray(source.trending)?source.trending:[]),
+   ...(Array.isArray(source.topTen)?source.topTen:[])
+  ]);
+  const categories=sources.flatMap(source=>Array.isArray(source.categories)?source.categories:[]);
+  const collections=sources.flatMap(source=>Array.isArray(source.collections)?source.collections:[]);
+  const upcoming=sources.flatMap(source=>Array.isArray(source.upcoming)?source.upcoming:[]);
+  return {...payload,sections,banners,trending,categories,collections,upcoming};
+ }
  async function load(){
   status.textContent="Loading MovieStream BD…";
   if(!home)root.innerHTML="";
   try{
-   // Use one primary feed; Hindi-dubbed sections are prioritized from the same response.
    const r=await fetch("/api/movie-api/home",{cache:"default"});
    const d=await r.json();
    if(!r.ok||d.ok!==true)throw new Error(d.error||"Catalog unavailable");
-   home=d;
+   home=normalizeHomePayload(d);
    render();
   }catch(e){if(!home)status.textContent="Catalog could not load: "+(e.message||"Unknown error");}
  }
