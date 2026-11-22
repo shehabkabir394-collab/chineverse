@@ -33,11 +33,10 @@ export async function onRequest(context) {
   const origin = request.headers.get("Origin");
   const fetchSite = request.headers.get("Sec-Fetch-Site");
 
-  // Reject requests explicitly identified by the browser as cross-site.
-  // "none" is normal for a URL opened directly in the address bar.
-  if (fetchSite === "cross-site") {
-    return blocked(403, "Cross-site API requests are not allowed.");
-  }
+  // Do not reject solely on Sec-Fetch-Site: direct navigation and browser
+  // navigation context can be reported as cross-site. Cross-origin API
+  // access remains restricted by the Origin allowlist below; host allowlist
+  // above also remains enforced.
 
   // If a browser sends Origin, it must be the production CineVerse origin.
   let originAllowed = !origin;
