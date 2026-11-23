@@ -28,6 +28,10 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 html, body {
   margin: 0;
   padding: 0;
@@ -763,6 +767,10 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   font-weight: 700;
   color: var(--cv-text-muted);
   background: radial-gradient(circle at 50% 35%, #202632, #101319 75%);
+}
+
+.cv-card-fallback[hidden] {
+  display: none !important;
 }
 
 .cv-card-top {

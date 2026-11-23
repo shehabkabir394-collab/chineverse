@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 
 export const MOVIEBOX_API = "https://h5-api.aoneroom.com";
+export const MOVIEBOX_MIRRORS = [MOVIEBOX_API, "https://moviebox.ph"];
 export const MOVIEBOX_SPORT_API = "https://h5-sport-api.aoneroom.com";
 export const MOVIEBOX_REFERER = "https://moviebox01.com/";
 export const MOVIEBOX_PLAYER_REFERER = "https://movie-box.co/";
@@ -11,7 +12,9 @@ const TOKEN_SECRET =
   process.env.MEDIA_PROXY_SECRET ||
   crypto.createHash("sha256").update(`${import.meta.url}::chineverse-media-proxy`).digest("hex");
 const cache = new Map();
+const inFlightFetches = new Map();
 const subjectIndex = new Map();
+let lastGoodHomeFeed = null;
 
 export const CATEGORIES = [
   { label: "Movies", path: "/type/movies" },
@@ -106,6 +109,15 @@ export function proxyImageUrl(rawUrl, filename = "poster.jpg") {
   }
 }
 
+function setCacheEntry(key, data, ttlMs) {
+  if (ttlMs <= 0) return;
+  if (cache.size > 900) {
+    const firstKey = cache.keys().next().value;
+    if (firstKey !== undefined) cache.delete(firstKey);
+  }
+  cache.set(key, { data, expiresAt: Date.now() + ttlMs });
+}
+
 async function mbFetch(url, options = {}, ttlMs = 0) {
   const method = (options.method || "GET").toUpperCase();
   const cacheKey = `${method}:${url}:${options.body || ""}`;
@@ -113,23 +125,66 @@ async function mbFetch(url, options = {}, ttlMs = 0) {
     const hit = cache.get(cacheKey);
     if (hit && hit.expiresAt > Date.now()) return hit.data;
   }
-  const response = await fetch(url, {
-    method,
-    headers: buildMovieBoxHeaders(options.headers || {}),
-    body: options.body,
-    signal: AbortSignal.timeout(options.timeoutMs || 20000)
-  });
-  const text = await response.text();
-  let json;
+  if (inFlightFetches.has(cacheKey)) {
+    return await inFlightFetches.get(cacheKey);
+  }
+
+  const run = (async () => {
+    const isMainApi = url.startsWith(MOVIEBOX_API);
+    const hosts = isMainApi ? MOVIEBOX_MIRRORS : [null];
+    let lastJson = null;
+    let lastError = null;
+
+    for (let round = 0; round < 2; round++) {
+      if (round > 0) {
+        await new Promise(r => setTimeout(r, 550 + Math.floor(Math.random() * 350)));
+      }
+      for (const host of hosts) {
+        const targetUrl = host && isMainApi ? host + url.slice(MOVIEBOX_API.length) : url;
+        const customHeaders = { ...(options.headers || {}) };
+        if (host && host !== MOVIEBOX_API && (!customHeaders.Referer || customHeaders.Referer === MOVIEBOX_REFERER)) {
+          customHeaders.Referer = `${host}/`;
+        } else if (host && host !== MOVIEBOX_API && customHeaders.Referer?.startsWith(MOVIEBOX_PLAYER_REFERER)) {
+          customHeaders.Referer = `${host}/${customHeaders.Referer.slice(MOVIEBOX_PLAYER_REFERER.length)}`;
+        }
+        try {
+          const response = await fetch(targetUrl, {
+            method,
+            headers: buildMovieBoxHeaders(customHeaders),
+            body: options.body,
+            signal: AbortSignal.timeout(options.timeoutMs || 18000)
+          });
+          const text = await response.text();
+          let json;
+          try {
+            json = JSON.parse(text);
+          } catch {
+            lastError = new Error(`MovieBox API returned non-JSON (${response.status})`);
+            continue;
+          }
+          lastJson = json;
+          if (response.status === 429 || json?.code === 429 || response.status >= 500) {
+            continue;
+          }
+          if (ttlMs > 0 && response.ok && json && json.code === 0) {
+            setCacheEntry(cacheKey, json, ttlMs);
+          }
+          return json;
+        } catch (err) {
+          lastError = err;
+        }
+      }
+    }
+    if (lastJson) return lastJson;
+    throw lastError || new Error("MovieBox upstream unavailable");
+  })();
+
+  inFlightFetches.set(cacheKey, run);
   try {
-    json = JSON.parse(text);
-  } catch {
-    throw new Error(`MovieBox API returned non-JSON (${response.status})`);
+    return await run;
+  } finally {
+    inFlightFetches.delete(cacheKey);
   }
-  if (ttlMs > 0 && response.ok && json && json.code === 0) {
-    cache.set(cacheKey, { data: json, expiresAt: Date.now() + ttlMs });
-  }
-  return json;
 }
 
 function inferLanguage(subject) {
@@ -156,24 +211,29 @@ export function normalizeSubject(raw, extra = {}) {
   if ((!subjectId && !detailPath && !title) || s.webHighRisk === true) return null;
 
   const subjectType = Number(s.subjectType || 1);
+  const genreStr = String(s.genre || "").trim();
+  const isAnime =
+    extra.isAnime === true ||
+    /\banime\b/i.test(genreStr) ||
+    (subjectType === 6 && !/music/i.test(genreStr) && /anime|animation/i.test(`${genreStr} ${title}`));
   const type =
-    subjectType === 2
-      ? "series"
-      : subjectType === 6
-        ? "anime"
-        : subjectType === 7
-          ? "series"
-          : "movie";
+    isAnime
+      ? "anime"
+      : subjectType === 2 || subjectType === 7
+        ? "series"
+        : "movie";
   const typeBadge =
-    subjectType === 2
-      ? "Series"
-      : subjectType === 6
-        ? "Anime"
+    isAnime
+      ? "Anime"
+      : subjectType === 2
+        ? "Series"
         : subjectType === 7
           ? "Short Drama"
           : "Movie";
 
   const rawPoster =
+    extra.poster ||
+    extra.previewImage ||
     s.cover?.url ||
     s.cover?.thumbnail ||
     (typeof s.cover === "string" ? s.cover : "") ||
@@ -185,6 +245,9 @@ export function normalizeSubject(raw, extra = {}) {
     (Array.isArray(s.stills) && s.stills[0]?.url ? s.stills[0].url : "") ||
     "";
   const poster = proxyImageUrl(rawPoster, "poster.jpg");
+  const rawTrailer = String(s.trailer?.videoAddress?.url || "").trim();
+  const trailerUrl = rawTrailer ? `/api/cinepulse-media?mb=${encodeURIComponent(signMediaToken(rawTrailer))}` : "";
+  const hasResource = s.hasResource !== false;
   const path = subjectId
     ? `/mb/${subjectId}/${detailPath || subjectId}`
     : detailPath
@@ -207,13 +270,11 @@ export function normalizeSubject(raw, extra = {}) {
     title: title || "Untitled",
     description: String(s.description || "").trim(),
     storyline: String(s.description || "").trim(),
-    poster,
-    previewImage: poster,
-    posterUrl: poster,
-    cover: poster,
+    hasResource,
+    trailerUrl,
     releaseDate,
     year: releaseDate.slice(0, 4),
-    genre: String(s.genre || "").trim(),
+    genre: genreStr,
     country: String(s.countryName || s.country || "").trim(),
     rating: String(s.imdbRatingValue || "").trim(),
     views: Number(s.imdbRatingCount || s.appointmentCnt || 0),
@@ -221,9 +282,9 @@ export function normalizeSubject(raw, extra = {}) {
     type,
     mediaType: type,
     typeBadge,
-    isMovie: subjectType === 1,
+    isMovie: subjectType === 1 && !isAnime,
     isSeries: subjectType === 2 || subjectType === 7,
-    isAnime: subjectType === 6,
+    isAnime,
     quality: String(s.corner || "").trim() || "1080p",
     language,
     dubs,
@@ -232,8 +293,12 @@ export function normalizeSubject(raw, extra = {}) {
     _latestFeed: true,
     _dramaCatalog: subjectType === 2 || subjectType === 7,
     _koreanCatalog: /korea/i.test(String(s.countryName || "")),
-    _animeCatalog: subjectType === 6,
-    ...extra
+    _animeCatalog: isAnime,
+    ...extra,
+    poster,
+    previewImage: poster,
+    posterUrl: poster,
+    cover: poster
   };
 
   if (subjectId) {
@@ -292,47 +357,26 @@ async function resolveSubjectIdentity({ pathStr = "", subjectId = "", detailPath
   return { subjectId: sid, detailPath: dp };
 }
 
+let warmPromise = null;
 async function warmSubjectIndexIfNeeded() {
-  if (subjectIndex.size >= 360) return;
-  const jobs = [
-    getHomeFeed(),
-    mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/subject/trending?page=1&perPage=28`, {}, 300000).then(j =>
-      indexList(j?.data?.subjectList)
-    ),
-    mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/subject/trending?page=2&perPage=28`, {}, 300000).then(j =>
-      indexList(j?.data?.subjectList)
-    ),
-    mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/subject/trending?page=3&perPage=28`, {}, 300000).then(j =>
-      indexList(j?.data?.subjectList)
-    ),
-    mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/ranking-list/content?id=872031290915189720&page=1&perPage=20`, {}, 300000).then(j =>
-      indexList(j?.data?.subjectList)
-    ),
-    mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/subject/everyone-search`, {}, 300000).then(j => {
-      for (const group of j?.data?.hot || []) indexList(group?.items);
-    })
-  ];
-  for (const ch of [1, 2, 6, 7]) {
-    for (const page of [1, 2]) {
-      jobs.push(
-        mbFetch(
-          `${MOVIEBOX_API}/wefeed-h5api-bff/subject/filter`,
-          { method: "POST", body: JSON.stringify({ page, perPage: 24, channelId: ch, sort: "Hottest" }) },
-          300000
-        ).then(j => indexList(j?.data?.items))
-      );
+  if (subjectIndex.size >= 240) return;
+  if (warmPromise) return await warmPromise;
+  warmPromise = (async () => {
+    const tasks = [
+      () => getHomeFeed(),
+      () => mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/subject/trending?page=1&perPage=28`, {}, 300000).then(j => indexList(j?.data?.subjectList)),
+      () => mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/subject/filter`, { method: "POST", body: JSON.stringify({ page: 1, perPage: 24, channelId: 1, sort: "Hottest" }) }, 300000).then(j => indexList(j?.data?.items)),
+      () => mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/subject/filter`, { method: "POST", body: JSON.stringify({ page: 1, perPage: 24, channelId: 2, sort: "Hottest" }) }, 300000).then(j => indexList(j?.data?.items)),
+      () => mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/subject/filter`, { method: "POST", body: JSON.stringify({ page: 1, perPage: 24, channelId: 2, genre: "Anime", sort: "Hottest" }) }, 300000).then(j => indexList(j?.data?.items, { isAnime: true })),
+      () => mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/subject/filter`, { method: "POST", body: JSON.stringify({ page: 1, perPage: 24, channelId: 1, country: "India", sort: "Hottest" }) }, 300000).then(j => indexList(j?.data?.items)),
+      () => mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/subject/filter`, { method: "POST", body: JSON.stringify({ page: 1, perPage: 24, channelId: 2, country: "Korea", sort: "Hottest" }) }, 300000).then(j => indexList(j?.data?.items)),
+      () => mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/subject/filter`, { method: "POST", body: JSON.stringify({ page: 1, perPage: 24, channelId: 1, country: "Bangladesh", sort: "Hottest" }) }, 300000).then(j => indexList(j?.data?.items))
+    ];
+    for (let i = 0; i < tasks.length; i += 3) {
+      await Promise.allSettled(tasks.slice(i, i + 3).map(fn => fn()));
     }
-  }
-  for (const country of ["India", "South Korea", "China", "United States"]) {
-    jobs.push(
-      mbFetch(
-        `${MOVIEBOX_API}/wefeed-h5api-bff/subject/filter`,
-        { method: "POST", body: JSON.stringify({ page: 1, perPage: 24, channelId: 1, country, sort: "Hottest" }) },
-        300000
-      ).then(j => indexList(j?.data?.items))
-    );
-  }
-  await Promise.allSettled(jobs);
+  })().finally(() => { warmPromise = null; });
+  return await warmPromise;
 }
 
 function mapPlatformName(name) {
@@ -359,12 +403,19 @@ function mapPlatformName(name) {
 function categoryToFilterBody(category, page = 1) {
   const c = String(category || "").toLowerCase();
   const body = { page, perPage: 24, channelId: 1, sort: "Latest" };
-  if (c.includes("series") || c === "/drama" || c.includes("drama")) body.channelId = 2;
-  if (c.includes("anime")) body.channelId = 6;
+  if (c.includes("series") || c === "/drama" || c.includes("drama") || c === "cv:drama") {
+    body.channelId = 2;
+    body.sort = "Hottest";
+  }
+  if (c.includes("anime")) {
+    body.channelId = 2;
+    body.genre = "Anime";
+    body.sort = "Hottest";
+  }
   if (c.includes("short")) body.channelId = 7;
   if (c.includes("korean")) {
     body.channelId = 2;
-    body.country = "South Korea";
+    body.country = "Korea";
   } else if (c.includes("chinese")) {
     body.channelId = 2;
     body.country = "China";
@@ -411,16 +462,17 @@ export async function getHomeFeed() {
   for (const op of opList) {
     if (op.type === "BANNER" && Array.isArray(op.banner?.items)) {
       for (const b of op.banner.items) {
+        const bannerRawImg = b.image?.url || b.subject?.cover?.url || "";
         const item = normalizeSubject(b.subject || b, {
-          poster: b.image?.url || b.subject?.cover?.url || "",
-          previewImage: b.image?.url || b.subject?.cover?.url || ""
+          poster: proxyImageUrl(bannerRawImg, "poster.jpg"),
+          previewImage: proxyImageUrl(bannerRawImg, "poster.jpg")
         });
-        if (item) banners.push(item);
+        if (item && item.subjectId && /^\d+$/.test(item.subjectId) && item.hasResource !== false) banners.push(item);
       }
     } else if (op.type === "SUBJECTS_MOVIE" && Array.isArray(op.subjects) && op.subjects.length) {
       const title = String(op.title || "Featured").trim();
       if (/nollywood|black shows/i.test(title)) continue;
-      const items = indexList(op.subjects);
+      const items = indexList(op.subjects).filter(x => x.hasResource !== false);
       if (items.length) {
         sections.push({
           title,
@@ -443,7 +495,9 @@ export async function getHomeFeed() {
   }
 
   const hindiItems =
-    hindiRes.status === "fulfilled" ? indexList(hindiRes.value?.data?.items, { _hindiCatalog: true }) : [];
+    hindiRes.status === "fulfilled"
+      ? indexList(hindiRes.value?.data?.items, { _hindiCatalog: true }).filter(x => x.hasResource !== false)
+      : [];
   if (hindiItems.length) {
     sections.unshift({
       title: "Hindi Dubbed — Movies & Series",
@@ -453,25 +507,33 @@ export async function getHomeFeed() {
     });
   }
 
-  const trending =
-    trendingRes.status === "fulfilled" ? indexList(trendingRes.value?.data?.subjectList) : [];
+  const trendingRaw =
+    trendingRes.status === "fulfilled"
+      ? indexList(trendingRes.value?.data?.subjectList).filter(x => x.hasResource !== false)
+      : [];
+  const trending = trendingRaw.length ? trendingRaw : (lastGoodHomeFeed?.trending || []);
   const rawUpcoming =
     upcomingRes.status === "fulfilled" ? indexList(upcomingRes.value?.data?.items) : [];
-  const upcomingList = rawUpcoming.length ? rawUpcoming : upcoming;
+  const upcomingList = rawUpcoming.length ? rawUpcoming : (upcoming.length ? upcoming : (lastGoodHomeFeed?.upcoming || []));
 
-  const platforms = Array.isArray(homeData.platformList)
+  const platforms = Array.isArray(homeData.platformList) && homeData.platformList.length
     ? homeData.platformList.map(p => ({ name: p.name }))
-    : [];
+    : (lastGoodHomeFeed?.platforms || []);
 
-  return {
+  const finalSections = sections.length ? sections : (lastGoodHomeFeed?.sections || []);
+  const result = {
     ok: true,
     categories: CATEGORIES,
     platforms,
-    banners: banners.length ? banners : trending.slice(0, 6),
+    banners: banners.length ? banners : (trending.length ? trending.slice(0, 6) : (lastGoodHomeFeed?.banners || [])),
     trending,
-    upcoming: upcomingList.length ? upcomingList : upcoming,
-    sections
+    upcoming: upcomingList,
+    sections: finalSections
   };
+  if (sections.length && trendingRaw.length) {
+    lastGoodHomeFeed = result;
+  }
+  return result;
 }
 
 export async function handleMovieBoxRoute(legacy, query) {
@@ -604,9 +666,15 @@ export async function handleMovieBoxRoute(legacy, query) {
       // If keyword hints at a genre/country/language, also pull live filtered titles on demand
       const dynamicFilters = [];
       if (/hindi/i.test(lower)) dynamicFilters.push({ body: { page: 1, perPage: 24, channelId: 1, classify: "Hindi dub", sort: "Hottest" }, extra: { _hindiCatalog: true } });
-      if (/bengali|bangla/i.test(lower)) dynamicFilters.push({ body: { page: 1, perPage: 24, channelId: 1, country: "India", sort: "Latest" }, extra: {} });
-      if (/korean|k-?drama/i.test(lower)) dynamicFilters.push({ body: { page: 1, perPage: 24, channelId: 2, country: "South Korea", sort: "Hottest" }, extra: {} });
-      if (/anime/i.test(lower) || rawTypes.includes(6)) dynamicFilters.push({ body: { page: 1, perPage: 24, channelId: 6, sort: "Hottest" }, extra: { isAnime: true, _animeCatalog: true } });
+      if (/bengali|bangla/i.test(lower)) {
+        dynamicFilters.push({ body: { page: 1, perPage: 24, channelId: 1, country: "Bangladesh", sort: "Hottest" }, extra: {} });
+        dynamicFilters.push({ body: { page: 1, perPage: 24, channelId: 2, country: "Bangladesh", sort: "Hottest" }, extra: {} });
+      }
+      if (/korean|k-?drama/i.test(lower)) dynamicFilters.push({ body: { page: 1, perPage: 24, channelId: 2, country: "Korea", sort: "Hottest" }, extra: {} });
+      if (/anime/i.test(lower) || rawTypes.includes(6)) {
+        dynamicFilters.push({ body: { page: 1, perPage: 24, channelId: 2, genre: "Anime", sort: "Hottest" }, extra: { isAnime: true, _animeCatalog: true } });
+        dynamicFilters.push({ body: { page: 1, perPage: 24, channelId: 1, genre: "Anime", sort: "Hottest" }, extra: { isAnime: true, _animeCatalog: true } });
+      }
       if (/short/i.test(lower) || rawTypes.includes(7)) dynamicFilters.push({ body: { page: 1, perPage: 24, channelId: 7, sort: "Hottest" }, extra: { subjectType: 7 } });
       if (dynamicFilters.length && uniq.size < 12) {
         await Promise.allSettled(
@@ -693,14 +761,34 @@ export async function handleMovieBoxRoute(legacy, query) {
       if (query.get("sort")) body.sort = query.get("sort");
       if (query.get("classify")) body.classify = query.get("classify");
 
+      const extra = {
+        ...(body.classify === "Hindi dub" ? { _hindiCatalog: true } : {}),
+        ...(lower.includes("anime") ? { isAnime: true, _animeCatalog: true } : {})
+      };
       const j = await mbFetch(
         `${MOVIEBOX_API}/wefeed-h5api-bff/subject/filter`,
         { method: "POST", body: JSON.stringify(body) },
         120000
       );
-      const extra = body.classify === "Hindi dub" ? { _hindiCatalog: true } : {};
-      let items = indexList(j?.data?.items, extra);
-      // Fallback if a country filter like Bangladesh returns 0 in MovieBox filter
+      let items = indexList(j?.data?.items, extra).filter(x => x.hasResource !== false);
+      if (lower.includes("anime") && page === 1) {
+        const movieAnime = await mbFetch(
+          `${MOVIEBOX_API}/wefeed-h5api-bff/subject/filter`,
+          { method: "POST", body: JSON.stringify({ page: 1, perPage: 12, channelId: 1, genre: "Anime", sort: "Hottest" }) },
+          120000
+        ).catch(() => null);
+        const extraAnime = indexList(movieAnime?.data?.items, extra).filter(x => x.hasResource !== false);
+        items = [...new Map([...items, ...extraAnime].map(x => [x.subjectId || x.path, x])).values()];
+      } else if (body.country === "Bangladesh" && page === 1) {
+        const bdSeries = await mbFetch(
+          `${MOVIEBOX_API}/wefeed-h5api-bff/subject/filter`,
+          { method: "POST", body: JSON.stringify({ page: 1, perPage: 12, channelId: 2, country: "Bangladesh", sort: "Hottest" }) },
+          120000
+        ).catch(() => null);
+        const extraBd = indexList(bdSeries?.data?.items, extra).filter(x => x.hasResource !== false);
+        items = [...new Map([...items, ...extraBd].map(x => [x.subjectId || x.path, x])).values()];
+      }
+      // Fallback if a filter returns 0
       if (!items.length && body.country === "Bangladesh") {
         const home = await getHomeFeed();
         items = [...home.trending, ...home.sections.flatMap(s => s.items)].filter(i => /bengali|bangla/i.test(i.language + " " + i.title)).slice(0, 24);
@@ -862,40 +950,222 @@ export async function handleMovieBoxRoute(legacy, query) {
       if (!subjectId) {
         return { ok: false, error: "subjectId is required to fetch stream sources." };
       }
-      if (!detailPath || detailPath === subjectId) {
+
+      let detJson = null;
+      const loadDetail = async () => {
+        if (detJson) return detJson;
         try {
-          const detJson = await mbFetch(
+          detJson = await mbFetch(
             `${MOVIEBOX_API}/wefeed-h5api-bff/detail?subjectId=${encodeURIComponent(subjectId)}`,
             {},
             300000
           );
-          if (detJson?.data?.subject?.detailPath) {
+          if (detJson?.data?.subject?.detailPath && (!detailPath || detailPath === subjectId)) {
             detailPath = String(detJson.data.subject.detailPath).trim();
+          }
+          if (detJson?.data?.subject) {
             normalizeSubject(detJson.data.subject);
           }
         } catch {}
+        return detJson;
+      };
+
+      if (!detailPath || detailPath === subjectId) {
+        await loadDetail();
       }
       const se = Math.max(0, Number(query.get("se") ?? 0));
       let ep = Math.max(0, Number(query.get("ep") ?? 0));
       const referer = `${MOVIEBOX_PLAYER_REFERER}movies/${detailPath || subjectId}?id=${subjectId}`;
+      let lastUpstreamCode = 0;
 
-      const fetchPlay = async (sNum, eNum) => {
-        const u = `${MOVIEBOX_API}/wefeed-h5api-bff/subject/play?subjectId=${encodeURIComponent(subjectId)}&se=${sNum}&ep=${eNum}&detailPath=${encodeURIComponent(detailPath)}&streamSignType=1`;
-        return await mbFetch(u, { headers: { Referer: referer } }, 0);
+      const fetchPlay = async (targetSid, targetDp, sNum, eNum, targetRef, allowAltSign = true) => {
+        const playCacheKey = `play:${targetSid}:${targetDp}:${sNum}:${eNum}`;
+        const cachedPlay = cache.get(playCacheKey);
+        if (cachedPlay && cachedPlay.expiresAt > Date.now()) return cachedPlay.data;
+
+        const isPlayableDirect = s => {
+          const u = String(s?.url || "").trim();
+          if (!u || /\.mpd(?:$|[?#])/i.test(u)) return false;
+          if (/\bdash\b/i.test(String(s?.format || s?.mimeType || ""))) return false;
+          return true;
+        };
+        const parseStreamRes = res => {
+          if (res?.code) lastUpstreamCode = Number(res.code);
+          const d = res?.data || {};
+          const direct = [
+            ...(Array.isArray(d.streams) ? d.streams : []),
+            ...(Array.isArray(d.hls) ? d.hls : [])
+          ].filter(isPlayableDirect);
+          return { d, direct };
+        };
+
+        const u1 = `${MOVIEBOX_API}/wefeed-h5api-bff/subject/play?subjectId=${encodeURIComponent(targetSid)}&se=${sNum}&ep=${eNum}&detailPath=${encodeURIComponent(targetDp)}&streamSignType=1`;
+        const res1 = await mbFetch(u1, { headers: { Referer: targetRef } }, 0);
+        const p1 = parseStreamRes(res1);
+        if (p1.direct.length) {
+          const out = { ...res1, data: { ...p1.d, streams: p1.direct } };
+          setCacheEntry(playCacheKey, out, 180000);
+          return out;
+        }
+        if (res1?.code === 429) return res1;
+
+        if (allowAltSign) {
+          const u2 = `${MOVIEBOX_API}/wefeed-h5api-bff/subject/play?subjectId=${encodeURIComponent(targetSid)}&se=${sNum}&ep=${eNum}&detailPath=${encodeURIComponent(targetDp)}`;
+          const res2 = await mbFetch(u2, { headers: { Referer: targetRef } }, 0).catch(() => null);
+          const p2 = parseStreamRes(res2);
+          if (p2.direct.length) {
+            const out = { ...res2, data: { ...p2.d, streams: p2.direct } };
+            setCacheEntry(playCacheKey, out, 180000);
+            return out;
+          }
+        }
+
+        // Fallback to MovieBox download endpoint if play streams are empty
+        const dlUrl = `${MOVIEBOX_API}/wefeed-h5api-bff/subject/download?subjectId=${encodeURIComponent(targetSid)}&se=${sNum}&ep=${eNum}&detailPath=${encodeURIComponent(targetDp)}`;
+        const dlRes = await mbFetch(dlUrl, { headers: { Referer: targetRef } }, 0).catch(() => null);
+        const downloads = Array.isArray(dlRes?.data?.downloads)
+          ? dlRes.data.downloads.filter(x => x?.url && !/\.mpd(?:$|[?#])/i.test(String(x.url)))
+          : [];
+        if (downloads.length) {
+          const mapped = downloads.map(x => ({
+            id: x.id || "",
+            url: x.url,
+            resolutions: String(x.resolution || x.resolutions || "720"),
+            size: x.size || "",
+            format: "MP4"
+          }));
+          const out = { ...res1, data: { ...p1.d, streams: mapped, hasResource: true } };
+          setCacheEntry(playCacheKey, out, 180000);
+          return out;
+        }
+        return res1;
       };
 
-      let playJson = await fetchPlay(se, ep);
-      let rawStreams = Array.isArray(playJson?.data?.streams) ? playJson.data.streams : [];
+      const buildCoordCandidates = (sNum, eNum) => {
+        const list = [{ se: sNum, ep: eNum }];
+        if (sNum === 0 && eNum !== 0) list.push({ se: 0, ep: 0 }, { se: 1, ep: 1 }, { se: 1, ep: eNum });
+        else if (sNum === 0 && eNum === 0) list.push({ se: 1, ep: 1 }, { se: 0, ep: 1 }, { se: 1, ep: 0 });
+        else if (sNum > 0 && eNum === 0) list.push({ se: sNum, ep: 1 }, { se: 0, ep: 0 }, { se: 0, ep: 1 });
+        else if (sNum === 1 && eNum === 1) list.push({ se: 0, ep: 0 }, { se: 0, ep: 1 });
+        else if (sNum > 0 && eNum > 1) list.push({ se: 0, ep: eNum });
+        return list.filter((c, i, arr) => arr.findIndex(x => x.se === c.se && x.ep === c.ep) === i);
+      };
 
-      // Movies use se=0&ep=0 on MovieBox even when UI sends ep=1
-      if (!rawStreams.length && se === 0 && ep !== 0) {
-        playJson = await fetchPlay(0, 0);
+      let streamSubjectId = subjectId;
+      let streamDetailPath = detailPath;
+      let streamReferer = referer;
+      let playJson = null;
+      let rawStreams = [];
+      let isTrailer = false;
+
+      for (const coord of buildCoordCandidates(se, ep)) {
+        playJson = await fetchPlay(subjectId, detailPath, coord.se, coord.ep, referer);
         rawStreams = Array.isArray(playJson?.data?.streams) ? playJson.data.streams : [];
-        if (rawStreams.length) ep = 0;
+        if (rawStreams.length || playJson?.code === 429) {
+          ep = coord.ep;
+          break;
+        }
+      }
+
+      // If empty and detailPath may be stale/missing, resolve canonical detailPath from detail API and retry
+      if (!rawStreams.length && lastUpstreamCode !== 429) {
+        const prevDp = detailPath;
+        const detail = await loadDetail();
+        const canonicalDp = String(detail?.data?.subject?.detailPath || "").trim();
+        if (canonicalDp && canonicalDp !== prevDp) {
+          detailPath = canonicalDp;
+          streamDetailPath = canonicalDp;
+          streamReferer = `${MOVIEBOX_PLAYER_REFERER}movies/${canonicalDp}?id=${subjectId}`;
+          for (const coord of buildCoordCandidates(se, ep)) {
+            playJson = await fetchPlay(subjectId, canonicalDp, coord.se, coord.ep, streamReferer);
+            rawStreams = Array.isArray(playJson?.data?.streams) ? playJson.data.streams : [];
+            if (rawStreams.length || playJson?.code === 429) {
+              ep = coord.ep;
+              break;
+            }
+          }
+        }
+      }
+
+      // If primary subject returned no stream, try alternate dubs (Original / English / Hindi)
+      if (!rawStreams.length && lastUpstreamCode !== 429) {
+        const detail = await loadDetail();
+        const cachedItem = subjectIndex.get(subjectId);
+        const rawDubs = Array.isArray(detail?.data?.dubs)
+          ? detail.data.dubs
+          : Array.isArray(detail?.data?.subject?.dubs)
+            ? detail.data.subject.dubs
+            : Array.isArray(cachedItem?.dubs)
+              ? cachedItem.dubs
+              : [];
+        const altDubs = rawDubs
+          .filter(d => d?.subjectId && String(d.subjectId) !== subjectId)
+          .sort((a, b) => {
+            const score = x =>
+              (x.original || /original/i.test(x.lanName || "") ? 0 : /english|hindi/i.test(x.lanName || "") ? 1 : 2);
+            return score(a) - score(b);
+          })
+          .slice(0, 3);
+
+        for (const altDub of altDubs) {
+          const altSid = String(altDub.subjectId);
+          const altDp = String(altDub.detailPath || altSid);
+          const altRef = `${MOVIEBOX_PLAYER_REFERER}movies/${altDp}?id=${altSid}`;
+          for (const coord of buildCoordCandidates(se, ep).slice(0, 2)) {
+            const altJson = await fetchPlay(altSid, altDp, coord.se, coord.ep, altRef, false);
+            const altStreams = Array.isArray(altJson?.data?.streams) ? altJson.data.streams : [];
+            if (altStreams.length) {
+              playJson = altJson;
+              rawStreams = altStreams;
+              streamSubjectId = altSid;
+              streamDetailPath = altDp;
+              streamReferer = altRef;
+              ep = coord.ep;
+              break;
+            }
+            if (altJson?.code === 429) break;
+          }
+          if (rawStreams.length || lastUpstreamCode === 429) break;
+        }
+      }
+
+      // If still empty and detail lookup itself failed for a stale/unindexed subjectId, recover via live title search
+      const streamTitle = String(query.get("title") || "").trim();
+      if (!rawStreams.length && lastUpstreamCode !== 429 && streamTitle && (!detJson || detJson.code !== 0 || !detJson.data?.subject)) {
+        try {
+          const sj = await mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/subject/search`, {
+            method: "POST",
+            body: JSON.stringify({ keyword: streamTitle, page: 1, perPage: 6, subjectType: 0 })
+          });
+          const hits = indexList(sj?.data?.items);
+          for (const hit of hits.slice(0, 2)) {
+            if (!hit?.subjectId || hit.subjectId === subjectId) continue;
+            const hDp = hit.detailPath || hit.subjectId;
+            const hRef = `${MOVIEBOX_PLAYER_REFERER}movies/${hDp}?id=${hit.subjectId}`;
+            for (const coord of buildCoordCandidates(se, ep).slice(0, 2)) {
+              const hJson = await fetchPlay(hit.subjectId, hDp, coord.se, coord.ep, hRef, false);
+              const hStreams = Array.isArray(hJson?.data?.streams) ? hJson.data.streams : [];
+              if (hStreams.length) {
+                playJson = hJson;
+                rawStreams = hStreams;
+                streamSubjectId = hit.subjectId;
+                streamDetailPath = hDp;
+                streamReferer = hRef;
+                ep = coord.ep;
+                break;
+              }
+              if (hJson?.code === 429) break;
+            }
+            if (rawStreams.length || lastUpstreamCode === 429) break;
+          }
+        } catch {}
       }
 
       const sources = rawStreams
-        .filter(s => s?.url)
+        .filter(s => {
+          const u = String(s?.url || "").trim();
+          return Boolean(u) && !/\.mpd(?:$|[?#])/i.test(u) && !/\bdash\b/i.test(String(s?.format || s?.mimeType || ""));
+        })
         .map(s => {
           const res = String(s.resolutions || "720").match(/\d+/)?.[0] || "720";
           const token = signMediaToken(s.url);
@@ -914,7 +1184,32 @@ export async function handleMovieBoxRoute(legacy, query) {
             audioLanguage: ""
           };
         })
-        .sort((a, b) => Number.parseInt(b.quality, 10) - Number.parseInt(a.quality, 10));
+        .sort((a, b) => {
+          const diff = Number.parseInt(b.quality, 10) - Number.parseInt(a.quality, 10);
+          if (diff !== 0) return diff;
+          return (a.format === "HLS" ? 1 : 0) - (b.format === "HLS" ? 1 : 0);
+        });
+
+      // Fallback to official trailer MP4 for upcoming/unreleased titles that lack full video streams
+      if (!sources.length) {
+        const detail = await loadDetail();
+        const trailerRaw = String(detail?.data?.subject?.trailer?.videoAddress?.url || "").trim();
+        if (trailerRaw) {
+          isTrailer = true;
+          sources.push({
+            id: "trailer",
+            url: `/api/cinepulse-media?mb=${encodeURIComponent(signMediaToken(trailerRaw))}&res=720`,
+            quality: "720p Trailer",
+            resolution: "720p",
+            size: "",
+            format: "MP4",
+            type: "video/mp4",
+            provider: "Official Trailer",
+            audioLanguage: "",
+            isTrailer: true
+          });
+        }
+      }
 
       const fetchCaptionsForStreams = async (targetSubjectId, targetDetailPath, streamsList, targetReferer) => {
         for (const st of streamsList) {
@@ -939,40 +1234,34 @@ export async function handleMovieBoxRoute(legacy, query) {
         return [];
       };
 
-      let subtitles = await fetchCaptionsForStreams(subjectId, detailPath, rawStreams, referer);
+      let subtitles = await fetchCaptionsForStreams(streamSubjectId, streamDetailPath, rawStreams, streamReferer);
 
       // Many MovieBox dubbed versions omit subtitles on the dub entry while keeping them on Original Audio / sub entries
-      if (!subtitles.length) {
+      if (!subtitles.length && rawStreams.length && lastUpstreamCode !== 429) {
         try {
+          const detail = await loadDetail();
           const cachedItem = subjectIndex.get(subjectId);
-          let dubs = Array.isArray(cachedItem?.dubs) ? cachedItem.dubs : [];
-          if (!dubs.length) {
-            const detJson = await mbFetch(
-              `${MOVIEBOX_API}/wefeed-h5api-bff/detail?subjectId=${encodeURIComponent(subjectId)}`,
-              {},
-              300000
-            );
-            dubs = Array.isArray(detJson?.data?.dubs)
-              ? detJson.data.dubs
-              : Array.isArray(detJson?.data?.subject?.dubs)
-                ? detJson.data.subject.dubs
+          let dubs = Array.isArray(detail?.data?.dubs)
+            ? detail.data.dubs
+            : Array.isArray(detail?.data?.subject?.dubs)
+              ? detail.data.subject.dubs
+              : Array.isArray(cachedItem?.dubs)
+                ? cachedItem.dubs
                 : [];
-          }
           const fallbackDubs = dubs
-            .filter(d => d?.subjectId && String(d.subjectId) !== subjectId)
+            .filter(d => d?.subjectId && String(d.subjectId) !== streamSubjectId)
             .sort((a, b) => {
               const score = x =>
                 (x.original || /original/i.test(x.lanName || "") ? 0 : /english sub/i.test(x.lanName || "") ? 1 : 2);
               return score(a) - score(b);
             })
-            .slice(0, 3);
+            .slice(0, 2);
 
           for (const altDub of fallbackDubs) {
             const altSid = String(altDub.subjectId);
             const altDp = String(altDub.detailPath || altSid);
             const altRef = `${MOVIEBOX_PLAYER_REFERER}movies/${altDp}?id=${altSid}`;
-            const altPlayUrl = `${MOVIEBOX_API}/wefeed-h5api-bff/subject/play?subjectId=${encodeURIComponent(altSid)}&se=${se}&ep=${ep}&detailPath=${encodeURIComponent(altDp)}&streamSignType=1`;
-            const altPlayJson = await mbFetch(altPlayUrl, { headers: { Referer: altRef } }, 60000);
+            const altPlayJson = await fetchPlay(altSid, altDp, se, ep, altRef, false);
             const altStreams = Array.isArray(altPlayJson?.data?.streams) ? altPlayJson.data.streams : [];
             if (altStreams.length) {
               subtitles = await fetchCaptionsForStreams(altSid, altDp, altStreams, altRef);
@@ -982,16 +1271,31 @@ export async function handleMovieBoxRoute(legacy, query) {
         } catch {}
       }
 
+      const hasRes = playJson?.code === 0
+        ? Boolean(playJson?.data?.hasResource ?? (!isTrailer && sources.length > 0))
+        : (!isTrailer && sources.length > 0);
+      const rateLimited = !sources.length && lastUpstreamCode === 429;
       return {
         ok: true,
+        retryable: rateLimited || !sources.length,
         stream: {
           sources,
           subtitles,
-          hasResource: Boolean(playJson?.data?.hasResource ?? sources.length > 0),
+          hasResource: hasRes,
+          isTrailer,
           vipLocked: Boolean(playJson?.data?.vipLocked)
         },
         sources,
-        subtitles
+        subtitles,
+        message: isTrailer
+          ? "Full video not yet released — playing official trailer."
+          : rateLimited
+            ? "Video server is temporarily busy (rate limit). Please tap Retry in a moment."
+            : !sources.length && !hasRes
+              ? "This title is marked Upcoming / Unreleased and does not have a playable video yet."
+              : !sources.length
+                ? "No playable stream URL is available for this episode right now."
+                : ""
       };
     }
 
@@ -1061,7 +1365,7 @@ export async function handleMovieBoxRoute(legacy, query) {
           staffId,
           name: person.name || "Cast & Crew",
           biography: person.description || (works.length ? `Featured in: ${works.slice(0, 6).map(w => w.title).join(", ")}` : "No additional biography available."),
-          avatarUrl: person.avatarUrl || "",
+          avatarUrl: proxyImageUrl(person.avatarUrl || "", "avatar.jpg"),
           works
         }
       };

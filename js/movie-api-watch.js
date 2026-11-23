@@ -389,45 +389,138 @@
       if (reqId !== streamReqId) return;
 
       const streamRoot = payload.stream || payload.data?.stream || payload.result?.stream || payload.data || payload.result || payload;
+      const explicitList = Array.isArray(streamRoot.sources)
+        ? streamRoot.sources
+        : Array.isArray(streamRoot.streams)
+          ? streamRoot.streams
+          : Array.isArray(payload.sources)
+            ? payload.sources
+            : null;
       const sourceObjects = [];
       const visited = new Set();
+      const skipWalkKeys = new Set(["subtitles", "subtitle", "captions", "caption", "tracks", "poster", "thumbnail", "images", "dubs"]);
+      const isPlayableStreamUrl = url => {
+        const s = String(url || "").trim();
+        if (!s || (!/^(https?:)?\/\//i.test(s) && !/^\/(?!\/)/.test(s))) return false;
+        if (/\/api\/moviebox-(?:subtitle|image)\//i.test(s) || /\/api\/poster\//i.test(s)) return false;
+        if (/\.(?:vtt|srt|ass|ssa|jpg|jpeg|png|webp|svg)(?:$|[?#])/i.test(s)) return false;
+        return true;
+      };
       const sourceKeys = ["url", "playUrl", "play_url", "src", "file", "videoUrl", "video_url", "streamUrl", "stream_url", "downloadUrl", "download_url", "m3u8", "mp4", "proxyUrl", "proxy_url"];
       const walkStream = (node, depth = 0) => {
         if (!node || depth > 7 || typeof node !== "object" || visited.has(node)) return;
         visited.add(node);
         if (Array.isArray(node)) { node.forEach(item => walkStream(item, depth + 1)); return; }
-        const candidate = sourceKeys.map(key => node[key]).find(value => typeof value === "string" && /^(https?:)?\/\//i.test(value) || /^\/(?!\/)/.test(value));
+        const candidate = sourceKeys.map(key => node[key]).find(value => typeof value === "string" && isPlayableStreamUrl(value));
         if (candidate) sourceObjects.push(node);
         for (const [key, value] of Object.entries(node)) {
+          if (skipWalkKeys.has(key)) continue;
           if (value && typeof value === "object") walkStream(value, depth + 1);
-          else if (typeof value === "string" && ["playUrl", "play_url", "videoUrl", "video_url", "streamUrl", "stream_url", "m3u8", "mp4"].includes(key) && /^(https?:)?\/\//i.test(value)) {
+          else if (typeof value === "string" && ["playUrl", "play_url", "videoUrl", "video_url", "streamUrl", "stream_url", "m3u8", "mp4"].includes(key) && isPlayableStreamUrl(value)) {
             sourceObjects.push({ [key]: value, quality: node.quality || node.resolution || node.label, type: node.type || node.mime || node.mimeType });
           }
         }
       };
-      walkStream(streamRoot);
-      const sources = [...new Map(sourceObjects.map(s => {
+      if (explicitList && explicitList.length) {
+        explicitList.forEach(item => {
+          if (item && typeof item === "object") {
+            const fmt = String(item.format || item.type || item.mime || item.mimeType || "");
+            if (/\bdash\b|dash\+xml/i.test(fmt)) return;
+            const candidate = sourceKeys.map(key => item[key]).find(value => typeof value === "string" && isPlayableStreamUrl(value) && !/\.mpd(?:$|[?#])/i.test(value));
+            if (candidate) sourceObjects.push(item);
+          } else if (typeof item === "string" && isPlayableStreamUrl(item) && !/\.mpd(?:$|[?#])/i.test(item)) {
+            sourceObjects.push({ url: item, quality: "Auto", format: "MP4" });
+          }
+        });
+      } else {
+        walkStream(streamRoot);
+      }
+      let sources = [...new Map(sourceObjects.map(s => {
         const url = s.url || s.playUrl || s.play_url || s.src || s.file || s.videoUrl || s.video_url || s.streamUrl || s.stream_url || s.downloadUrl || s.download_url || s.m3u8 || s.mp4 || s.proxyUrl || s.proxy_url;
+        const mime = s.type || s.mime || s.mimeType || (/\.m3u8(?:$|[?#])/i.test(url) ? "application/vnd.apple.mpegurl" : "video/mp4");
         return [url, {
           url,
           quality: String(s.quality || s.resolution || s.label || s.name || "Auto"),
           provider: s.provider || s.source || "MovieBox Direct",
-          mime: s.type || s.mime || s.mimeType || (/\.m3u8(?:$|[?#])/i.test(url) ? "application/vnd.apple.mpegurl" : "video/mp4"),
+          format: String(s.format || ""),
+          mime,
           audioLanguage: s.audioLanguage || s.audio_language || ""
         }];
-      }).values())].filter(s => s.url);
+      }).values())].filter(s => isPlayableStreamUrl(s.url) && !/\.mpd(?:$|[?#])/i.test(s.url) && !/\bdash\b|dash\+xml/i.test(s.format + " " + s.mime));
+
+      if (!sources.length && Array.isArray(explicitList) && explicitList.length) {
+        sources = explicitList
+          .map(item => {
+            const url = typeof item === "string" ? item : sourceKeys.map(k => item?.[k]).find(v => typeof v === "string" && v.trim());
+            return url && !/\.mpd(?:$|[?#])/i.test(url)
+              ? { url: url.trim(), quality: String(item?.quality || item?.resolution || "Auto"), provider: "MovieBox Direct", format: String(item?.format || "MP4"), mime: /\.m3u8(?:$|[?#])/i.test(url) ? "application/vnd.apple.mpegurl" : "video/mp4", audioLanguage: "" }
+              : null;
+          })
+          .filter(Boolean);
+      }
 
       const subtitles = Array.isArray(streamRoot.subtitles) ? streamRoot.subtitles
         : Array.isArray(payload.subtitles) ? payload.subtitles
         : Array.isArray(streamRoot.caption) ? streamRoot.caption : [];
 
+      const renderStageRetry = errText => {
+        if (streamMsg) streamMsg.textContent = errText;
+        const altDub = currentDubs.find(d => d?.path && d.path !== path);
+        const stage = root.querySelector(".cv-player-stage");
+        if (stage) {
+          stage.querySelector(".cv-stage-fallback")?.remove();
+          const box = document.createElement("div");
+          box.className = "cv-stage-fallback";
+          box.style.cssText =
+            "position:absolute;inset:0;z-index:20;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:20px;text-align:center;background:rgba(11,13,16,.88);color:#f3f4f6;";
+          box.innerHTML = `<div style="max-width:460px;font-size:14px;line-height:1.5">${esc(errText)}</div>
+            <div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:center">
+              <button type="button" data-retry-stream class="cv-action-btn" style="background:#e50914;border-color:#e50914;color:#fff;cursor:pointer">↻ Retry Stream</button>
+              ${altDub ? `<button type="button" data-switch-alt-dub class="cv-action-btn" style="cursor:pointer">Switch to ${esc(altDub.language || altDub.lanName || "Original Audio")}</button>` : ""}
+            </div>`;
+          box.querySelector("[data-retry-stream]")?.addEventListener("click", () => {
+            box.remove();
+            playEpisode(idx, { ...opts, retryCount: 0 });
+          });
+          box.querySelector("[data-switch-alt-dub]")?.addEventListener("click", () => {
+            box.remove();
+            if (altDub) switchDubInPlace(altDub.path, altDub.language || altDub.lanName || "Original Audio");
+          });
+          stage.appendChild(box);
+        }
+      };
+
+      const retryCount = Number(opts.retryCount || 0);
       if (!sources.length) {
-        if (streamMsg) streamMsg.textContent = payload?.error || payload?.message || "The API returned no playable video URL for this episode.";
+        if (retryCount < 1 && (!r.ok || payload?.retryable || /busy|rate|429/i.test(String(payload?.message || payload?.error || "")))) {
+          if (streamMsg) streamMsg.textContent = "Connecting to backup video server…";
+          setTimeout(() => {
+            if (reqId === streamReqId) {
+              playEpisode(idx, { ...opts, retryCount: retryCount + 1 });
+            }
+          }, 1400);
+          return;
+        }
+        const diag = [
+          `HTTP ${r.status}`,
+          `raw=${Array.isArray(explicitList) ? explicitList.length : -1}`,
+          `keys=${Object.keys(payload || {}).slice(0, 6).join(",")}`
+        ].join(" · ");
+        const errText =
+          payload?.message ||
+          payload?.error ||
+          (watchDetail?.hasResource === false
+            ? "This title is Upcoming / Coming Soon and does not have a playable video yet."
+            : `Stream unavailable right now (${diag}). Tap Retry or try another audio dub.`);
+        renderStageRetry(errText);
         return;
       }
 
+      root.querySelector(".cv-stage-fallback")?.remove();
       if (streamMsg) {
-        streamMsg.textContent = `${sources.map(s => s.quality).join(" · ")}${subtitles.length ? ` · ${subtitles.length} subtitles` : ""}`;
+        streamMsg.textContent = streamRoot?.isTrailer
+          ? "Upcoming title · Playing Official Trailer"
+          : `${sources.map(s => s.quality).join(" · ")}${subtitles.length ? ` · ${subtitles.length} subtitles` : ""}`;
       }
 
       const historyMeta = {
@@ -461,13 +554,38 @@
           backUrl: "./",
           historyMeta,
           onOpenSettings: openSettingsModal,
-          onStateChange: syncPlayerUiState
+          onStateChange: syncPlayerUiState,
+          onRetryStream: () => playEpisode(selectedEpIdx, { seekTo: video.currentTime || 0, autoplay: true, retryCount: 0 })
         });
         syncPlayerUiState();
       }
-    } catch {
-      if (reqId === streamReqId && streamMsg) {
-        streamMsg.textContent = "Stream temporarily unavailable. Try another episode or version.";
+    } catch (err) {
+      if (reqId === streamReqId) {
+        const retryCount = Number(opts.retryCount || 0);
+        if (retryCount < 1) {
+          if (streamMsg) streamMsg.textContent = "Reconnecting to video stream…";
+          setTimeout(() => {
+            if (reqId === streamReqId) playEpisode(idx, { ...opts, retryCount: retryCount + 1 });
+          }, 1400);
+          return;
+        }
+        const msg = `Stream connection failed (${err?.message || "Network error"}). Tap Retry or try another audio dub.`;
+        if (streamMsg) streamMsg.textContent = msg;
+        const stage = root.querySelector(".cv-player-stage");
+        if (stage) {
+          stage.querySelector(".cv-stage-fallback")?.remove();
+          const box = document.createElement("div");
+          box.className = "cv-stage-fallback";
+          box.style.cssText =
+            "position:absolute;inset:0;z-index:20;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:20px;text-align:center;background:rgba(11,13,16,.88);color:#f3f4f6;";
+          box.innerHTML = `<div style="max-width:460px;font-size:14px;line-height:1.5">${esc(msg)}</div>
+            <button type="button" data-retry-stream class="cv-action-btn" style="background:#e50914;border-color:#e50914;color:#fff;cursor:pointer">↻ Retry Stream</button>`;
+          box.querySelector("[data-retry-stream]")?.addEventListener("click", () => {
+            box.remove();
+            playEpisode(idx, { ...opts, retryCount: 0 });
+          });
+          stage.appendChild(box);
+        }
       }
     }
   }
@@ -499,8 +617,9 @@
       path = targetPath;
       const d = data.detail;
       // Normalize common image fields returned by different source adapters.
-      d.poster = d.poster || d.previewImage || d.bannerImage || d.cover || d.coverImage ||
-        d.image || d.thumbnail || d.thumbnailUrl || d.pic || "";
+      d.poster = posterOf(d);
+      if (video && safeImg(d.poster)) video.poster = safeImg(d.poster);
+      root.querySelector(".cv-stage-fallback")?.remove();
       watchDetail = d;
       requestedTitle = d.title || requestedTitle;
       episodes =

@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "main": "server.js",
   "description": "MovieStream BD (CineVerse) — Movies & Dramas streaming catalog",
   "scripts": {
     "dev": "node server.js",

@@ -23,7 +23,7 @@ function getSources(ep){
  const raw=[...(Array.isArray(ep?.sources)?ep.sources:[])];
  for(const b of Array.isArray(ep?.downloadButtons)?ep.downloadButtons:[])raw.push({...b,url:b.downloadUrl||b.download_url||b.url||b.link||b.fileUrl});
  const rows=raw.map(s=>{const rawUrl=s.downloadUrl||s.download_url||s.url||s.link||s.fileUrl||s.file_url||s.proxyUrl||s.proxy_url;let url=rawUrl;try{const parsed=new URL(String(rawUrl||""));const token=parsed.searchParams.get("t");if(token&&/^cp1[A-Za-z0-9._~-]{8,2048}$/.test(token))url="/api/cinepulse-media?t="+encodeURIComponent(token)+"&download=1";}catch{}const q=String(s.quality||s.resolution||s.label||s.name||s.title||"").match(/\d{3,4}/)?.[0];return {url,quality:q? q+"p":"",language:String(s.audioLanguage||s.dubLanguage||s.language||s.lang||""),type:String(s.type||s.format||"")};});
- return rows.filter(s=>{try{const u=new URL(s.url,location.origin);const allowed=u.protocol==="https:"||u.origin===location.origin&&u.pathname==="/api/cinepulse-media";return !!s.quality&&allowed&&!/m3u8|hls/i.test(s.type)&&!/\.m3u8(?:$|[?#])/i.test(s.url);}catch{return false;}})
+ return rows.filter(s=>{try{const u=new URL(s.url,location.origin);const allowed=u.protocol==="https:"||u.origin===location.origin&&u.pathname==="/api/cinepulse-media";return !!s.quality&&allowed&&!/m3u8|hls|dash/i.test(s.type)&&!/\.(?:m3u8|mpd)(?:$|[?#])/i.test(s.url);}catch{return false;}})
  .sort((a,b)=>Number(b.quality.replace("p",""))-Number(a.quality.replace("p","")));
 }
 function updateSources(){
@@ -66,12 +66,13 @@ $("#downloadEpisodeList").addEventListener("click",async e=>{
 async function fetchEpisode(subjectId,item,index){
  let last="No downloadable MP4 source";
  await loadStreamSources(index);
+ const coords=episodeCoords(item,index)[0]||{se:0,ep:index};
  const candidates=getSources(item).filter(s=>s.url);
  for(const source of candidates){
   const url=source.url;
   try{const r=await fetch(url,{cache:"no-store"});if(!r.ok){let msg="HTTP "+r.status;try{const j=await r.json();msg=j.error||msg;}catch{}last=msg;continue;}
    const type=(r.headers.get("content-type")||"").toLowerCase();if(type.includes("json")||type.includes("text/html")){last="Server returned a message instead of video";continue;}
-   const blob=await r.blob();if(!blob.size){last="Empty video file";continue;}return {blob,coords:c};
+   const blob=await r.blob();if(!blob.size){last="Empty video file";continue;}return {blob,coords};
   }catch(e){last=e.message||"Network error";}
  }
  throw new Error(last);

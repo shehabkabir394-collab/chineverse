@@ -230,6 +230,7 @@
     const out = { ...raw, banners: [], trending: [], sections: [] };
     const seenArrays = new Set();
     const isCard = x => x && typeof x === "object" &&
+      x.hasResource !== false &&
       (x.title || x.name) &&
       (posterOf(x) || x.path || x.url || x.subjectId);
     const labelFor = key => String(key || "Featured")
@@ -251,6 +252,7 @@
       else if (/trending|popular|most.?watch|hot|top.?view/.test(k)) out.trending.push(...items);
       else out.sections.push({ title: labelFor(key), items });
     };
+    const skipWalkKeys = new Set(["upcoming", "comingSoon", "categories", "platforms"]);
     const walk = (node, parentKey = "", depth = 0) => {
       if (!node || typeof node !== "object" || depth > 5) return;
       if (Array.isArray(node)) {
@@ -258,6 +260,7 @@
         return;
       }
       for (const [key, value] of Object.entries(node)) {
+        if (skipWalkKeys.has(key)) continue;
         if (value && typeof value === "object") walk(value, key, depth + 1);
       }
     };
@@ -301,7 +304,7 @@
     const bannersRaw = [...(homeData.banners || []), ...(homeData.trending || [])];
     const bannerUniq = new Map();
     for (const item of bannersRaw) {
-      if (!item || isNigerian(item)) continue;
+      if (!item || isNigerian(item) || item.hasResource === false) continue;
       const key = item.path || item.subjectId || item.title;
       if (key && safeImg(posterOf(item)) && !bannerUniq.has(key)) {
         bannerUniq.set(key, item);
@@ -313,7 +316,7 @@
     const renderedIds = new Set();
     const buildShelf = (title, sub, items, moreHref) => {
       const filtered = (Array.isArray(items) ? items : []).filter(item => {
-        if (!item || isNigerian(item)) return false;
+        if (!item || isNigerian(item) || item.hasResource === false) return false;
         const key = item.path || item.subjectId || item.title;
         if (!key || renderedIds.has(key)) return false;
         renderedIds.add(key);

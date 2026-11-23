@@ -16,15 +16,23 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = Number(process.env.PORT) || 3000;
+const RAW_PORT = process.env.PORT;
+const IS_PORT_NUMBER = !RAW_PORT || /^\d+$/.test(String(RAW_PORT).trim());
+const PORT = IS_PORT_NUMBER ? Number(RAW_PORT || 3000) : String(RAW_PORT).trim();
 const HOST = "0.0.0.0";
 const CINEPULSE_UPSTREAM = "https://okay-891h.onrender.com";
+const recentStreamEvents = [];
+
+function recordStreamEvent(evt) {
+  recentStreamEvents.unshift({ ts: new Date().toISOString(), ...evt });
+  if (recentStreamEvents.length > 30) recentStreamEvents.length = 30;
+}
 
 app.set("trust proxy", true);
 
 function getBaseUrl(req) {
   const proto = req.get("x-forwarded-proto") || req.protocol || "http";
-  const host = req.get("host") || `localhost:${PORT}`;
+  const host = req.get("host") || (IS_PORT_NUMBER ? `localhost:${PORT}` : "localhost");
   return `${proto.split(",")[0].trim()}://${host}`;
 }
 
@@ -375,6 +383,20 @@ async function proxyMediaStream(req, res, targetUrl, extraHeaders = {}, forceDow
   let upstream;
   try {
     upstream = await fetchMediaWithRetry(targetUrl, req.method, headers, abortController.signal, 2);
+    if (upstream.status === 403 && extraHeaders.Referer === MOVIEBOX_PLAYER_REFERER) {
+      try {
+        await upstream.body?.cancel();
+      } catch {}
+      for (const altRef of ["https://moviebox.ph/", MOVIEBOX_REFERER]) {
+        const altHeaders = new Headers(headers);
+        altHeaders.set("Referer", altRef);
+        upstream = await fetchMediaWithRetry(targetUrl, req.method, altHeaders, abortController.signal, 1);
+        if (upstream.ok || upstream.status === 206) break;
+        try {
+          await upstream.body?.cancel();
+        } catch {}
+      }
+    }
   } catch (err) {
     req.off("close", onReqClose);
     if (abortController.signal.aborted) {
@@ -526,26 +548,83 @@ app.all("/api/movie-api/*", async (req, res) => {
   const legacy = String(req.params[0] || "").replace(/^\/+|\/+$/g, "");
   const incomingUrl = new URL(req.originalUrl, getBaseUrl(req));
   const query = new URLSearchParams(incomingUrl.search);
+  const startedAt = Date.now();
 
   try {
     const payload = await handleMovieBoxRoute(legacy, query);
     if (payload && payload.ok === false && /^Unknown MovieBox API endpoint/i.test(payload.error || "")) {
       return res.status(404).json(payload);
     }
+    if (legacy === "status" && payload && typeof payload === "object") {
+      payload.recentStreamEvents = recentStreamEvents.slice(0, 15);
+    }
+    const statusCode = payload?.ok === false ? 502 : 200;
+    if (legacy === "stream") {
+      const sourceCount = Array.isArray(payload?.sources)
+        ? payload.sources.length
+        : Array.isArray(payload?.stream?.sources)
+          ? payload.stream.sources.length
+          : 0;
+      const evt = {
+        title: query.get("title") || "",
+        subjectId: query.get("subjectId") || "",
+        se: query.get("se") || "0",
+        ep: query.get("ep") || "0",
+        status: statusCode,
+        sourceCount,
+        message: payload?.message || payload?.error || "",
+        durationMs: Date.now() - startedAt
+      };
+      recordStreamEvent(evt);
+      if (sourceCount === 0 || statusCode >= 400) {
+        console.warn("[MovieBox stream empty/error]", JSON.stringify(evt));
+      }
+    }
     res.setHeader("Cache-Control", legacy === "stream" ? "no-store" : "public, max-age=60");
-    return res.status(payload?.ok === false ? 502 : 200).json(payload);
+    return res.status(statusCode).json(payload);
   } catch (error) {
     console.warn(`[MovieBox API fallback] ${legacy}:`, error?.message || error);
     const fallback = handleMockMovieApi(legacy, query, getBaseUrl(req));
+    if (legacy === "stream") {
+      const sourceCount = Array.isArray(fallback?.stream?.sources) ? fallback.stream.sources.length : 0;
+      recordStreamEvent({
+        title: query.get("title") || "",
+        subjectId: query.get("subjectId") || "",
+        se: query.get("se") || "0",
+        ep: query.get("ep") || "0",
+        status: 200,
+        sourceCount,
+        fallback: true,
+        error: error?.message || String(error),
+        durationMs: Date.now() - startedAt
+      });
+    }
     res.setHeader("Cache-Control", "no-store");
     return res.json(fallback);
   }
 });
 
 // Serve static HTML/CSS/JS/assets from repository root
-app.use(express.static(__dirname, { extensions: ["html"] }));
+app.use(
+  express.static(__dirname, {
+    extensions: ["html"],
+    setHeaders: (res, filePath) => {
+      if (/\.(?:html|js|css)$/i.test(filePath)) {
+        res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+        res.setHeader("Pragma", "no-cache");
+      }
+    }
+  })
+);
 
-app.listen(PORT, HOST, () => {
-  console.log(`MovieStream BD server listening on http://${HOST}:${PORT}`);
-  console.log("Primary upstream: MovieBox Direct API (https://h5-api.aoneroom.com)");
-});
+if (IS_PORT_NUMBER) {
+  app.listen(PORT, HOST, () => {
+    console.log(`MovieStream BD server listening on http://${HOST}:${PORT}`);
+    console.log("Primary upstream: MovieBox Direct API (https://h5-api.aoneroom.com)");
+  });
+} else {
+  app.listen(PORT, () => {
+    console.log(`MovieStream BD server listening on socket/pipe ${PORT}`);
+    console.log("Primary upstream: MovieBox Direct API (https://h5-api.aoneroom.com)");
+  });
+}

@@ -60,7 +60,8 @@
     backUrl = "./",
     historyMeta = null,
     onOpenSettings = null,
-    onStateChange = null
+    onStateChange = null,
+    onRetryStream = null
   }) {
     if (!video || !sources.length) return null;
 
@@ -77,7 +78,12 @@
     const qualityNumber = x => Number(String(x?.quality || "").match(/\d+/)?.[0] || 0);
     const normalizeSources = list =>
       [...list]
-        .filter(x => x && x.url)
+        .filter(x => {
+          if (!x || !x.url) return false;
+          if (/\.mpd(?:$|[?#])/i.test(String(x.url))) return false;
+          if (/\bdash\b|dash\+xml/i.test(String(x.format || x.mime || x.type || ""))) return false;
+          return true;
+        })
         .map(x => ({ ...x, quality: String(x.quality || "Auto"), mime: String(x.mime || x.type || "") }))
         .sort((a, b) => qualityNumber(a) - qualityNumber(b));
 
@@ -359,9 +365,14 @@
         esc(msg) +
         '</div><button type="button" style="margin-top:10px;padding:7px 14px;border-radius:8px;border:1px solid rgba(255,255,255,.28);background:#e50914;color:#fff;font-weight:700;cursor:pointer">↻ Retry Stream</button>';
       errorNotice.querySelector("button")?.addEventListener("click", () => {
+        errorNotice.hidden = true;
         failedSources.clear();
         retriedUrls.clear();
-        setSource(best() || ordered[0], false, true);
+        if (typeof onRetryStream === "function") {
+          onRetryStream();
+        } else {
+          setSource(best() || ordered[0], false, true);
+        }
       });
       errorNotice.hidden = false;
       console.error("All video sources failed", { code, message, networkState: video.networkState, readyState: video.readyState, probeInfo });
