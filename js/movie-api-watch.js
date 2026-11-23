@@ -378,6 +378,7 @@
 
     try {
       const qs = new URLSearchParams({
+        path: String(path || watchDetail?.path || ""),
         subjectId: String(watchDetail?.subjectId || watchDetail?.id || ""),
         detailPath: String(watchDetail?.detailPath || ""),
         title: String(watchDetail?.title || ""),

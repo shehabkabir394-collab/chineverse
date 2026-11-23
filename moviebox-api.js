@@ -1,4 +1,154 @@
-import crypto from "node:crypto";
+const textEncoder = new TextEncoder();
+const textDecoder = new TextDecoder();
+
+function toBase64Url(bytes) {
+  let bin = "";
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function fromBase64Url(str) {
+  const padded = String(str).replace(/-/g, "+").replace(/_/g, "/") + "===".slice((String(str).length + 3) % 4);
+  const bin = atob(padded);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+
+function md5Hex(input) {
+  const msg = textEncoder.encode(String(input));
+  const bitLen = msg.length * 8;
+  const padLen = ((56 - ((msg.length + 1) % 64)) + 64) % 64;
+  const buf = new Uint8Array(msg.length + 1 + padLen + 8);
+  buf.set(msg);
+  buf[msg.length] = 0x80;
+  const view = new DataView(buf.buffer);
+  view.setUint32(buf.length - 8, bitLen >>> 0, true);
+  view.setUint32(buf.length - 4, Math.floor(bitLen / 0x100000000) >>> 0, true);
+
+  const s = [
+    7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22,
+    5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20,
+    4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23,
+    6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21
+  ];
+  const K = new Uint32Array(64);
+  for (let i = 0; i < 64; i++) K[i] = Math.floor(Math.abs(Math.sin(i + 1)) * 0x100000000) >>> 0;
+
+  let a0 = 0x67452301, b0 = 0xefcdab89, c0 = 0x98badcfe, d0 = 0x10325476;
+  const M = new Uint32Array(16);
+  for (let offset = 0; offset < buf.length; offset += 64) {
+    for (let j = 0; j < 16; j++) M[j] = view.getUint32(offset + j * 4, true);
+    let A = a0, B = b0, C = c0, D = d0;
+    for (let i = 0; i < 64; i++) {
+      let F, g;
+      if (i < 16) { F = (B & C) | (~B & D); g = i; }
+      else if (i < 32) { F = (D & B) | (~D & C); g = (5 * i + 1) % 16; }
+      else if (i < 48) { F = B ^ C ^ D; g = (3 * i + 5) % 16; }
+      else { F = C ^ (B | ~D); g = (7 * i) % 16; }
+      const sum = (A + F + K[i] + M[g]) >>> 0;
+      const rot = ((sum << s[i]) | (sum >>> (32 - s[i]))) >>> 0;
+      A = D;
+      D = C;
+      C = B;
+      B = (B + rot) >>> 0;
+    }
+    a0 = (a0 + A) >>> 0;
+    b0 = (b0 + B) >>> 0;
+    c0 = (c0 + C) >>> 0;
+    d0 = (d0 + D) >>> 0;
+  }
+  const out = new DataView(new ArrayBuffer(16));
+  out.setUint32(0, a0, true);
+  out.setUint32(4, b0, true);
+  out.setUint32(8, c0, true);
+  out.setUint32(12, d0, true);
+  return Array.from(new Uint8Array(out.buffer), b => b.toString(16).padStart(2, "0")).join("");
+}
+
+const SHA256_K = new Uint32Array([
+  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+  0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+  0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+  0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+  0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+  0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+  0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+  0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+]);
+
+function sha256Bytes(msgBytes) {
+  const bitLen = msgBytes.length * 8;
+  const padLen = ((56 - ((msgBytes.length + 1) % 64)) + 64) % 64;
+  const buf = new Uint8Array(msgBytes.length + 1 + padLen + 8);
+  buf.set(msgBytes);
+  buf[msgBytes.length] = 0x80;
+  const view = new DataView(buf.buffer);
+  view.setUint32(buf.length - 8, Math.floor(bitLen / 0x100000000) >>> 0, false);
+  view.setUint32(buf.length - 4, bitLen >>> 0, false);
+
+  let h0 = 0x6a09e667, h1 = 0xbb67ae85, h2 = 0x3c6ef372, h3 = 0xa54ff53a;
+  let h4 = 0x510e527f, h5 = 0x9b05688c, h6 = 0x1f83d9ab, h7 = 0x5be0cd19;
+  const w = new Uint32Array(64);
+  const rotr = (x, n) => ((x >>> n) | (x << (32 - n))) >>> 0;
+
+  for (let offset = 0; offset < buf.length; offset += 64) {
+    for (let i = 0; i < 16; i++) w[i] = view.getUint32(offset + i * 4, false);
+    for (let i = 16; i < 64; i++) {
+      const s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >>> 3);
+      const s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >>> 10);
+      w[i] = (w[i - 16] + s0 + w[i - 7] + s1) >>> 0;
+    }
+    let a = h0, b = h1, c = h2, d = h3, e = h4, f = h5, g = h6, h = h7;
+    for (let i = 0; i < 64; i++) {
+      const S1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
+      const ch = (e & f) ^ (~e & g);
+      const temp1 = (h + S1 + ch + SHA256_K[i] + w[i]) >>> 0;
+      const S0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
+      const maj = (a & b) ^ (a & c) ^ (b & c);
+      const temp2 = (S0 + maj) >>> 0;
+      h = g; g = f; f = e; e = (d + temp1) >>> 0;
+      d = c; c = b; b = a; a = (temp1 + temp2) >>> 0;
+    }
+    h0 = (h0 + a) >>> 0; h1 = (h1 + b) >>> 0; h2 = (h2 + c) >>> 0; h3 = (h3 + d) >>> 0;
+    h4 = (h4 + e) >>> 0; h5 = (h5 + f) >>> 0; h6 = (h6 + g) >>> 0; h7 = (h7 + h) >>> 0;
+  }
+  const out = new DataView(new ArrayBuffer(32));
+  out.setUint32(0, h0, false); out.setUint32(4, h1, false);
+  out.setUint32(8, h2, false); out.setUint32(12, h3, false);
+  out.setUint32(16, h4, false); out.setUint32(20, h5, false);
+  out.setUint32(24, h6, false); out.setUint32(28, h7, false);
+  return new Uint8Array(out.buffer);
+}
+
+function hmacSha256Base64Url(secret, message) {
+  let keyBytes = textEncoder.encode(String(secret));
+  if (keyBytes.length > 64) keyBytes = sha256Bytes(keyBytes);
+  const blockKey = new Uint8Array(64);
+  blockKey.set(keyBytes);
+  const oPad = new Uint8Array(64);
+  const iPad = new Uint8Array(64);
+  for (let i = 0; i < 64; i++) {
+    oPad[i] = blockKey[i] ^ 0x5c;
+    iPad[i] = blockKey[i] ^ 0x36;
+  }
+  const msgBytes = textEncoder.encode(String(message));
+  const inner = new Uint8Array(64 + msgBytes.length);
+  inner.set(iPad);
+  inner.set(msgBytes, 64);
+  const innerHash = sha256Bytes(inner);
+  const outer = new Uint8Array(64 + 32);
+  outer.set(oPad);
+  outer.set(innerHash, 64);
+  return toBase64Url(sha256Bytes(outer));
+}
+
+function timingSafeEqualStr(a, b) {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
 
 export const MOVIEBOX_API = "https://h5-api.aoneroom.com";
 export const MOVIEBOX_MIRRORS = [MOVIEBOX_API, "https://moviebox.ph"];
@@ -8,9 +158,21 @@ export const MOVIEBOX_PLAYER_REFERER = "https://movie-box.co/";
 export const MOVIEBOX_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
-const TOKEN_SECRET =
-  process.env.MEDIA_PROXY_SECRET ||
-  crypto.createHash("sha256").update(`${import.meta.url}::chineverse-media-proxy`).digest("hex");
+const DEFAULT_TOKEN_SECRET = Array.from(
+  sha256Bytes(textEncoder.encode("chineverse-media-proxy-v1")),
+  b => b.toString(16).padStart(2, "0")
+).join("");
+let configuredTokenSecret = "";
+
+export function configureMediaSecret(secret) {
+  const clean = String(secret || "").trim();
+  if (clean) configuredTokenSecret = clean;
+}
+
+function getTokenSecret() {
+  return configuredTokenSecret || globalThis.process?.env?.MEDIA_PROXY_SECRET || DEFAULT_TOKEN_SECRET;
+}
+
 const cache = new Map();
 const inFlightFetches = new Map();
 const subjectIndex = new Map();
@@ -56,7 +218,7 @@ const COUNTRY_LANGUAGE_MAP = {
 export function buildMovieBoxHeaders(extra = {}) {
   const ts = Math.floor(Date.now() / 1000);
   const reversed = String(ts).split("").reverse().join("");
-  const hash = crypto.createHash("md5").update(reversed).digest("hex");
+  const hash = md5Hex(reversed);
   return {
     "User-Agent": MOVIEBOX_UA,
     Accept: "application/json",
@@ -72,8 +234,8 @@ export function buildMovieBoxHeaders(extra = {}) {
 }
 
 export function signMediaToken(url) {
-  const payload = Buffer.from(String(url), "utf8").toString("base64url");
-  const sig = crypto.createHmac("sha256", TOKEN_SECRET).update(payload).digest("base64url");
+  const payload = toBase64Url(textEncoder.encode(String(url)));
+  const sig = hmacSha256Base64Url(getTokenSecret(), payload);
   return `${payload}.${sig}`;
 }
 
@@ -83,11 +245,10 @@ export function verifyMediaToken(token) {
   if (dot <= 0) return "";
   const payload = raw.slice(0, dot);
   const sig = raw.slice(dot + 1);
-  const expected = crypto.createHmac("sha256", TOKEN_SECRET).update(payload).digest("base64url");
-  if (sig.length !== expected.length) return "";
-  if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return "";
+  const expected = hmacSha256Base64Url(getTokenSecret(), payload);
+  if (!timingSafeEqualStr(sig, expected)) return "";
   try {
-    const decoded = Buffer.from(payload, "base64url").toString("utf8");
+    const decoded = textDecoder.decode(fromBase64Url(payload));
     const parsed = new URL(decoded);
     return parsed.protocol === "https:" || parsed.protocol === "http:" ? parsed.href : "";
   } catch {
@@ -1447,4 +1608,40 @@ export async function handleMovieBoxRoute(legacy, query) {
     default:
       return { ok: false, error: `Unknown MovieBox API endpoint: ${legacy}` };
   }
+}
+
+export function convertSrtToVtt(rawText) {
+  const clean = String(rawText || "").replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n").trim();
+  if (!clean) return "WEBVTT\n\n";
+  if (/^WEBVTT(?:\s|$)/i.test(clean)) return clean;
+
+  const normalizeTs = ts => {
+    const m = /^(?:(\d+):)?(\d{1,2}):(\d{1,2})[,.](\d{1,3})$/.exec(ts.trim());
+    if (!m) return ts.trim();
+    const h = String(Number(m[1] || 0)).padStart(2, "0");
+    const min = String(Number(m[2])).padStart(2, "0");
+    const sec = String(Number(m[3])).padStart(2, "0");
+    const ms = String(m[4]).padEnd(3, "0").slice(0, 3);
+    return `${h}:${min}:${sec}.${ms}`;
+  };
+
+  const blocks = clean.split(/\n{2,}/);
+  const cues = [];
+  for (const block of blocks) {
+    const lines = block.split("\n").map(l => l.trimEnd()).filter(Boolean);
+    if (!lines.length) continue;
+    const timeIdx = lines.findIndex(l => l.includes("-->"));
+    if (timeIdx < 0) continue;
+    const timingLine = lines[timeIdx];
+    const parts = timingLine.split("-->");
+    if (parts.length < 2) continue;
+    const start = normalizeTs(parts[0]);
+    const restParts = parts[1].trim().split(/\s+/);
+    const end = normalizeTs(restParts[0] || "");
+    const settings = restParts.slice(1).join(" ");
+    const payloadLines = lines.slice(timeIdx + 1).map(l => l.replace(/\{\\an\d+\}/gi, "").trim());
+    if (!payloadLines.length) continue;
+    cues.push(`${start} --> ${end}${settings ? ` ${settings}` : ""}\n${payloadLines.join("\n")}`);
+  }
+  return `WEBVTT\n\n${cues.join("\n\n")}\n`;
 }
