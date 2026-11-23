@@ -3,6 +3,13 @@
  const $=s=>document.querySelector(s);
  const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
  const text=v=>typeof v==="string"?v.trim():"";
+ const imageValue=value=>{
+  if(typeof value==="string")return value;
+  if(Array.isArray(value))return imageValue(value[0]);
+  if(value&&typeof value==="object")return imageValue(value.url||value.src||value.imageUrl||value.image_url||value.original||value.large||value.medium||value.path);
+  return "";
+ };
+ const posterOf=item=>imageValue(item?.poster||item?.posterUrl||item?.poster_url||item?.previewImage||item?.preview_image||item?.bannerImage||item?.banner_image||item?.cover||item?.coverUrl||item?.coverImage||item?.image||item?.imageUrl||item?.image_url||item?.thumbnail||item?.thumbnailUrl||item?.thumbnail_url||item?.pic||item?.img);
  const norm=v=>text(v).toLowerCase().replace(/[_-]+/g," ").replace(/\s+/g," ").trim();
  const params=new URLSearchParams(location.search);
  const selected=params.get("category")||"", letter=(params.get("letter")||"").toUpperCase(), page=Math.max(1,Number(params.get("page"))||1);
@@ -85,7 +92,7 @@
    const saved=map.get(key);
    if(section&&!saved._sections.includes(section))saved._sections.push(section);
    if(source&&!saved._sources.includes(source))saved._sources.push(source);
-   if(!saved.poster&&item.poster)saved.poster=item.poster;
+   if(!posterOf(saved)&&posterOf(item))saved.poster=posterOf(item);
   };
   (Array.isArray(d.sections)?d.sections:[]).forEach(s=>(Array.isArray(s.items)?s.items:[]).forEach(x=>add(x,text(s.title),"section")));
   (Array.isArray(d.allOfficialSections)?d.allOfficialSections:[]).forEach(s=>(Array.isArray(s.items)?s.items:[]).forEach(x=>add(x,text(s.title),"officialSection")));
@@ -158,7 +165,7 @@
   return true;
  }
  function card(item){
-  const p=/^(?:https?:\/\/|\/api\/)/i.test(item.poster||item.previewImage||"")?(item.poster||item.previewImage):"";
+  const image=posterOf(item),p=/^(?:https?:\/\/|\/\/|\/api\/)/i.test(image)?image:"";
   const title=text(item.title)||"Untitled",path=pathOf(item),b=badge(item);
   return '<article class="movie-card movie-api-card"><button class="movie-api-poster" type="button" data-path="'+esc(path)+'" data-title="'+esc(title)+'" '+(!path?"disabled":"")+' aria-label="Open '+esc(title)+'">'+(p?'<img loading="lazy" decoding="async" src="'+esc(p)+'" alt="'+esc(title)+' poster">':'<span class="movie-api-placeholder">CINEVERSE</span>')+'<span class="quality">'+esc(item.quality||item.typeBadge||"HD")+'</span>'+(b?'<span class="movie-api-language-badge">'+b+'</span>':"")+'<span class="overlay">▶<small>View details &amp; watch</small></span></button><div class="movie-info"><h3>'+esc(title)+'</h3><p>'+esc(item.language||item.country||item.typeBadge||"")+'</p></div></article>';
  }
