@@ -24,7 +24,7 @@ export async function onRequest(context) {
 
   const isAllowedHostname = (hostname) => {
     const host = String(hostname || "").toLowerCase();
-    return ALLOWED_HOSTS.has(host) || /^[a-z0-9-]+\.chineverse4k\.pages\.dev$/.test(host);
+    return ALLOWED_HOSTS.has(host) || /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.chineverse\.pages\.dev$/.test(host) || /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.chineverse4k\.pages\.dev$/.test(host);
   };
   if (!isAllowedHostname(url.hostname)) {
     return blocked(403, "API host is not allowed.");
