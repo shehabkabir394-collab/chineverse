@@ -632,6 +632,7 @@
       if (!r.ok || !data?.detail) throw new Error(data?.error || "Title details unavailable.");
 
       const d = data.detail;
+      d.poster = posterOf(d);
       watchDetail = d;
       episodes = Array.isArray(d.episodes) && d.episodes.length ? d.episodes : [{ label: d.title || "Play", number: 1, seasonNumber: 0, episodeNumber: 1, se: 0, ep: 0 }];
       currentDubs = Array.isArray(d.dubs) ? d.dubs : [];
