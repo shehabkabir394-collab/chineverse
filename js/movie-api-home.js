@@ -110,7 +110,7 @@
 
     const draw = () => {
       const item = slides[activeIdx];
-      const img = safeImg(item.poster || item.previewImage || item.cover);
+      const img = safeImg(posterOf(item));
       const title = String(item.title || "Featured");
       const year = item.year ? ` (${item.year})` : "";
       const path = String(item.path || "");
@@ -148,7 +148,7 @@
           <div class="cv-spotlight-strip">
             ${slides
               .map((s, i) => {
-                const sImg = safeImg(s.poster || s.previewImage || s.cover);
+                const sImg = safeImg(posterOf(s));
                 const sPath = String(s.path || "");
                 const sHref = sPath ? `watch.html?path=${encodeURIComponent(sPath)}&title=${encodeURIComponent(s.title || "")}` : watchHref;
                 const sMeta = [s.year, String(s.genre || s.typeBadge || "").split(",")[0]].filter(Boolean).join(" · ");
