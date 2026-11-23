@@ -3,7 +3,19 @@
   const $ = s => document.querySelector(s);
   const esc = s =>
     String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-  const safeImg = u => (/^(?:https?:\/\/|\/api\/)/i.test(String(u || "")) ? String(u) : "");
+  const imageValue = value => {
+    if (typeof value === "string") return value;
+    if (Array.isArray(value)) return imageValue(value[0]);
+    if (value && typeof value === "object") return imageValue(value.url || value.src || value.imageUrl || value.image_url || value.original || value.large || value.medium || value.path);
+    return "";
+  };
+  const posterOf = item => imageValue(
+    item?.poster || item?.posterUrl || item?.poster_url || item?.cover || item?.coverUrl ||
+    item?.coverImage || item?.cover_image || item?.previewImage || item?.preview_image ||
+    item?.bannerImage || item?.banner_image || item?.image || item?.imageUrl || item?.image_url ||
+    item?.thumbnail || item?.thumbnailUrl || item?.thumbnail_url || item?.pic || item?.img
+  );
+  const safeImg = u => (/^(?:https?:\/\/|\/\/|\/api\/)/i.test(String(u || "")) ? String(u) : "");
   const WATCHLIST_KEY = "cv_watchlist_v1";
 
   const params = new URLSearchParams(location.search);
@@ -376,26 +388,41 @@
       const payload = await r.json();
       if (reqId !== streamReqId) return;
 
-      const streamRoot = payload.stream || payload.data?.stream || payload.data || payload;
-      const rawSources = Array.isArray(streamRoot.sources) ? streamRoot.sources
-        : Array.isArray(streamRoot.streams) ? streamRoot.streams
-        : Array.isArray(streamRoot.playSources) ? streamRoot.playSources
-        : Array.isArray(streamRoot.playUrlList) ? streamRoot.playUrlList
-        : [];
-      const sources = rawSources
-        .filter(s => s && (s.url || s.playUrl || s.play_url || s.src || s.file || s.videoUrl || s.streamUrl))
-        .map(s => ({
-          url: s.url || s.playUrl || s.play_url || s.src || s.file || s.videoUrl || s.streamUrl,
-          quality: String(s.quality || s.resolution || s.label || s.name || "720p"),
+      const streamRoot = payload.stream || payload.data?.stream || payload.result?.stream || payload.data || payload.result || payload;
+      const sourceObjects = [];
+      const visited = new Set();
+      const sourceKeys = ["url", "playUrl", "play_url", "src", "file", "videoUrl", "video_url", "streamUrl", "stream_url", "downloadUrl", "download_url", "m3u8", "mp4", "proxyUrl", "proxy_url"];
+      const walkStream = (node, depth = 0) => {
+        if (!node || depth > 7 || typeof node !== "object" || visited.has(node)) return;
+        visited.add(node);
+        if (Array.isArray(node)) { node.forEach(item => walkStream(item, depth + 1)); return; }
+        const candidate = sourceKeys.map(key => node[key]).find(value => typeof value === "string" && /^(https?:)?\/\//i.test(value));
+        if (candidate) sourceObjects.push(node);
+        for (const [key, value] of Object.entries(node)) {
+          if (value && typeof value === "object") walkStream(value, depth + 1);
+          else if (typeof value === "string" && ["playUrl", "play_url", "videoUrl", "video_url", "streamUrl", "stream_url", "m3u8", "mp4"].includes(key) && /^(https?:)?\/\//i.test(value)) {
+            sourceObjects.push({ [key]: value, quality: node.quality || node.resolution || node.label, type: node.type || node.mime || node.mimeType });
+          }
+        }
+      };
+      walkStream(streamRoot);
+      const sources = [...new Map(sourceObjects.map(s => {
+        const url = s.url || s.playUrl || s.play_url || s.src || s.file || s.videoUrl || s.video_url || s.streamUrl || s.stream_url || s.downloadUrl || s.download_url || s.m3u8 || s.mp4 || s.proxyUrl || s.proxy_url;
+        return [url, {
+          url,
+          quality: String(s.quality || s.resolution || s.label || s.name || "Auto"),
           provider: s.provider || s.source || "MovieBox Direct",
-          mime: s.type || s.mime || s.mimeType || "video/mp4",
-          audioLanguage: s.audioLanguage || ""
-        }));
+          mime: s.type || s.mime || s.mimeType || (/\.m3u8(?:$|[?#])/i.test(url) ? "application/vnd.apple.mpegurl" : "video/mp4"),
+          audioLanguage: s.audioLanguage || s.audio_language || ""
+        }];
+      }).values())].filter(s => s.url);
 
-      const subtitles = Array.isArray(streamRoot.subtitles) ? streamRoot.subtitles : [];
+      const subtitles = Array.isArray(streamRoot.subtitles) ? streamRoot.subtitles
+        : Array.isArray(payload.subtitles) ? payload.subtitles
+        : Array.isArray(streamRoot.caption) ? streamRoot.caption : [];
 
       if (!sources.length) {
-        if (streamMsg) streamMsg.textContent = "No playable MP4 source was returned for this episode.";
+        if (streamMsg) streamMsg.textContent = payload?.error || payload?.message || "The API returned no playable video URL for this episode.";
         return;
       }
 
@@ -546,7 +573,7 @@
 
     grid.innerHTML = usable
       .map(x => {
-        const poster = safeImg(x.poster || x.previewImage || x.cover);
+        const poster = safeImg(posterOf(x));
         const lang = String(x.language || x.typeBadge || "").split("·")[0].trim();
         const rate = x.rating && Number(x.rating) > 0 ? `★ ${esc(x.rating)}` : "";
         return `
