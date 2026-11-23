@@ -2,7 +2,14 @@
   "use strict";
   const $ = s => document.querySelector(s);
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-  const safeImg = u => (/^(?:https?:\/\/|\/api\/)/i.test(String(u || "")) ? String(u) : "");
+  const imageValue = value => {
+    if (typeof value === "string") return value;
+    if (Array.isArray(value)) return imageValue(value[0]);
+    if (value && typeof value === "object") return imageValue(value.url || value.src || value.imageUrl || value.image_url || value.original || value.large || value.medium || value.path);
+    return "";
+  };
+  const posterOf = item => imageValue(item?.poster || item?.posterUrl || item?.poster_url || item?.previewImage || item?.preview_image || item?.bannerImage || item?.banner_image || item?.cover || item?.coverUrl || item?.coverImage || item?.image || item?.imageUrl || item?.image_url || item?.thumbnail || item?.thumbnailUrl || item?.thumbnail_url || item?.pic || item?.img);
+  const safeImg = u => (/^(?:https?:\/\/|\/\/|\/api\/)/i.test(String(u || "")) ? String(u) : "");
   const isNigerian = item =>
     /nigeria|nigerian|nollywood|naija/i.test(
       [item?.country, item?.title, item?.language, item?.description].filter(Boolean).join(" ")
@@ -70,7 +77,7 @@
   function cardMarkup(item) {
     const title = String(item.title || "Untitled").trim();
     const path = String(item.path || "");
-    const poster = safeImg(item.poster || item.previewImage || item.cover);
+    const poster = safeImg(posterOf(item));
     const href = path ? `watch.html?path=${encodeURIComponent(path)}&title=${encodeURIComponent(title)}` : `catalog.html?q=${encodeURIComponent(title)}`;
     const langTag = String(item.language || item.country || item.typeBadge || "").split("·")[0].trim();
     const rating = item.rating && Number(item.rating) > 0 ? `★ ${esc(item.rating)}` : "";
@@ -224,7 +231,7 @@
     const seenArrays = new Set();
     const isCard = x => x && typeof x === "object" &&
       (x.title || x.name) &&
-      (x.poster || x.previewImage || x.bannerImage || x.cover || x.image || x.path || x.url || x.subjectId);
+      (posterOf(x) || x.path || x.url || x.subjectId);
     const labelFor = key => String(key || "Featured")
       .replace(/([a-z])([A-Z])/g, "$1 $2")
       .replace(/[_-]+/g, " ")
@@ -235,7 +242,7 @@
         ...item,
         title: item.title || item.name || "Untitled",
         path: item.path || item.url || item.detailPath || "",
-        poster: item.poster || item.previewImage || item.bannerImage || item.cover || item.image || ""
+        poster: posterOf(item)
       }));
       if (!items.length) return;
       seenArrays.add(arr);
@@ -296,7 +303,7 @@
     for (const item of bannersRaw) {
       if (!item || isNigerian(item)) continue;
       const key = item.path || item.subjectId || item.title;
-      if (key && safeImg(item.poster || item.previewImage) && !bannerUniq.has(key)) {
+      if (key && safeImg(posterOf(item)) && !bannerUniq.has(key)) {
         bannerUniq.set(key, item);
       }
       if (bannerUniq.size >= 7) break;
