@@ -396,7 +396,7 @@
         if (!node || depth > 7 || typeof node !== "object" || visited.has(node)) return;
         visited.add(node);
         if (Array.isArray(node)) { node.forEach(item => walkStream(item, depth + 1)); return; }
-        const candidate = sourceKeys.map(key => node[key]).find(value => typeof value === "string" && /^(https?:)?\/\//i.test(value));
+        const candidate = sourceKeys.map(key => node[key]).find(value => typeof value === "string" && /^(https?:)?\/\//i.test(value) || /^\/(?!\/)/.test(value));
         if (candidate) sourceObjects.push(node);
         for (const [key, value] of Object.entries(node)) {
           if (value && typeof value === "object") walkStream(value, depth + 1);
