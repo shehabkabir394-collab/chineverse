@@ -130,6 +130,11 @@
     let preferredQuality = "auto";
     let activeSubtitleIdx = -1;
     let subtitleItems = [];
+    let activeHls = null;
+    let sourceToken = 0;
+    let activeSource = null;
+    let failedSources = new Set();
+    let retriedUrls = new Set();
 
     // Audio boost via Web Audio GainNode (safe on same-origin proxied streams)
     let audioCtx = null;
@@ -453,12 +458,6 @@
         ? h + ":" + String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0")
         : m + ":" + String(s).padStart(2, "0");
     };
-
-    let activeHls = null;
-    let sourceToken = 0;
-    let activeSource = null;
-    let failedSources = new Set();
-    let retriedUrls = new Set();
 
     const errorNotice = document.createElement("div");
     errorNotice.className = "cv-player-error";
