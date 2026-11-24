@@ -695,6 +695,8 @@
     ]);
 
     const matchAny = (pred) => allPool.filter(pred);
+    const mlbdSections = Array.isArray(homeData.mlbdSections) ? homeData.mlbdSections : [];
+    const mlbdItems = dedupeList([...(homeData.mlbdTrending || []), ...mlbdSections.flatMap(s => s.items || [])]);
     const hasLang = (x, re) => re.test([x.language, x.audioLanguage, x.country, x.title, x.genre].filter(Boolean).join(" "));
 
     const orderedShelves = [
@@ -703,6 +705,13 @@
         items: sortNewestFirst(dedupeList(curated.trending?.length ? curated.trending : homeData.trending)),
         moreHref: "catalog.html?category=%2Fmostwatch%2F7d"
       },
+      ...(mlbdItems.length
+        ? [{
+            title: "🟢 Latest & Bangla",
+            items: mlbdItems,
+            moreHref: "catalog.html?category=%2Flanguage%2Fbangla"
+          }]
+        : []),
       {
         title: "🏆 Top 10 This Week",
         top10: true,

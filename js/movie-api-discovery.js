@@ -294,7 +294,10 @@
     const id = ++reqSeq;
     body.innerHTML = `<div class="cv-status-banner">Searching “${esc(q)}”…</div>`;
     try {
-      const r = await fetch(`/api/movie-api/search?q=${encodeURIComponent(q)}&subjectType=${encodeURIComponent(activeType)}`);
+      const endpoint = activeType === "0"
+        ? `/api/suggest?q=${encodeURIComponent(q)}`
+        : `/api/movie-api/search?q=${encodeURIComponent(q)}&subjectType=${encodeURIComponent(activeType)}`;
+      const r = await fetch(endpoint);
       const d = await r.json();
       if (id !== reqSeq) return;
       const items = Array.isArray(d?.items) ? d.items : [];

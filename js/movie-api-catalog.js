@@ -81,8 +81,8 @@
  };
  const badge=item=>isHindiDubbed(item)?"HINDI DUBBED":"";
  const pathOf=item=>{
-  if(typeof item.path==="string"&&/^\/(?:mb|movie|series)\//.test(item.path))return item.path;
-  try{const u=new URL(item.detailsEndpoint);const p=u.searchParams.get("path");return p&&/^\/(?:mb|movie|series)\//.test(p)?p:"";}catch{return "";}
+  if(typeof item.path==="string"&&/^\/(?:mb|mlbd|movie|series|anime)\//i.test(item.path))return item.path;
+  try{const u=new URL(item.detailsEndpoint,location.origin);const p=u.searchParams.get("path");return p&&/^\/(?:mb|mlbd|movie|series|anime)\//i.test(p)?p:"";}catch{return "";}
  };
  function flatten(d){
   const map=new Map();
@@ -116,6 +116,9 @@
   "/language/telugu":"Telugu Movies",
   "/language/malayalam":"Malayalam Movies",
   "/language/punjabi":"Punjabi Movies",
+  "/language/bangla":"Bangla Movies (MovieLinkBD)",
+  "/language/bangla-dubbed":"Bangla Dubbed",
+  "/language/dual-audio":"Dual Audio",
   "/language/japanese-drama":"Japanese Drama (J-Drama)",
   "/language/turkish":"Turkish Drama",
   "/indian-series":"Indian Web Series",
@@ -159,7 +162,9 @@
   if(path==="/anime"||path==="/genre/animation")return type==="anime"||genres.includes("animation");
   if(path==="/language/hindi-dubbed")return isHindiDubbed(item);
   if(path==="/language/hindi")return language==="hindi"||language==="hindi original"||language==="hindi dubbed";
+  if(path==="/language/bangla")return language.includes("bangla")||language.includes("bengali")||sections.some(s=>s.includes("bangla")||s.includes("bengali"));
   if(path==="/language/bangla-dubbed")return language==="bangla dubbed"||sections.some(s=>s.includes("bangla dubbed"));
+  if(path==="/language/dual-audio")return language.includes("dual")||sections.some(s=>s.includes("dual audio"));
   if(path.startsWith("/language/")){
    const wanted=norm(path.split("/").pop()).replace("gujrati","gujarati");
    return language===wanted||language.startsWith(wanted+" ")||sections.some(s=>s===label);

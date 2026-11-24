@@ -600,7 +600,7 @@
 
       const isHls =
         /\.m3u8(?:$|[?#])/i.test(src.url) ||
-        /\/api\/sports-hls\//i.test(src.url) ||
+        /\/api\/(?:sports-hls|mlbd-hls)\//i.test(src.url) ||
         /mpegurl|m3u8|hls/i.test(String(src.mime || src.type || ""));
 
       const ready = () => {
@@ -611,6 +611,7 @@
         if (activeSubtitleIdx >= 0) {
           applyTrackSelection(activeSubtitleIdx);
         }
+        emitState();
         if (was || autoplay) safePlayWithFallback();
       };
 
@@ -627,6 +628,12 @@
                 if (token === sourceToken) activeHls.loadSource(src.url);
               });
               activeHls.on(Hls.Events.MANIFEST_PARSED, ready);
+              activeHls.on(Hls.Events.AUDIO_TRACKS_UPDATED, () => {
+                if (token === sourceToken) emitState();
+              });
+              activeHls.on(Hls.Events.AUDIO_TRACK_SWITCHED, () => {
+                if (token === sourceToken) emitState();
+              });
               activeHls.on(Hls.Events.ERROR, (_, data) => {
                 if (data.fatal && token === sourceToken) {
                   $(".cv-buffer").hidden = true;
@@ -1110,7 +1117,23 @@
       }
     }
 
+    function setAudioTrack(idx) {
+      if (!activeHls || !Array.isArray(activeHls.audioTracks)) return;
+      const target = Number(idx);
+      if (Number.isInteger(target) && target >= 0 && target < activeHls.audioTracks.length) {
+        activeHls.audioTrack = target;
+        emitState();
+      }
+    }
+
     function getState() {
+      const hlsAudioTracks = activeHls && Array.isArray(activeHls.audioTracks)
+        ? activeHls.audioTracks.map((t, i) => ({
+            index: i,
+            label: t.name || t.lang || `Audio ${i + 1}`,
+            lang: t.lang || ""
+          }))
+        : [];
       return {
         qualities: ordered.map(x => x.quality),
         preferredQuality,
@@ -1119,6 +1142,8 @@
         brightness: brightnessPct,
         subtitles: subtitleItems,
         activeSubtitleIdx,
+        audioTracks: hlsAudioTracks,
+        activeAudioIdx: activeHls ? Number(activeHls.audioTrack ?? 0) : 0,
         speed: Number(video.playbackRate || 1)
       };
     }
@@ -1142,6 +1167,7 @@
         emitState();
       },
       setActiveSubtitle: applyTrackSelection,
+      setAudioTrack,
       toggleBanglaSubtitle,
       setSpeed,
       setScreenMode,

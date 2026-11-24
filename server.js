@@ -10,6 +10,20 @@ import {
   signMediaToken,
   verifyMediaToken
 } from "./moviebox-api.js";
+import {
+  getActiveMlbdReferer,
+  getMlbdCatalog,
+  getMlbdCategories,
+  getMlbdDetails,
+  getMlbdHomeFeed,
+  getMlbdServerHealth,
+  getMlbdStream,
+  getMlbdSuggest,
+  isMlbdPath,
+  resolveSafeMlbdToken,
+  rewriteMlbdHlsPlaylist,
+  validateExternalHttpUrl
+} from "./movielinkbd-api.js";
 import { buildPosterSvg, handleMockMovieApi } from "./mock-catalog.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -49,6 +63,7 @@ app.use((req, res, next) => {
     p.startsWith("/.env") ||
     p === "/server.js" ||
     p === "/moviebox-api.js" ||
+    p === "/movielinkbd-api.js" ||
     p === "/mock-catalog.js" ||
     p === "/package.json" ||
     p === "/package-lock.json" ||
@@ -124,7 +139,11 @@ app.get("/api/moviebox-image/:file", async (req, res) => {
   if (!targetUrl) {
     return res.status(400).send("Invalid or missing image token");
   }
-  const referer = /aisports/i.test(targetUrl) ? "https://aisports.mobi/" : MOVIEBOX_REFERER;
+  const referer = /aisports/i.test(targetUrl)
+    ? "https://aisports.mobi/"
+    : /movielink/i.test(targetUrl)
+      ? getActiveMlbdReferer()
+      : MOVIEBOX_REFERER;
   try {
     const upstream = await fetchMediaWithRetry(
       targetUrl,
@@ -170,10 +189,11 @@ app.get("/api/moviebox-subtitle/:file", async (req, res) => {
     return res.status(400).send("Invalid or missing subtitle token");
   }
   try {
+    const subReferer = /movielink/i.test(targetUrl) ? getActiveMlbdReferer() : MOVIEBOX_PLAYER_REFERER;
     const upstream = await fetch(targetUrl, {
       headers: {
         "User-Agent": MOVIEBOX_UA,
-        Referer: MOVIEBOX_PLAYER_REFERER
+        Referer: subReferer
       },
       signal: AbortSignal.timeout(20000)
     });
@@ -520,8 +540,8 @@ async function proxyMediaStream(req, res, targetUrl, extraHeaders = {}, forceDow
     if (value) res.setHeader(name, value);
   }
   const ct = (upstream.headers.get("content-type") || "").toLowerCase();
-  if (!ct || ct.includes("octet-stream")) {
-    res.setHeader("content-type", "video/mp4");
+  if (!ct || ct.includes("octet-stream") || (ct.startsWith("image/") && /movielink/i.test(targetUrl))) {
+    res.setHeader("content-type", /\/vsub\//i.test(targetUrl) ? "text/vtt; charset=utf-8" : "video/mp4");
   }
   if (!upstream.headers.get("accept-ranges")) {
     res.setHeader("accept-ranges", "bytes");
@@ -732,29 +752,203 @@ app.all("/api/cinepulse-media", async (req, res) => {
   }
 });
 
+// === MovieLinkBD & Cineverse API Endpoints ===
+
+app.get("/api/categories", async (_req, res) => {
+  try {
+    const data = await getMlbdCategories();
+    res.setHeader("Cache-Control", "public, max-age=180");
+    return res.json(data);
+  } catch (err) {
+    return res.status(502).json({ ok: false, error: err?.message || "Categories unavailable" });
+  }
+});
+
+app.get("/api/server-health", async (_req, res) => {
+  try {
+    const data = await getMlbdServerHealth();
+    res.setHeader("Cache-Control", "no-store");
+    return res.json(data);
+  } catch (err) {
+    return res.status(502).json({ ok: false, error: err?.message || "Server health check failed" });
+  }
+});
+
+app.get("/api/suggest", async (req, res) => {
+  const q = String(req.query.q || "").trim();
+  if (!q) return res.json({ ok: true, query: "", items: [], suggestions: [] });
+  try {
+    const [mlbdRes, mbRes] = await Promise.allSettled([
+      getMlbdSuggest(q),
+      handleMovieBoxRoute("search", new URLSearchParams({ q, page: "1" }))
+    ]);
+    const mlbdItems = mlbdRes.status === "fulfilled" && Array.isArray(mlbdRes.value?.items) ? mlbdRes.value.items : [];
+    const mbItems = mbRes.status === "fulfilled" && Array.isArray(mbRes.value?.items) ? mbRes.value.items : [];
+    const seen = new Set();
+    const merged = [];
+    for (const item of [...mlbdItems, ...mbItems]) {
+      const key = item?.path || item?.title;
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      merged.push(item);
+      if (merged.length >= 16) break;
+    }
+    res.setHeader("Cache-Control", "public, max-age=60");
+    return res.json({
+      ok: true,
+      query: q,
+      items: merged,
+      suggestions: merged.map(it => it.title)
+    });
+  } catch (err) {
+    return res.status(502).json({ ok: false, error: err?.message || "Suggestions unavailable" });
+  }
+});
+
+app.get("/api/home-feed", async (_req, res) => {
+  try {
+    const data = await getMlbdHomeFeed();
+    res.setHeader("Cache-Control", "public, max-age=120");
+    return res.json(data);
+  } catch (err) {
+    return res.status(502).json({ ok: false, error: err?.message || "Home feed unavailable" });
+  }
+});
+
+app.get("/api/catalog", async (req, res) => {
+  try {
+    const pathParam = String(req.query.path || req.query.category || "/");
+    const q = String(req.query.q || "");
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const data = await getMlbdCatalog({ path: pathParam, q, page });
+    res.setHeader("Cache-Control", "public, max-age=90");
+    return res.json(data);
+  } catch (err) {
+    return res.status(502).json({ ok: false, error: err?.message || "Catalog unavailable" });
+  }
+});
+
+app.get("/api/details", async (req, res) => {
+  const pathParam = String(req.query.path || "").trim();
+  if (!pathParam) {
+    return res.status(400).json({ ok: false, error: "Missing path parameter" });
+  }
+  try {
+    if (pathParam.startsWith("/mb/")) {
+      const mbPayload = await handleMovieBoxRoute("details", new URLSearchParams({
+        path: pathParam,
+        title: String(req.query.title || "")
+      }));
+      return res.json(mbPayload);
+    }
+    const data = await getMlbdDetails(pathParam);
+    res.setHeader("Cache-Control", "public, max-age=120");
+    return res.json(data);
+  } catch (err) {
+    return res.status(502).json({ ok: false, error: err?.message || "Title details unavailable" });
+  }
+});
+
+app.get("/api/go", (req, res) => {
+  const token = String(req.query.t || "").trim();
+  const targetUrl = resolveSafeMlbdToken(token);
+  if (!targetUrl) {
+    return res.status(400).type("text/plain").send("Invalid or expired download redirect token");
+  }
+  res.setHeader("Referrer-Policy", "no-referrer");
+  res.setHeader("Cache-Control", "no-store");
+  return res.redirect(302, targetUrl);
+});
+
+app.get("/api/mlbd-hls.m3u8", async (req, res) => {
+  const token = String(req.query.t || "").trim();
+  const targetUrl = resolveSafeMlbdToken(token);
+  if (!targetUrl) {
+    return res.status(400).type("text/plain").send("Invalid or expired MovieLinkBD HLS token");
+  }
+  try {
+    const upstream = await fetchMediaWithRetry(
+      targetUrl,
+      "GET",
+      {
+        "User-Agent": MOVIEBOX_UA,
+        Referer: getActiveMlbdReferer(),
+        Accept: "*/*"
+      },
+      null,
+      2,
+      20000
+    );
+    if (!upstream.ok) {
+      return res.status(upstream.status).type("text/plain").send("HLS playlist unavailable");
+    }
+    const rawText = await upstream.text();
+    const rewritten = rewriteMlbdHlsPlaylist(rawText, upstream.url || targetUrl);
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Content-Type", "application/vnd.apple.mpegurl; charset=utf-8");
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    return res.send(rewritten);
+  } catch (err) {
+    return res.status(502).type("text/plain").send(err?.message || "MovieLinkBD HLS proxy failed");
+  }
+});
+
+app.all("/api/mlbd-stream.mp4", async (req, res) => {
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    return res.status(405).set("Allow", "GET, HEAD").send("Method not allowed");
+  }
+  const token = String(req.query.t || "").trim();
+  const targetUrl = resolveSafeMlbdToken(token);
+  if (!targetUrl) {
+    return res.status(400).type("text/plain").send("Invalid or expired MovieLinkBD stream token");
+  }
+  const forceDownload = req.query.download === "1";
+  const customFilename = String(req.query.filename || "");
+  try {
+    return await proxyMediaStream(
+      req,
+      res,
+      targetUrl,
+      { Referer: getActiveMlbdReferer() },
+      forceDownload,
+      customFilename
+    );
+  } catch (err) {
+    return res.status(502).type("text/plain").send(
+      err?.name === "TimeoutError" ? "MovieLinkBD stream timed out" : "MovieLinkBD stream unavailable"
+    );
+  }
+});
+
 // Download helper for season ZIP & one-click episode fetch
 app.get("/api/movie-api/download-file", async (req, res) => {
   try {
     const incomingUrl = new URL(req.originalUrl, getBaseUrl(req));
     const query = new URLSearchParams(incomingUrl.search);
-    const streamPayload = await handleMovieBoxRoute("stream", query);
+    const reqPath = String(query.get("path") || "");
+    const streamPayload = isMlbdPath(reqPath)
+      ? await getMlbdStream({ path: reqPath, se: query.get("se") || 0, ep: query.get("ep") || 1 })
+      : await handleMovieBoxRoute("stream", query);
     const sources = Array.isArray(streamPayload?.sources) ? streamPayload.sources : [];
-    const best = sources[0];
+    const best = sources.find(s => s?.url && !/\.m3u8(?:$|[?#])/i.test(s.url)) || sources[0];
     if (!best?.url) {
       return res.status(404).json({ ok: false, error: "No downloadable MP4 source found" });
     }
     const parsed = new URL(best.url, getBaseUrl(req));
-    const targetUrl = verifyMediaToken(parsed.searchParams.get("mb"));
+    const token = parsed.searchParams.get("mb") || parsed.searchParams.get("t");
+    const targetUrl = validateExternalHttpUrl(verifyMediaToken(token));
     if (!targetUrl) {
       return res.status(404).json({ ok: false, error: "Download token unavailable" });
     }
-    return await proxyMediaStream(req, res, targetUrl, { Referer: MOVIEBOX_PLAYER_REFERER }, true);
+    const referer = isMlbdPath(reqPath) ? getActiveMlbdReferer() : MOVIEBOX_PLAYER_REFERER;
+    return await proxyMediaStream(req, res, targetUrl, { Referer: referer }, true);
   } catch (error) {
     return res.status(502).json({ ok: false, error: error?.message || "Download failed" });
   }
 });
 
-// Main MovieBox Upstream API Proxy
+// Main Upstream API Proxy (MovieBox Direct + MovieLinkBD Unified)
 app.all("/api/movie-api/*", async (req, res) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
@@ -767,8 +961,136 @@ app.all("/api/movie-api/*", async (req, res) => {
   const incomingUrl = new URL(req.originalUrl, getBaseUrl(req));
   const query = new URLSearchParams(incomingUrl.search);
   const startedAt = Date.now();
+  const reqPath = String(query.get("path") || "");
 
   try {
+    // Route MovieLinkBD item paths directly (/movie/*, /series/*, /anime/*, /mlbd/*)
+    if (legacy === "details" && isMlbdPath(reqPath)) {
+      const payload = await getMlbdDetails(reqPath);
+      res.setHeader("Cache-Control", "public, max-age=120");
+      return res.status(200).json(payload);
+    }
+
+    if (legacy === "stream" && isMlbdPath(reqPath)) {
+      const payload = await getMlbdStream({
+        path: reqPath,
+        se: query.get("se") || 0,
+        ep: query.get("ep") || 1
+      });
+      recordStreamEvent({
+        title: query.get("title") || reqPath,
+        subjectId: reqPath,
+        se: query.get("se") || "0",
+        ep: query.get("ep") || "0",
+        status: 200,
+        sourceCount: payload.sources?.length || 0,
+        message: "MovieLinkBD",
+        durationMs: Date.now() - startedAt
+      });
+      res.setHeader("Cache-Control", "no-store");
+      return res.status(200).json(payload);
+    }
+
+    if (legacy === "home") {
+      const [mbRes, mlbdRes] = await Promise.allSettled([
+        handleMovieBoxRoute("home", query),
+        getMlbdHomeFeed()
+      ]);
+      const payload = mbRes.status === "fulfilled"
+        ? mbRes.value
+        : { ok: true, sections: [], trending: [], banners: [], categories: [], curated: {} };
+      if (mlbdRes.status === "fulfilled" && mlbdRes.value?.ok) {
+        const mlbd = mlbdRes.value;
+        payload.mlbdSections = mlbd.sections || [];
+        payload.mlbdTrending = mlbd.trending || [];
+        payload.sections = [...(payload.sections || []), ...(mlbd.sections || [])];
+        payload.activeMlbdMirror = mlbd.activeMirror;
+      }
+      res.setHeader("Cache-Control", "public, max-age=60");
+      return res.status(200).json(payload);
+    }
+
+    if (legacy === "categories") {
+      const [mbRes, mlbdRes] = await Promise.allSettled([
+        handleMovieBoxRoute("categories", query),
+        getMlbdCategories()
+      ]);
+      const mbCats = mbRes.status === "fulfilled" && Array.isArray(mbRes.value?.categories) ? mbRes.value.categories : [];
+      const mlbdCats = mlbdRes.status === "fulfilled" && Array.isArray(mlbdRes.value?.categories) ? mlbdRes.value.categories : [];
+      const seen = new Set(mbCats.map(c => c.path));
+      const mergedCats = [...mbCats, ...mlbdCats.filter(c => c?.path && !seen.has(c.path))];
+      res.setHeader("Cache-Control", "public, max-age=120");
+      return res.json({
+        ok: true,
+        categories: mergedCats,
+        servers: mlbdRes.status === "fulfilled" ? mlbdRes.value?.servers || [] : []
+      });
+    }
+
+    if (legacy === "search") {
+      const q = String(query.get("q") || "").trim();
+      const page = Math.max(1, Number(query.get("page")) || 1);
+      const [mbRes, mlbdRes] = await Promise.allSettled([
+        handleMovieBoxRoute("search", query),
+        q ? getMlbdCatalog({ path: "/search", q, page }) : Promise.resolve({ items: [] })
+      ]);
+      const mbItems = mbRes.status === "fulfilled" && Array.isArray(mbRes.value?.items) ? mbRes.value.items : [];
+      const mlbdItems = mlbdRes.status === "fulfilled" && Array.isArray(mlbdRes.value?.items) ? mlbdRes.value.items : [];
+      const merged = [];
+      const seen = new Set();
+      // Interleave exact MovieLinkBD + MovieBox matches cleanly
+      const maxLen = Math.max(mlbdItems.length, mbItems.length);
+      for (let i = 0; i < maxLen; i++) {
+        for (const candidate of [mbItems[i], mlbdItems[i]]) {
+          if (!candidate) continue;
+          const key = candidate.path || candidate.title;
+          if (!key || seen.has(key)) continue;
+          seen.add(key);
+          merged.push(candidate);
+        }
+      }
+      res.setHeader("Cache-Control", "public, max-age=60");
+      return res.json({
+        ok: true,
+        items: merged,
+        totalCount: merged.length,
+        hasMore: Boolean(mbRes.value?.hasMore || mlbdRes.value?.hasMore)
+      });
+    }
+
+    if (legacy === "catalog") {
+      const category = String(query.get("category") || "/");
+      const page = Math.max(1, Number(query.get("page")) || 1);
+      const isMlbdOnlyCategory = /^\/(?:language\/(?:bangla|bangla-dubbed|dual-audio)|category\/|collection\/)/i.test(category);
+      if (isMlbdOnlyCategory) {
+        const mlbdCat = await getMlbdCatalog({ path: category, page });
+        res.setHeader("Cache-Control", "public, max-age=60");
+        return res.json(mlbdCat);
+      }
+      const [mbRes, mlbdRes] = await Promise.allSettled([
+        handleMovieBoxRoute("catalog", query),
+        getMlbdCatalog({ path: category, page })
+      ]);
+      const mbPayload = mbRes.status === "fulfilled" ? mbRes.value : { ok: true, items: [] };
+      const mbItems = Array.isArray(mbPayload?.items) ? mbPayload.items : [];
+      const mlbdItems = mlbdRes.status === "fulfilled" && Array.isArray(mlbdRes.value?.items) ? mlbdRes.value.items : [];
+      const merged = [...mbItems];
+      const seen = new Set(merged.map(x => x.path));
+      for (const item of mlbdItems) {
+        if (item?.path && !seen.has(item.path)) {
+          seen.add(item.path);
+          merged.push(item);
+        }
+      }
+      res.setHeader("Cache-Control", "public, max-age=60");
+      return res.json({
+        ...mbPayload,
+        ok: true,
+        items: merged,
+        maxPage: Math.max(Number(mbPayload?.maxPage || 1), Number(mlbdRes.value?.maxPage || 1))
+      });
+    }
+
     const payload = await handleMovieBoxRoute(legacy, query);
     if (payload && payload.ok === false && /^Unknown MovieBox API endpoint/i.test(payload.error || "")) {
       return res.status(404).json(payload);

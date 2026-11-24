@@ -47,7 +47,7 @@
   function decorateMediaUrl(rawUrl, filename) {
     try {
       const u = new URL(String(rawUrl || ""), location.origin);
-      if (u.origin === location.origin && u.pathname === "/api/cinepulse-media") {
+      if (u.origin === location.origin && (u.pathname === "/api/cinepulse-media" || u.pathname === "/api/mlbd-stream.mp4")) {
         u.searchParams.set("download", "1");
         if (filename) u.searchParams.set("filename", filename);
         return u.pathname + u.search;
@@ -121,8 +121,8 @@
     const filtered = rows.filter(s => {
       try {
         const u = new URL(s.url, location.origin);
-        const allowed = u.protocol === "https:" || (u.origin === location.origin && u.pathname === "/api/cinepulse-media");
-        return Boolean(s.quality) && allowed && !/m3u8|hls|dash/i.test(s.type) && !/\.(?:m3u8|mpd)(?:$|[?#])/i.test(s.url);
+        const allowed = u.protocol === "https:" || (u.origin === location.origin && (u.pathname === "/api/cinepulse-media" || u.pathname === "/api/mlbd-stream.mp4"));
+        return Boolean(s.quality) && allowed && !/m3u8|hls|dash/i.test(s.type) && !/\.(?:m3u8|mpd)(?:$|[?#])/i.test(s.url) && !/\/api\/mlbd-hls\.m3u8/i.test(s.url);
       } catch {
         return false;
       }
@@ -197,7 +197,10 @@
     }
     quality.value = downloadable.length ? String(defaultIdx) : "";
 
-    $("#downloadLinks").innerHTML = downloadable
+    const gatewayButtons = (Array.isArray(ep?.downloadButtons) ? ep.downloadButtons : [])
+      .filter(b => b?.url && b.type === "gateway");
+
+    const mp4LinksHtml = downloadable
       .map(s => {
         const fname = buildFilename(ep, s);
         const href = decorateMediaUrl(s.url, fname);
@@ -205,6 +208,15 @@
         return `<a class="ms-download-link" href="${esc(href)}" download="${esc(fname)}" data-dl-url="${esc(href)}" data-dl-filename="${esc(fname)}"><span>Download ${esc(s.quality)}<small>${esc(sub)}</small></span><b>⬇</b></a>`;
       })
       .join("");
+
+    const gatewayLinksHtml = gatewayButtons
+      .map(b => {
+        const sub = [b.sizeText, b.provider || "Mirror Server"].filter(Boolean).join(" · ");
+        return `<a class="ms-download-link" href="${esc(b.url)}" data-mlbd-gateway="1" rel="noopener noreferrer"><span>${esc(b.label || `Mirror ${b.quality || "HD"}`)}<small>${esc(sub)}</small></span><b>↗</b></a>`;
+      })
+      .join("");
+
+    $("#downloadLinks").innerHTML = mp4LinksHtml + gatewayLinksHtml;
 
     if (downloadable.length) {
       const picked = downloadable[defaultIdx] || downloadable[0];
@@ -714,7 +726,7 @@
   });
 
   async function load() {
-    if (!/^\/(?:mb|movie|series)\/[a-zA-Z0-9_./-]{1,300}$/.test(path)) {
+    if (!/^\/(?:mb|mlbd|movie|series|anime)\/[a-zA-Z0-9_./-]{1,300}$/i.test(path)) {
       $("#downloadStatus").textContent = "Invalid title link.";
       return;
     }

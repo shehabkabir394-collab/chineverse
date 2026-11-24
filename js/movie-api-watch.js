@@ -228,6 +228,19 @@
     modal.querySelectorAll("[data-set-speed]").forEach(btn => {
       btn.classList.toggle("active", Number(btn.dataset.setSpeed) === st.speed);
     });
+
+    const audioSec = $("#cvModalAudioSection");
+    const audioPicker = $("#cvModalAudioTracks");
+    if (audioSec && audioPicker) {
+      if (Array.isArray(st.audioTracks) && st.audioTracks.length > 1) {
+        audioSec.hidden = false;
+        audioPicker.innerHTML = st.audioTracks
+          .map(a => `<button type="button" class="cv-sub-pill ${st.activeAudioIdx === a.index ? "active" : ""}" data-set-audio="${a.index}">${esc(a.label)}</button>`)
+          .join("");
+      } else {
+        audioSec.hidden = true;
+      }
+    }
   }
 
   function ensureSettingsModal() {
@@ -293,6 +306,11 @@
         </button>
         <div id="cvModalSubTracks" class="cv-sub-pill-strip" hidden></div>
 
+        <div id="cvModalAudioSection" hidden>
+          <div class="cv-ps-action-row"><span>Audio Track (Multi-Audio)</span></div>
+          <div id="cvModalAudioTracks" class="cv-sub-pill-strip"></div>
+        </div>
+
         <div class="cv-ps-action-row cv-ps-speed-row">
           <span>Playback Speed</span>
           <b id="cvModalSpeedVal" class="cv-ps-speed-val">1x</b>
@@ -345,6 +363,12 @@
       const subBtn = e.target.closest("[data-set-sub]");
       if (subBtn && playerApi) {
         playerApi.setActiveSubtitle(Number(subBtn.dataset.setSub));
+        syncPlayerUiState();
+        return;
+      }
+      const audioBtn = e.target.closest("[data-set-audio]");
+      if (audioBtn && playerApi) {
+        playerApi.setAudioTrack?.(Number(audioBtn.dataset.setAudio));
         syncPlayerUiState();
         return;
       }
@@ -766,7 +790,7 @@
   }
 
   async function load() {
-    if (!/^\/(?:mb|movie|series)\/[a-zA-Z0-9_./-]{1,300}$/.test(path)) {
+    if (!/^\/(?:mb|mlbd|movie|series|anime)\/[a-zA-Z0-9_./-]{1,300}$/i.test(path)) {
       statusEl.textContent = "Invalid title URL. Returning to home or select another title.";
       return;
     }
@@ -874,7 +898,7 @@
           <aside class="cv-resources-panel">
             <div class="cv-resources-head">
               <h2>Resources</h2>
-              <span>Verified · MovieBox Direct</span>
+              <span>${d.source === "movielinkbd" ? "Verified · MovieLinkBD Mirror" : "Verified · MovieBox Direct"}</span>
             </div>
             <div class="cv-resources-selects">
               ${dubSelectHtml}
@@ -1006,7 +1030,11 @@
         }
       });
 
-      playEpisode(0);
+      const requestedEpIdx = Number(params.get("episode") || 0);
+      const startEpIdx = Number.isInteger(requestedEpIdx) && requestedEpIdx >= 0 && requestedEpIdx < episodes.length
+        ? requestedEpIdx
+        : 0;
+      playEpisode(startEpIdx);
       loadRelated(d);
       loadComments(d);
     } catch (err) {
