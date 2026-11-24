@@ -120,7 +120,7 @@
 
       heroEl.innerHTML = `
         <div class="cv-spotlight-stage">
-          ${img ? `<img class="cv-spotlight-bg" referrerpolicy="no-referrer" src="${esc(img)}" alt="${esc(title)}">` : ""}
+          ${img ? `<img class="cv-spotlight-bg" decoding="async" referrerpolicy="no-referrer" src="${esc(img)}" alt="${esc(title)}">` : ""}
           <div class="cv-spotlight-scrim" aria-hidden="true"></div>
 
           <div class="cv-spotlight-top">
@@ -154,7 +154,7 @@
                 const sMeta = [s.year, String(s.genre || s.typeBadge || "").split(",")[0]].filter(Boolean).join(" · ");
                 return `
                   <div class="cv-spot-mini ${i === activeIdx ? "active" : ""}" data-spot-card="${i}" role="button" tabindex="0" aria-label="Select ${esc(s.title || "title")}">
-                    ${sImg ? `<img class="cv-spot-mini-thumb" referrerpolicy="no-referrer" src="${esc(sImg)}" alt="">` : `<div class="cv-spot-mini-thumb"></div>`}
+                    ${sImg ? `<img class="cv-spot-mini-thumb" decoding="async" referrerpolicy="no-referrer" src="${esc(sImg)}" alt="">` : `<div class="cv-spot-mini-thumb"></div>`}
                     <div class="cv-spot-mini-info">
                       <b>${esc(s.title || "Featured")}</b>
                       <span>${esc(sMeta || lang)}</span>
@@ -169,9 +169,10 @@
           </div>
         </div>
       `;
+      const strip = heroEl.querySelector(".cv-spotlight-strip");
       const activeMini = heroEl.querySelector(".cv-spot-mini.active");
-      if (activeMini) {
-        activeMini.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+      if (strip && activeMini) {
+        strip.scrollLeft = Math.max(0, activeMini.offsetLeft - Math.max(0, (strip.clientWidth - activeMini.offsetWidth) / 2));
       }
     };
 

@@ -194,9 +194,9 @@
       ...ordered.map(x => '<option value="' + esc(x.quality) + '">' + esc(x.quality) + "</option>")
     ].join("");
     controls.innerHTML =
-      '<div class="cv-progress"><input class="cv-seek" type="range" min="0" max="1000" value="0" aria-label="Seek"></div><div class="cv-control-row"><button type="button" class="cv-play" aria-label="Play">▶</button><button type="button" class="cv-back" aria-label="Back 10 seconds">↶10</button><button type="button" class="cv-forward" aria-label="Forward 10 seconds">10↷</button><span class="cv-time">0:00 / 0:00</span><button type="button" class="cv-mute" aria-label="Mute sound" title="Mute / Unmute">🔊</button><input class="cv-volume" type="range" min="0" max="1" step=".05" value="1" aria-label="Volume"><select class="cv-quality" aria-label="Quality">' +
+      '<div class="cv-progress"><input class="cv-seek" type="range" min="0" max="1000" value="0" aria-label="Seek"></div><div class="cv-control-row"><button type="button" class="cv-play" aria-label="Play">▶</button><button type="button" class="cv-back" aria-label="Back 10 seconds">↶10</button><button type="button" class="cv-forward" aria-label="Forward 10 seconds">10↷</button><span class="cv-time tabular-nums">0:00 / 0:00</span><button type="button" class="cv-mute" aria-label="Mute sound" title="Mute / Unmute">🔊</button><input class="cv-volume" type="range" min="0" max="1" step=".05" value="1" aria-label="Volume"><select class="cv-quality" aria-label="Quality">' +
       qualityOptions +
-      '</select><select class="cv-speed" aria-label="Playback speed"><option value="0.5">0.5</option><option value="0.75">0.75</option><option value="1" selected>1</option><option value="1.25">1.25</option><option value="1.5">1.5</option><option value="2">2</option></select><select class="cv-subtitles" aria-label="Subtitles"><option value="-1">Subtitles Off</option></select><button type="button" class="cv-pip" title="Picture in Picture">▣</button><button type="button" class="cv-full" title="Fullscreen">⛶</button></div><div class="cv-buffer" hidden>Buffering…</div>';
+      '</select><select class="cv-speed" aria-label="Playback speed"><option value="0.5">0.5</option><option value="0.75">0.75</option><option value="1" selected>1</option><option value="1.25">1.25</option><option value="1.5">1.5</option><option value="2">2</option></select><select class="cv-subtitles" aria-label="Subtitles"><option value="-1">CC: Off</option></select><button type="button" class="cv-settings" aria-label="Player settings" title="Settings">⚙</button><button type="button" class="cv-pip" title="Picture in Picture" aria-label="Picture in Picture">▣</button><button type="button" class="cv-full" title="Fullscreen" aria-label="Fullscreen">⛶</button></div><div class="cv-buffer" hidden>Buffering…</div>';
     wrap.appendChild(controls);
 
     const topRight = topbar.querySelector(".cv-top-right");
@@ -207,13 +207,7 @@
     lockButton.setAttribute("aria-label", "Lock controls");
     wrap.appendChild(lockButton);
 
-    const settingsButton = document.createElement("button");
-    settingsButton.type = "button";
-    settingsButton.className = "cv-settings";
-    settingsButton.textContent = "⚙";
-    settingsButton.setAttribute("aria-label", "Player settings");
-    wrap.appendChild(settingsButton);
-
+    const settingsButton = controls.querySelector(".cv-settings");
     const settingsPanel = document.createElement("div");
     settingsPanel.className = "cv-settings-panel";
     settingsPanel.innerHTML = "<span>Playback speed</span>";
@@ -283,8 +277,11 @@
     }
 
     let hideTimer = 0;
+    let lastRevealAt = 0;
     function revealControls() {
+      const wasVisible = wrap.classList.contains("cv-ui-visible");
       wrap.classList.add("cv-ui-visible");
+      if (!wasVisible) lastRevealAt = Date.now();
       clearTimeout(hideTimer);
       if (!video.paused && !video.ended) {
         hideTimer = setTimeout(() => wrap.classList.remove("cv-ui-visible"), 2800);
@@ -517,8 +514,14 @@
     play.addEventListener("click", () => (video.paused ? safePlayWithFallback() : video.pause()));
     centerPlay.addEventListener("click", () => (video.paused ? safePlayWithFallback() : video.pause()));
     video.addEventListener("click", () => {
-      if (video.paused) safePlayWithFallback();
-      else revealControls();
+      if (video.paused) {
+        safePlayWithFallback();
+      } else if (wrap.classList.contains("cv-ui-visible") && Date.now() - lastRevealAt > 250) {
+        clearTimeout(hideTimer);
+        wrap.classList.remove("cv-ui-visible");
+      } else {
+        revealControls();
+      }
     });
     video.addEventListener("play", () => {
       if (soundBoostPct > 100) applyAudioBoost(soundBoostPct);
@@ -646,7 +649,7 @@
 
     async function setSubtitles(list = []) {
       video.querySelectorAll("track[data-cv-dynamic-subtitle]").forEach(t => t.remove());
-      subs.innerHTML = '<option value="-1">Subtitles Off</option>';
+      subs.innerHTML = '<option value="-1">CC: Off</option>';
       subtitleItems = [];
       activeSubtitleIdx = -1;
 
