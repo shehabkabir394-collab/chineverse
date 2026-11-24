@@ -188,6 +188,7 @@ export const CATEGORIES = [
   { label: "Recently Updated", path: "/recently-updated", group: "Collections", icon: "🔄" },
   { label: "Short Drama", path: "/shorts", group: "Collections", icon: "⚡" },
   { label: "Upcoming", path: "/upcoming", group: "Collections", icon: "⏳" },
+  { label: "Midnight (18+)", path: "/adult18plus", group: "Collections", icon: "🔞" },
   { label: "Hindi Dubbed", path: "/language/hindi-dubbed", group: "Languages & Regions", icon: "🇮🇳" },
   { label: "Hindi Dubbed Web Series", path: "/language/hindi-dubbed-series", group: "Languages & Regions", icon: "🎙️" },
   { label: "Bollywood", path: "/bollywood", group: "Languages & Regions", icon: "🎬" },
@@ -215,13 +216,16 @@ export const CATEGORIES = [
   { label: "Action", path: "/genre/action", group: "Genres", icon: "💥" },
   { label: "Adventure", path: "/genre/adventure", group: "Genres", icon: "🧭" },
   { label: "Animation", path: "/genre/animation", group: "Genres", icon: "🎨" },
+  { label: "Adult", path: "/genre/adult", group: "Genres", icon: "💋" },
   { label: "Comedy", path: "/genre/comedy", group: "Genres", icon: "😂" },
   { label: "Crime", path: "/genre/crime", group: "Genres", icon: "🕵️" },
   { label: "Documentary", path: "/genre/documentary", group: "Genres", icon: "📽️" },
   { label: "Drama", path: "/genre/drama", group: "Genres", icon: "🎭" },
+  { label: "Erotic", path: "/genre/erotic", group: "Genres", icon: "🔥" },
   { label: "Family", path: "/genre/family", group: "Genres", icon: "👨‍👩‍👧" },
   { label: "History", path: "/genre/history", group: "Genres", icon: "🏛️" },
   { label: "Horror", path: "/genre/horror", group: "Genres", icon: "👻" },
+  { label: "Hot (18+)", path: "/genre/hot", group: "Genres", icon: "❤️‍🔥" },
   { label: "Music", path: "/genre/music", group: "Genres", icon: "🎶" },
   { label: "Mystery", path: "/genre/mystery", group: "Genres", icon: "🔍" },
   { label: "Romance", path: "/genre/romance", group: "Genres", icon: "❤️" },
@@ -730,6 +734,11 @@ function categoryToFilterBody(category, page = 1) {
       "sci-fi": "Sci-Fi",
       scifi: "Sci-Fi",
       action: "Action",
+      adult: "Adult",
+      "18+": "18+",
+      "adult18+": "Adult",
+      erotic: "Erotic",
+      hot: "Hot",
       adventure: "Adventure",
       animation: "Animation",
       comedy: "Comedy",
@@ -748,6 +757,8 @@ function categoryToFilterBody(category, page = 1) {
       war: "War"
     };
     body.genre = genreAliases[rawGenre] || rawGenre.replace(/(^|-)\w/g, m => m.toUpperCase());
+  } else if (c.includes("adult18plus") || c === "/midnight" || c === "/18+") {
+    body.genre = "Adult";
   }
   return body;
 }
@@ -1113,7 +1124,7 @@ export async function handleMovieBoxRoute(legacy, query) {
         ok: true,
         languages: ["Hindi", "Korean", "Chinese", "English", "Bengali", "Japanese", "Tamil", "Urdu"],
         types: ["Movie", "Series", "Anime", "Short Drama"],
-        genres: ["Action", "Adventure", "Animation", "Comedy", "Crime", "Drama", "Family", "Fantasy", "Horror", "Mystery", "Romance", "Sci-Fi", "Thriller"]
+        genres: ["Action", "Adult", "Adventure", "Animation", "Comedy", "Crime", "Drama", "Erotic", "Family", "Fantasy", "Horror", "Hot", "Mystery", "Romance", "Sci-Fi", "Thriller"]
       };
     }
 
@@ -1145,6 +1156,37 @@ export async function handleMovieBoxRoute(legacy, query) {
           ? home.curated.imdbTopRated
           : [...(home?.trending || [])].sort((a, b) => Number(b.rating || 0) - Number(a.rating || 0));
         return { ok: true, items, page: 1, totalPages: 1 };
+      }
+      if (lower.includes("adult18plus") || lower === "/midnight" || lower === "/18+" || lower === "/genre/18+") {
+        const calls = [
+          { page, perPage: 12, channelId: 1, genre: "Adult", sort: "Latest" },
+          { page, perPage: 12, channelId: 1, genre: "Erotic", sort: "Latest" },
+          { page, perPage: 12, channelId: 1, genre: "Hot", sort: "Latest" },
+          { page, perPage: 12, channelId: 2, genre: "Adult", sort: "Latest" },
+          { page, perPage: 12, channelId: 1, classify: "Midnight", sort: "Latest" }
+        ];
+        if (page === 1) {
+          calls.push({ page: 1, perPage: 12, channelId: 1, genre: "18+" });
+        }
+        const results = await Promise.allSettled([
+          ...calls.map(b =>
+            mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/subject/filter`, { method: "POST", body: JSON.stringify(b) }, 120000)
+              .then(r => indexList(r?.data?.items).filter(x => x.hasResource !== false))
+          ),
+          ...(page === 1
+            ? [
+                mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/platform/play-list?page=1&perPage=6&platform=Vivamax`, {}, 180000)
+                  .then(r => {
+                    const months = Array.isArray(r?.data?.monthList) ? r.data.monthList : [];
+                    return indexList(months.flatMap(m => Array.isArray(m.subjects) ? m.subjects : []), { platform: "Vivamax" });
+                  })
+              ]
+            : [])
+        ]);
+        const merged = results.flatMap(r => (r.status === "fulfilled" && Array.isArray(r.value) ? r.value : []));
+        const uniq = [...new Map(merged.filter(x => x && (x.subjectId || x.path)).map(x => [x.subjectId || x.path, x])).values()];
+        const items = sortByReleaseNewest(uniq);
+        return { ok: true, items, page, totalPages: items.length >= 12 ? page + 1 : page };
       }
       if (lower.includes("southindian") || lower.includes("south-indian")) {
         const j = await mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/subject/filter`, {
@@ -1223,6 +1265,14 @@ export async function handleMovieBoxRoute(legacy, query) {
         ).catch(() => null);
         const extraIn = indexList(inMore?.data?.items, extra).filter(x => x.hasResource !== false);
         items = [...new Map([...items, ...extraIn].map(x => [x.subjectId || x.path, x])).values()];
+      } else if (/\/genre\/(?:adult|erotic|hot)/i.test(lower)) {
+        const ch2 = await mbFetch(
+          `${MOVIEBOX_API}/wefeed-h5api-bff/subject/filter`,
+          { method: "POST", body: JSON.stringify({ ...body, channelId: 2 }) },
+          120000
+        ).catch(() => null);
+        const extraAdult = indexList(ch2?.data?.items, extra).filter(x => x.hasResource !== false);
+        items = [...new Map([...items, ...extraAdult].map(x => [x.subjectId || x.path, x])).values()];
       }
 
       // Fallback if Bangla Dubbed / Genre / Bangladesh returns empty on primary channel

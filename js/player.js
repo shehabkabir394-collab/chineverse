@@ -76,6 +76,11 @@
     let currentMeta = historyMeta ? { ...historyMeta } : { path: "", title, poster: "", isSeries: false, se: 0, ep: 0 };
 
     const qualityNumber = x => Number(String(x?.quality || "").match(/\d+/)?.[0] || 0);
+    const normalizeQualityLabel = raw => {
+      const s = String(raw || "Auto").trim();
+      const m = /^(\d{3,4})\s*p?$/i.exec(s);
+      return m ? `${m[1]}p` : s || "Auto";
+    };
     const normalizeSources = list =>
       [...list]
         .filter(x => {
@@ -84,10 +89,29 @@
           if (/\bdash\b|dash\+xml/i.test(String(x.format || x.mime || x.type || ""))) return false;
           return true;
         })
-        .map(x => ({ ...x, quality: String(x.quality || "Auto"), mime: String(x.mime || x.type || "") }))
+        .map(x => ({
+          ...x,
+          quality: normalizeQualityLabel(x.quality),
+          mime: String(x.mime || x.type || "")
+        }))
         .sort((a, b) => qualityNumber(a) - qualityNumber(b));
 
-    let ordered = normalizeSources(sources);
+    const dedupeByQuality = list => {
+      const byQ = new Map();
+      for (const s of list) {
+        const key = String(s.quality || "Auto").toLowerCase();
+        const prev = byQ.get(key);
+        const isHls = /\.m3u8(?:$|[?#])/i.test(s.url) || /mpegurl|m3u8|hls/i.test(s.mime);
+        const prevIsHls = prev ? (/\.m3u8(?:$|[?#])/i.test(prev.url) || /mpegurl|m3u8|hls/i.test(prev.mime)) : false;
+        if (!prev || (prevIsHls && !isHls)) {
+          byQ.set(key, s);
+        }
+      }
+      return [...byQ.values()];
+    };
+
+    let allSources = normalizeSources(sources);
+    let ordered = dedupeByQuality(allSources);
     const best = () => {
       const c = navigator.connection || {};
       const down = Number(c.downlink) || 0;
@@ -217,9 +241,15 @@
 
     settingsButton.addEventListener("click", () => {
       if (typeof onOpenSettings === "function") {
+        hideControls();
         onOpenSettings();
       } else {
         settingsPanel.classList.toggle("open");
+        if (settingsPanel.classList.contains("open")) {
+          clearTimeout(hideTimer);
+        } else {
+          scheduleHide();
+        }
       }
     });
 
@@ -229,7 +259,7 @@
       wrap.classList.toggle("cv-locked", locked);
       lockButton.textContent = locked ? "🔓" : "🔒";
       lockButton.setAttribute("aria-label", locked ? "Unlock controls" : "Lock controls");
-      if (!locked) revealControls();
+      revealControls();
     });
 
     const centerPlay = document.createElement("button");
@@ -260,6 +290,93 @@
     const mute = $(".cv-mute");
     volume.value = String(video.volume);
 
+    const qualBtn = document.createElement("button");
+    qualBtn.type = "button";
+    qualBtn.className = "cv-top-pill cv-qual-btn";
+    qualBtn.setAttribute("aria-label", "Video quality");
+    qualBtn.textContent = "Auto ▾";
+
+    const subsBtn = document.createElement("button");
+    subsBtn.type = "button";
+    subsBtn.className = "cv-top-pill cv-subs-btn";
+    subsBtn.setAttribute("aria-label", "Subtitles");
+    subsBtn.textContent = "CC: Off ▾";
+
+    const topMenu = document.createElement("div");
+    topMenu.className = "cv-top-menu";
+    topMenu.hidden = true;
+    wrap.appendChild(topMenu);
+
+    let openTopMenuType = "";
+    function closeTopMenu() {
+      openTopMenuType = "";
+      topMenu.hidden = true;
+      topMenu.innerHTML = "";
+    }
+
+    function syncTopButtons() {
+      const qText = preferredQuality === "auto" ? `Auto${activeSource?.quality ? ` (${activeSource.quality})` : ""}` : preferredQuality;
+      qualBtn.textContent = `${qText} ▾`;
+      const activeSub = activeSubtitleIdx >= 0 ? subtitleItems[activeSubtitleIdx] : null;
+      subsBtn.textContent = activeSub ? `CC: ${activeSub.label} ▾` : "CC: Off ▾";
+    }
+
+    function openTopMenu(type) {
+      if (openTopMenuType === type && !topMenu.hidden) {
+        closeTopMenu();
+        scheduleHide(1200);
+        return;
+      }
+      openTopMenuType = type;
+      clearTimeout(hideTimer);
+      wrap.classList.add("cv-ui-visible");
+      if (type === "quality") {
+        const items = [
+          { value: "auto", label: `Auto${activeSource?.quality ? ` (${activeSource.quality})` : ""}`, active: preferredQuality === "auto" },
+          ...ordered.map(x => ({ value: x.quality, label: x.quality, active: preferredQuality === x.quality }))
+        ];
+        topMenu.innerHTML = `<div class="cv-top-menu-head">Quality</div>` + items.map(
+          it => `<button type="button" class="cv-top-menu-item ${it.active ? "active" : ""}" data-pick-quality="${esc(it.value)}"><span>${esc(it.label)}</span>${it.active ? "<b>✓</b>" : ""}</button>`
+        ).join("");
+      } else {
+        const items = [
+          { value: -1, label: "Off", active: activeSubtitleIdx < 0 },
+          ...subtitleItems.map(s => ({ value: s.index, label: s.label, active: activeSubtitleIdx === s.index }))
+        ];
+        topMenu.innerHTML = `<div class="cv-top-menu-head">Subtitles</div>` + (
+          items.length > 1
+            ? items.map(it => `<button type="button" class="cv-top-menu-item ${it.active ? "active" : ""}" data-pick-sub="${it.value}"><span>${esc(it.label)}</span>${it.active ? "<b>✓</b>" : ""}</button>`).join("")
+            : `<button type="button" class="cv-top-menu-item active" data-pick-sub="-1"><span>Off (No tracks)</span><b>✓</b></button>`
+        );
+      }
+      topMenu.hidden = false;
+    }
+
+    qualBtn.addEventListener("click", e => {
+      e.stopPropagation();
+      openTopMenu("quality");
+    });
+    subsBtn.addEventListener("click", e => {
+      e.stopPropagation();
+      openTopMenu("subs");
+    });
+    topMenu.addEventListener("click", e => {
+      e.stopPropagation();
+      const qPick = e.target.closest("[data-pick-quality]");
+      if (qPick) {
+        selectQuality(qPick.dataset.pickQuality);
+        closeTopMenu();
+        scheduleHide(1200);
+        return;
+      }
+      const sPick = e.target.closest("[data-pick-sub]");
+      if (sPick) {
+        applyTrackSelection(Number(sPick.dataset.pickSub));
+        closeTopMenu();
+        scheduleHide(1200);
+      }
+    });
+
     function syncSound() {
       const silent = video.muted || video.volume === 0;
       mute.textContent = silent ? "🔇" : "🔊";
@@ -268,24 +385,56 @@
       if (!silent) unmuteBtn.hidden = true;
     }
     syncSound();
-    topRight.append(quality, subs);
+    topRight.append(qualBtn, subsBtn);
+    syncTopButtons();
 
     function emitState() {
+      syncTopButtons();
       if (typeof onStateChange === "function") {
         onStateChange(getState());
       }
     }
 
+    const AUTO_HIDE_MS = 1700;
     let hideTimer = 0;
-    let lastRevealAt = 0;
-    function revealControls() {
-      const wasVisible = wrap.classList.contains("cv-ui-visible");
-      wrap.classList.add("cv-ui-visible");
-      if (!wasVisible) lastRevealAt = Date.now();
-      clearTimeout(hideTimer);
-      if (!video.paused && !video.ended) {
-        hideTimer = setTimeout(() => wrap.classList.remove("cv-ui-visible"), 2800);
+    let isDraggingControl = false;
+    let activeSelect = false;
+    let hasShownInitial = false;
+    let uiVisibleAtPointerDown = false;
+    let suppressNextVideoClick = false;
+    let lastMouseMoveAt = 0;
+
+    function blurFocusedControl() {
+      const active = document.activeElement;
+      if (active && active !== document.body && wrap.contains(active) && active !== wrap) {
+        try {
+          active.blur();
+        } catch {}
       }
+    }
+
+    function hideControls() {
+      clearTimeout(hideTimer);
+      wrap.classList.remove("cv-ui-visible");
+      settingsPanel.classList.remove("open");
+      closeTopMenu();
+      activeSelect = false;
+      blurFocusedControl();
+    }
+
+    function scheduleHide(delay = AUTO_HIDE_MS) {
+      clearTimeout(hideTimer);
+      if (isDraggingControl || activeSelect || settingsPanel.classList.contains("open") || !topMenu.hidden) return;
+      if (!video.paused && !video.ended) {
+        hideTimer = setTimeout(() => {
+          hideControls();
+        }, delay);
+      }
+    }
+
+    function revealControls(delay = AUTO_HIDE_MS) {
+      wrap.classList.add("cv-ui-visible");
+      scheduleHide(delay);
     }
 
     function showSkip(delta) {
@@ -344,8 +493,9 @@
       }
       if (token !== sourceToken) return;
       failedSources.add(failed.url);
-      const remaining = ordered.filter(x => x && x.url && !failedSources.has(x.url));
-      const next = remaining.find(x => x.quality === "720p") || remaining.find(x => x.quality === "480p") || remaining[remaining.length - 1] || remaining[0];
+      const remaining = allSources.filter(x => x && x.url && !failedSources.has(x.url));
+      const sameQ = remaining.find(x => x.quality === failed.quality);
+      const next = sameQ || remaining.find(x => x.quality === "720p") || remaining.find(x => x.quality === "480p") || remaining[remaining.length - 1] || remaining[0];
       if (next) {
         console.warn("Video source failed; trying another source", { quality: failed.quality, code, probeInfo });
         setSource(next, false, true);
@@ -506,45 +656,155 @@
 
     quality.addEventListener("change", () => {
       preferredQuality = quality.value;
+      activeSelect = false;
       const src = quality.value === "auto" ? best() : ordered.find(x => x.quality === quality.value);
       if (src) setSource(src, true, true);
       emitState();
+      scheduleHide(1200);
     });
 
-    play.addEventListener("click", () => (video.paused ? safePlayWithFallback() : video.pause()));
-    centerPlay.addEventListener("click", () => (video.paused ? safePlayWithFallback() : video.pause()));
+    [quality, subs, speedSelect].forEach(sel => {
+      if (!sel) return;
+      sel.addEventListener("focus", () => {
+        activeSelect = true;
+        clearTimeout(hideTimer);
+      });
+      sel.addEventListener("blur", () => {
+        activeSelect = false;
+        scheduleHide(1200);
+      });
+    });
+
+    [seek, volume].forEach(rangeEl => {
+      if (!rangeEl) return;
+      const startDrag = () => {
+        isDraggingControl = true;
+        clearTimeout(hideTimer);
+      };
+      const endDrag = () => {
+        if (!isDraggingControl) return;
+        isDraggingControl = false;
+        scheduleHide();
+      };
+      rangeEl.addEventListener("pointerdown", startDrag, { passive: true });
+      rangeEl.addEventListener("touchstart", startDrag, { passive: true });
+      rangeEl.addEventListener("pointerup", endDrag, { passive: true });
+      rangeEl.addEventListener("touchend", endDrag, { passive: true });
+      rangeEl.addEventListener("change", () => {
+        isDraggingControl = false;
+        scheduleHide();
+      });
+    });
+
+    window.addEventListener("pointerup", () => {
+      if (isDraggingControl) {
+        isDraggingControl = false;
+        scheduleHide();
+      }
+    });
+
+    play.addEventListener("click", () => {
+      if (video.paused) safePlayWithFallback();
+      else video.pause();
+    });
+    centerPlay.addEventListener("click", () => {
+      if (video.paused) safePlayWithFallback();
+      else video.pause();
+    });
+
+    wrap.addEventListener(
+      "pointerdown",
+      e => {
+        uiVisibleAtPointerDown = wrap.classList.contains("cv-ui-visible");
+        if (e.target !== video && !locked && e.target !== wrap) {
+          clearTimeout(hideTimer);
+        }
+      },
+      { passive: true }
+    );
+
+    wrap.addEventListener("click", e => {
+      if (locked && e.target !== lockButton && !lockButton.contains(e.target)) {
+        if (uiVisibleAtPointerDown) hideControls();
+        else revealControls();
+        return;
+      }
+      if (e.target === wrap) {
+        if (uiVisibleAtPointerDown) hideControls();
+        else revealControls();
+      }
+    });
+
     video.addEventListener("click", () => {
+      if (!topMenu.hidden) {
+        closeTopMenu();
+        scheduleHide(1200);
+        return;
+      }
+      if (suppressNextVideoClick) {
+        suppressNextVideoClick = false;
+        return;
+      }
+      if (locked) {
+        if (uiVisibleAtPointerDown) hideControls();
+        else revealControls();
+        return;
+      }
       if (video.paused) {
         safePlayWithFallback();
-      } else if (wrap.classList.contains("cv-ui-visible") && Date.now() - lastRevealAt > 250) {
-        clearTimeout(hideTimer);
-        wrap.classList.remove("cv-ui-visible");
+        return;
+      }
+      if (uiVisibleAtPointerDown) {
+        hideControls();
       } else {
         revealControls();
       }
     });
+
     video.addEventListener("play", () => {
       if (soundBoostPct > 100) applyAudioBoost(soundBoostPct);
       wrap.classList.remove("cv-ended");
       play.textContent = "Ⅱ";
+      centerPlay.innerHTML = '<span style="margin-left:0;letter-spacing:-1px">❚❚</span>';
+      centerPlay.setAttribute("aria-label", "Pause video");
       centerPlay.classList.remove("visible");
       wrap.classList.add("cv-playing");
-      revealControls();
+      if (!hasShownInitial) {
+        hasShownInitial = true;
+        hideControls();
+      } else if (wrap.classList.contains("cv-ui-visible")) {
+        scheduleHide(1200);
+      }
     });
     video.addEventListener("pause", () => {
       play.textContent = "▶";
+      centerPlay.innerHTML = "<span>▶</span>";
+      centerPlay.setAttribute("aria-label", "Play video");
       centerPlay.classList.add("visible");
       wrap.classList.remove("cv-playing");
-      revealControls();
+      clearTimeout(hideTimer);
+      wrap.classList.add("cv-ui-visible");
     });
-    ["pointermove", "pointerdown", "touchstart"].forEach(evt => wrap.addEventListener(evt, revealControls, { passive: true }));
+
+    wrap.addEventListener(
+      "pointermove",
+      e => {
+        if (e.pointerType === "touch") return;
+        const now = Date.now();
+        if (now - lastMouseMoveAt < 180) return;
+        lastMouseMoveAt = now;
+        revealControls();
+      },
+      { passive: true }
+    );
     wrap.addEventListener("mouseleave", () => {
-      if (!video.paused) wrap.classList.remove("cv-ui-visible");
+      if (!video.paused && !isDraggingControl && !activeSelect) hideControls();
     });
     video.addEventListener("ended", () => {
       centerPlay.classList.add("visible");
       wrap.classList.add("cv-ui-visible");
       wrap.classList.add("cv-ended");
+      clearTimeout(hideTimer);
     });
 
     const jump = delta => {
@@ -572,6 +832,7 @@
 
     seek.addEventListener("input", () => {
       if (video.duration) video.currentTime = (Number(seek.value) / 1000) * video.duration;
+      revealControls();
     });
 
     volume.addEventListener("input", e => {
@@ -579,6 +840,7 @@
       video.muted = false;
       localStorage.setItem("cv-player-volume", String(video.volume));
       syncSound();
+      revealControls();
     });
 
     mute.addEventListener("click", () => {
@@ -598,7 +860,9 @@
 
     speedSelect.addEventListener("change", e => {
       video.playbackRate = Number(e.target.value) || 1;
+      activeSelect = false;
       emitState();
+      scheduleHide(1200);
     });
 
     async function enterFullscreen() {
@@ -689,7 +953,9 @@
 
     setSubtitles(subtitles);
     subs.addEventListener("change", () => {
+      activeSelect = false;
       applyTrackSelection(Number(subs.value));
+      scheduleHide(1200);
     });
 
     video.addEventListener("waiting", () => ($(".cv-buffer").hidden = false));
@@ -732,6 +998,7 @@
     video.addEventListener(
       "touchend",
       e => {
+        if (locked) return;
         const x = e.changedTouches[0].clientX;
         const r = video.getBoundingClientRect();
         if (Math.abs(x - (r.left + r.width / 2)) < r.width * 0.12) {
@@ -744,6 +1011,7 @@
           video.currentTime = Math.max(0, Math.min(video.duration || Infinity, video.currentTime + delta));
           showSkip(delta);
           tap = 0;
+          suppressNextVideoClick = true;
           revealControls();
         } else {
           tap = now;
@@ -778,11 +1046,13 @@
     function setSources(next, opts = {}) {
       const seekTo = opts.seekTo != null ? Number(opts.seekTo) : 0;
       const shouldAutoplay = opts.autoplay !== false;
-      ordered = normalizeSources(next);
+      allSources = normalizeSources(next);
+      ordered = dedupeByQuality(allSources);
       failedSources.clear();
       retriedUrls.clear();
       activeSource = null;
       errorNotice.hidden = true;
+      closeTopMenu();
       if (opts.storageKey) storageKey = opts.storageKey;
       if (opts.title) {
         const tEl = topbar.querySelector(".cv-title");
@@ -806,6 +1076,7 @@
     function selectQuality(q) {
       preferredQuality = q || "auto";
       const src = preferredQuality === "auto" ? best() : ordered.find(x => x.quality === preferredQuality);
+      if (quality) quality.value = preferredQuality === "auto" ? "auto" : src?.quality || "auto";
       if (src) setSource(src, true, true);
       emitState();
     }

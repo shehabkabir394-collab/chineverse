@@ -12,13 +12,16 @@
   const safeName = s =>
     String(s || "MovieStreamBD").replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 100) || "MovieStreamBD";
 
-  const CHUNK_SIZE = 10 * 1024 * 1024; // 10 MiB chunks (stays safely under 32 MiB proxy caps)
+  const CHUNK_SIZE = 5 * 1024 * 1024; // 5 MiB verified chunks: stays safely below proxy 32 MiB cap & resumes on drops
+  const CHUNK_TIMEOUT_MS = 35000;
+  const CHUNK_MAX_RETRIES = 5;
 
   let episodes = [];
   let selected = requested;
   let detail = null;
   let downloadable = [];
   let busy = false;
+  let activeDownloadAbort = null;
 
   const subjectIdOf = () =>
     detail?.subjectId || detail?.subject_id || detail?.subject?.subjectId || detail?.subject?.subject_id || detail?.subject?.id || detail?.id || "";
@@ -133,6 +136,7 @@
     const ep = episodes[selected];
     const action = $("#downloadAction");
     const safeBtn = $("#downloadSafeChunked");
+    const rawLink = $("#downloadDirectRaw");
     const status = $("#downloadStatus");
     if (!src) {
       action.href = "#";
@@ -140,6 +144,7 @@
       action.setAttribute("aria-disabled", "true");
       action.innerHTML = '<span>Download source unavailable<small>Try another episode or audio dub</small></span><b class="icon">↓</b>';
       if (safeBtn) safeBtn.hidden = true;
+      if (rawLink) rawLink.hidden = true;
       status.textContent = "এই Episode-এর সরাসরি MP4 source পাওয়া যায়নি। অন্য Episode নির্বাচন করে দেখুন।";
       return;
     }
@@ -150,14 +155,18 @@
 
     action.href = finalUrl;
     action.setAttribute("download", filename);
+    action.dataset.dlUrl = finalUrl;
+    action.dataset.dlFilename = filename;
     action.setAttribute("aria-disabled", "false");
-    action.innerHTML = `<span>⚡ ONE CLICK DOWNLOAD · ${esc(src.quality)}<small>${esc(metaLabel || "Direct MP4 · Full File")}</small></span><b class="icon">↓</b>`;
+    action.innerHTML = `<span>⚡ ONE CLICK DOWNLOAD · ${esc(src.quality)}<small>${esc(metaLabel || "Full File · Verified Chunked")}</small></span><b class="icon">↓</b>`;
 
     if (safeBtn) {
-      safeBtn.hidden = false;
-      safeBtn.dataset.chunkUrl = finalUrl;
-      safeBtn.dataset.chunkFilename = filename;
-      safeBtn.dataset.chunkQuality = src.quality;
+      safeBtn.hidden = true; // Primary ONE CLICK button now uses verified chunked download directly
+    }
+    if (rawLink) {
+      rawLink.hidden = false;
+      rawLink.href = finalUrl;
+      rawLink.setAttribute("download", filename);
     }
   }
 
@@ -190,7 +199,7 @@
         const fname = buildFilename(ep, s);
         const href = decorateMediaUrl(s.url, fname);
         const sub = [s.sizeText || "Full MP4", s.language || "", s.isTrailer ? "Trailer" : ""].filter(Boolean).join(" · ");
-        return `<a class="ms-download-link" href="${esc(href)}" download="${esc(fname)}"><span>Download ${esc(s.quality)}<small>${esc(sub)}</small></span><b>⬇</b></a>`;
+        return `<a class="ms-download-link" href="${esc(href)}" download="${esc(fname)}" data-dl-url="${esc(href)}" data-dl-filename="${esc(fname)}"><span>Download ${esc(s.quality)}<small>${esc(sub)}</small></span><b>⬇</b></a>`;
       })
       .join("");
 
@@ -316,16 +325,24 @@
     return m ? Number(m[1]) : 0;
   }
 
-  async function fetchChunkWithRetry(url, start, end, retries = 3) {
+  async function fetchChunkWithRetry(url, start, end, outerSignal, retries = CHUNK_MAX_RETRIES) {
     let lastErr = null;
     for (let attempt = 0; attempt <= retries; attempt++) {
+      if (outerSignal?.aborted) throw new DOMException("Download cancelled", "AbortError");
+      const timeoutCtrl = new AbortController();
+      const timer = setTimeout(() => timeoutCtrl.abort(new DOMException("Chunk timed out", "TimeoutError")), CHUNK_TIMEOUT_MS);
+      const signal = outerSignal && typeof AbortSignal.any === "function"
+        ? AbortSignal.any([outerSignal, timeoutCtrl.signal])
+        : timeoutCtrl.signal;
       try {
         const res = await fetch(url, {
           headers: { Range: `bytes=${start}-${end}` },
-          cache: "no-store"
+          cache: "no-store",
+          signal
         });
+        clearTimeout(timer);
         if ((res.status === 429 || res.status >= 500) && attempt < retries) {
-          await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
+          await new Promise(r => setTimeout(r, 600 * (attempt + 1)));
           continue;
         }
         if (!res.ok && res.status !== 206) {
@@ -333,57 +350,109 @@
         }
         const ct = (res.headers.get("content-type") || "").toLowerCase();
         if (ct.includes("json") || ct.includes("text/html")) {
-          throw new Error("Server returned a message instead of video");
+          throw new Error("Server returned an error page instead of video");
         }
         const buf = await res.arrayBuffer();
         const total = parseTotalFromContentRange(res.headers.get("content-range")) || Number(res.headers.get("content-length") || 0);
         return { buf, status: res.status, total };
       } catch (err) {
+        clearTimeout(timer);
+        if (outerSignal?.aborted) throw new DOMException("Download cancelled", "AbortError");
         lastErr = err;
         if (attempt >= retries) throw err;
-        await new Promise(r => setTimeout(r, 450 * (attempt + 1)));
+        await new Promise(r => setTimeout(r, 600 * (attempt + 1)));
       }
     }
     throw lastErr || new Error("Chunk download failed");
   }
 
-  async function fetchFullVideoBlobVerified(url, onProgress) {
+  async function tryOpenDirectDiskWriter(filename) {
+    // Only works in top-level browsing context (not cross-origin iframes) on desktop Chromium
+    if (window.self !== window.top || typeof window.showSaveFilePicker !== "function") {
+      return null;
+    }
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName: filename,
+        types: [{ description: "MP4 Video", accept: { "video/mp4": [".mp4"] } }]
+      });
+      return await handle.createWritable();
+    } catch (err) {
+      if (err?.name === "AbortError") throw err; // User cancelled Save dialog
+      return null; // SecurityError or unsupported -> silently fall back to Blob download
+    }
+  }
+
+  async function downloadVerifiedFullFile(url, filename, onProgress, outerSignal) {
+    let writable = null;
+    try {
+      writable = await tryOpenDirectDiskWriter(filename);
+    } catch (err) {
+      if (err?.name === "AbortError") throw err;
+      writable = null;
+    }
+
     let totalBytes = 0;
     try {
-      const headRes = await fetch(url, { method: "HEAD", cache: "no-store" });
-      if (headRes.ok) {
-        totalBytes = Number(headRes.headers.get("content-length") || 0);
+      const headRes = await fetch(url, { method: "HEAD", cache: "no-store", signal: outerSignal });
+      if (headRes.ok) totalBytes = Number(headRes.headers.get("content-length") || 0);
+    } catch (err) {
+      if (err?.name === "AbortError") {
+        await writable?.abort().catch(() => {});
+        throw err;
       }
-    } catch {}
-
-    // If file is unknown or small (< 12 MiB), probe or download in verified chunks
-    const firstEnd = CHUNK_SIZE - 1;
-    const first = await fetchChunkWithRetry(url, 0, firstEnd);
-    const detectedTotal = first.total || totalBytes || first.buf.byteLength;
-
-    if (first.status === 200 && first.buf.byteLength >= detectedTotal) {
-      onProgress?.(first.buf.byteLength, first.buf.byteLength);
-      return new Blob([first.buf], { type: "video/mp4" });
     }
 
-    const chunks = [first.buf];
-    let downloaded = first.buf.byteLength;
-    onProgress?.(downloaded, detectedTotal);
+    const chunks = writable ? null : [];
+    let downloaded = 0;
+    let detectedTotal = totalBytes;
+    const startedAt = Date.now();
+    let emptyRetries = 0;
 
-    while (downloaded < detectedTotal) {
-      const nextEnd = Math.min(detectedTotal - 1, downloaded + CHUNK_SIZE - 1);
-      const part = await fetchChunkWithRetry(url, downloaded, nextEnd);
-      if (!part.buf.byteLength) break;
-      chunks.push(part.buf);
-      downloaded += part.buf.byteLength;
-      onProgress?.(downloaded, detectedTotal);
-      if (part.status === 200) break;
-    }
+    try {
+      while (detectedTotal === 0 || downloaded < detectedTotal) {
+        if (outerSignal?.aborted) throw new DOMException("Download cancelled", "AbortError");
+        const nextEnd = detectedTotal > 0 ? Math.min(detectedTotal - 1, downloaded + CHUNK_SIZE - 1) : downloaded + CHUNK_SIZE - 1;
+        const part = await fetchChunkWithRetry(url, downloaded, nextEnd, outerSignal);
+        if (part.total > 0 && (detectedTotal === 0 || part.total > detectedTotal)) {
+          detectedTotal = part.total;
+        }
+        if (!part.buf.byteLength) {
+          emptyRetries++;
+          if (emptyRetries > 3) break;
+          await new Promise(r => setTimeout(r, 700));
+          continue;
+        }
+        emptyRetries = 0;
+        if (writable) {
+          await writable.write(new Uint8Array(part.buf));
+        } else {
+          chunks.push(part.buf);
+        }
+        downloaded += part.buf.byteLength;
+        const elapsedSec = Math.max(0.25, (Date.now() - startedAt) / 1000);
+        const speedBps = downloaded / elapsedSec;
+        onProgress?.(downloaded, detectedTotal, speedBps);
+        if (part.status === 200 && downloaded >= detectedTotal) break;
+      }
 
-    if (detectedTotal > 0 && downloaded < detectedTotal) {
-      throw new Error(`Incomplete download (${formatBytes(downloaded)} / ${formatBytes(detectedTotal)})`);
+      if (detectedTotal > 0 && downloaded < detectedTotal) {
+        throw new Error(`Incomplete download (${formatBytes(downloaded)} / ${formatBytes(detectedTotal)})`);
+      }
+
+      if (writable) {
+        await writable.close();
+        return { size: downloaded, streamedToDisk: true };
+      }
+
+      const blob = new Blob(chunks, { type: "video/mp4" });
+      chunks.length = 0;
+      triggerBlobSave(blob, filename);
+      return { size: blob.size, streamedToDisk: false };
+    } catch (err) {
+      if (writable) await writable.abort().catch(() => {});
+      throw err;
     }
-    return new Blob(chunks, { type: "video/mp4" });
   }
 
   function triggerBlobSave(blob, filename) {
@@ -394,57 +463,116 @@
     document.body.appendChild(a);
     a.click();
     a.remove();
-    setTimeout(() => URL.revokeObjectURL(u), 120000);
+    setTimeout(() => URL.revokeObjectURL(u), 180000);
   }
 
-  $("#downloadSafeChunked")?.addEventListener("click", async () => {
-    if (busy) return;
-    const btn = $("#downloadSafeChunked");
-    const url = btn?.dataset.chunkUrl;
-    const filename = btn?.dataset.chunkFilename || "MovieStreamBD-Video.mp4";
-    if (!url) return;
-
+  async function startVerifiedSingleDownload(url, filename) {
+    if (busy || !url) return;
     busy = true;
+    activeDownloadAbort = new AbortController();
+
+    const action = $("#downloadAction");
+    const cancelBtn = $("#downloadCancelBtn");
     const progress = $("#zipProgress");
     const bar = $("#zipProgressBar");
     const label = $("#zipProgressText");
     const status = $("#downloadStatus");
-    const origHtml = btn.innerHTML;
+    const origHtml = action.innerHTML;
 
-    btn.disabled = true;
-    btn.innerHTML = '<span>⏳ Verified Full Download চলছে…<small>পেজ বন্ধ করবেন না — chunk verify হচ্ছে</small></span><b class="icon">⟳</b>';
+    action.setAttribute("aria-disabled", "true");
+    action.innerHTML = '<span>⏳ পূর্ণাঙ্গ ডাউনলোড চলছে…<small>অর্ধেক কাটবে না — পেজটি খোলা রাখুন</small></span><b class="icon">⟳</b>';
+    if (cancelBtn) cancelBtn.hidden = false;
     progress.hidden = false;
     bar.style.width = "0%";
     label.textContent = "Connecting to download server…";
+    status.textContent = "ডাউনলোড শুরু হচ্ছে — প্রতিটি অংশ (5 MB chunk) যাচাই করে নামানো হচ্ছে…";
 
     try {
-      const blob = await fetchFullVideoBlobVerified(url, (done, total) => {
-        const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
-        bar.style.width = `${pct}%`;
-        label.textContent = `Downloaded ${formatBytes(done)} / ${formatBytes(total) || "?"} (${pct}%)`;
-      });
+      const res = await downloadVerifiedFullFile(
+        url,
+        filename,
+        (done, total, speedBps) => {
+          const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+          const speedText = speedBps > 0 ? ` · ${formatBytes(speedBps)}/s` : "";
+          bar.style.width = `${pct}%`;
+          label.textContent = `Downloaded ${formatBytes(done)} / ${formatBytes(total) || "?"} (${pct}%)${speedText}`;
+        },
+        activeDownloadAbort.signal
+      );
       bar.style.width = "100%";
-      triggerBlobSave(blob, filename);
-      label.textContent = `Complete: ${formatBytes(blob.size)} saved (${filename})`;
-      status.textContent = `সম্পূর্ণ ফাইল verified হয়ে save শুরু হয়েছে (${formatBytes(blob.size)})।`;
+      label.textContent = `Complete: ${formatBytes(res.size)} (${filename})`;
+      status.textContent = res.streamedToDisk
+        ? `১০০% সম্পূর্ণ ফাইল সেভ হয়েছে (${formatBytes(res.size)})।`
+        : `১০০% সম্পূর্ণ ফাইল যাচাই হয়ে সেভ শুরু হয়েছে (${formatBytes(res.size)})।`;
     } catch (e) {
-      label.textContent = e?.message || "Verified download ব্যর্থ হয়েছে।";
-      status.textContent = `Verified download ব্যর্থ: ${e?.message || "Unknown error"}`;
+      if (e?.name === "AbortError") {
+        label.textContent = "Download cancelled.";
+        status.textContent = "ডাউনলোড বাতিল করা হয়েছে।";
+      } else {
+        label.textContent = e?.message || "Download ব্যর্থ হয়েছে।";
+        status.textContent = `ডাউনলোড ব্যর্থ: ${e?.message || "অন্য Quality চেষ্টা করুন"}`;
+      }
     } finally {
       busy = false;
-      btn.disabled = false;
-      btn.innerHTML = origHtml;
+      activeDownloadAbort = null;
+      if (cancelBtn) cancelBtn.hidden = true;
+      action.setAttribute("aria-disabled", "false");
+      action.innerHTML = origHtml;
     }
+  }
+
+  $("#downloadCancelBtn")?.addEventListener("click", () => {
+    activeDownloadAbort?.abort();
   });
 
-  async function fetchEpisode(subjectId, item, index) {
+  $("#downloadAction").addEventListener("click", e => {
+    e.preventDefault();
+    const action = $("#downloadAction");
+    if (action.getAttribute("aria-disabled") === "true") return;
+    const url = action.dataset.dlUrl || action.getAttribute("href");
+    const filename = action.dataset.dlFilename || action.getAttribute("download") || "MovieStreamBD-Video.mp4";
+    startVerifiedSingleDownload(url, filename);
+  });
+
+  $("#downloadLinks").addEventListener("click", e => {
+    const link = e.target.closest(".ms-download-link");
+    if (!link) return;
+    e.preventDefault();
+    const url = link.dataset.dlUrl || link.getAttribute("href");
+    const filename = link.dataset.dlFilename || link.getAttribute("download") || "MovieStreamBD-Video.mp4";
+    startVerifiedSingleDownload(url, filename);
+  });
+
+  async function fetchEpisodeBlobOnly(item, index) {
     let last = "No downloadable MP4 source";
     await loadStreamSources(index);
     const coords = episodeCoords(item, index)[0] || { se: 0, ep: index + 1 };
     const candidates = getSources(item).filter(s => s.url);
     for (const source of candidates) {
       try {
-        const blob = await fetchFullVideoBlobVerified(source.url);
+        const chunks = [];
+        let downloaded = 0;
+        let detectedTotal = 0;
+        let emptyRetries = 0;
+        while (detectedTotal === 0 || downloaded < detectedTotal) {
+          const nextEnd = detectedTotal > 0 ? Math.min(detectedTotal - 1, downloaded + CHUNK_SIZE - 1) : downloaded + CHUNK_SIZE - 1;
+          const part = await fetchChunkWithRetry(source.url, downloaded, nextEnd, null);
+          if (part.total > 0 && (detectedTotal === 0 || part.total > detectedTotal)) detectedTotal = part.total;
+          if (!part.buf.byteLength) {
+            emptyRetries++;
+            if (emptyRetries > 3) break;
+            continue;
+          }
+          emptyRetries = 0;
+          chunks.push(part.buf);
+          downloaded += part.buf.byteLength;
+          if (part.status === 200 && downloaded >= detectedTotal) break;
+        }
+        if (detectedTotal > 0 && downloaded < detectedTotal) {
+          last = `Incomplete episode (${formatBytes(downloaded)} / ${formatBytes(detectedTotal)})`;
+          continue;
+        }
+        const blob = new Blob(chunks, { type: "video/mp4" });
         if (!blob.size) {
           last = "Empty video file";
           continue;
@@ -483,7 +611,7 @@
         const item = episodes[i];
         label.textContent = `Episode ${i + 1} / ${episodes.length} সংগ্রহ হচ্ছে…`;
         try {
-          const result = await fetchEpisode(subjectId, item, i);
+          const result = await fetchEpisodeBlobOnly(item, i);
           const seasonNum = Number(item.seasonNumber ?? result.coords.se ?? 1) || 1;
           const season = `Season ${String(seasonNum).padStart(2, "0")}`;
           const epNo = String(item.episodeNumber || item.number || i + 1).padStart(2, "0");
@@ -514,10 +642,6 @@
       btn.disabled = false;
       btn.textContent = "📦 DOWNLOAD FULL DRAMA ZIP";
     }
-  });
-
-  $("#downloadAction").addEventListener("click", e => {
-    if ($("#downloadAction").getAttribute("aria-disabled") === "true") e.preventDefault();
   });
 
   async function load() {

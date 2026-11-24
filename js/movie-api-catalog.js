@@ -124,7 +124,12 @@
   "/top-rated":"IMDb Top Rated",
   "/recently-updated":"Recently Updated",
   "/new":"Recently Added",
-  "/mostwatch/7d":"Trending Now"
+  "/mostwatch/7d":"Trending Now",
+  "/adult18plus":"Midnight (18+)",
+  "/midnight":"Midnight (18+)",
+  "/genre/adult":"Adult",
+  "/genre/erotic":"Erotic",
+  "/genre/hot":"Hot (18+)"
  };
  function groupOf(item){
   const sections=(item._sections||[]).map(norm),type=norm(item.typeBadge||item.type),country=norm(item.country);

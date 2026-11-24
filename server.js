@@ -335,7 +335,7 @@ function buildDownloadDisposition(rawName) {
   return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(withExt)}`;
 }
 
-async function fetchMediaWithRetry(targetUrl, method, headers, clientAbortSignal, retries = 3, connectTimeoutMs = 30000) {
+async function fetchMediaWithRetry(targetUrl, method, headers, clientAbortSignal, retries = 4, connectTimeoutMs = 30000) {
   let lastError = null;
   for (let attempt = 0; attempt <= retries; attempt++) {
     if (clientAbortSignal?.aborted) {
@@ -360,7 +360,7 @@ async function fetchMediaWithRetry(targetUrl, method, headers, clientAbortSignal
         try {
           await upstream.body?.cancel();
         } catch {}
-        await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
+        await new Promise(r => setTimeout(r, 450 * (attempt + 1)));
         continue;
       }
       return upstream;
@@ -368,7 +368,7 @@ async function fetchMediaWithRetry(targetUrl, method, headers, clientAbortSignal
       clearTimeout(timer);
       lastError = err;
       if (clientAbortSignal?.aborted || attempt >= retries) throw err;
-      await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
+      await new Promise(r => setTimeout(r, 450 * (attempt + 1)));
     }
   }
   throw lastError || new Error("Media upstream unavailable");
@@ -397,16 +397,15 @@ async function proxyMediaStream(req, res, targetUrl, extraHeaders = {}, forceDow
   if (req.get("if-range")) headers.set("if-range", req.get("if-range"));
 
   const abortController = new AbortController();
-  const onReqClose = () => {
+  res.on("close", () => {
     if (!res.writableFinished) {
       abortController.abort();
     }
-  };
-  req.on("close", onReqClose);
+  });
 
   let upstream;
   try {
-    upstream = await fetchMediaWithRetry(targetUrl, req.method, headers, abortController.signal, 3, 30000);
+    upstream = await fetchMediaWithRetry(targetUrl, req.method, headers, abortController.signal, 4, 30000);
     if (upstream.status === 403 && extraHeaders.Referer === MOVIEBOX_PLAYER_REFERER) {
       try {
         await upstream.body?.cancel();
@@ -422,7 +421,6 @@ async function proxyMediaStream(req, res, targetUrl, extraHeaders = {}, forceDow
       }
     }
   } catch (err) {
-    req.off("close", onReqClose);
     if (abortController.signal.aborted) {
       if (!res.headersSent) res.status(499).end();
       return;
@@ -431,7 +429,6 @@ async function proxyMediaStream(req, res, targetUrl, extraHeaders = {}, forceDow
   }
 
   if (!upstream.ok && upstream.status !== 206) {
-    req.off("close", onReqClose);
     const errContentRange = upstream.headers.get("content-range");
     if (errContentRange) res.setHeader("content-range", errContentRange);
     return res.status(upstream.status).type("text/plain").send("Media upstream unavailable");
@@ -468,12 +465,10 @@ async function proxyMediaStream(req, res, targetUrl, extraHeaders = {}, forceDow
   res.status(upstream.status);
 
   if (req.method === "HEAD" || !upstream.body) {
-    req.off("close", onReqClose);
     return res.end();
   }
   const nodeStream = Readable.fromWeb(upstream.body);
   res.on("close", () => {
-    req.off("close", onReqClose);
     if (!res.writableFinished) {
       abortController.abort();
       try {
@@ -481,11 +476,7 @@ async function proxyMediaStream(req, res, targetUrl, extraHeaders = {}, forceDow
       } catch {}
     }
   });
-  res.on("finish", () => {
-    req.off("close", onReqClose);
-  });
   nodeStream.on("error", () => {
-    req.off("close", onReqClose);
     if (!res.headersSent) res.status(502).end();
     else res.end();
   });
@@ -647,14 +638,25 @@ app.use(
   })
 );
 
+const configureServer = srv => {
+  srv.requestTimeout = 0;
+  srv.headersTimeout = 60000;
+  srv.keepAliveTimeout = 65000;
+  return srv;
+};
+
 if (IS_PORT_NUMBER) {
-  app.listen(PORT, HOST, () => {
-    console.log(`MovieStream BD server listening on http://${HOST}:${PORT}`);
-    console.log("Primary upstream: MovieBox Direct API (https://h5-api.aoneroom.com)");
-  });
+  configureServer(
+    app.listen(PORT, HOST, () => {
+      console.log(`MovieStream BD server listening on http://${HOST}:${PORT}`);
+      console.log("Primary upstream: MovieBox Direct API (https://h5-api.aoneroom.com)");
+    })
+  );
 } else {
-  app.listen(PORT, () => {
-    console.log(`MovieStream BD server listening on socket/pipe ${PORT}`);
-    console.log("Primary upstream: MovieBox Direct API (https://h5-api.aoneroom.com)");
-  });
+  configureServer(
+    app.listen(PORT, () => {
+      console.log(`MovieStream BD server listening on socket/pipe ${PORT}`);
+      console.log("Primary upstream: MovieBox Direct API (https://h5-api.aoneroom.com)");
+    })
+  );
 }

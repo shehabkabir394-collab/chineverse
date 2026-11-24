@@ -14,12 +14,12 @@
     gtag('config', 'G-VK18GBQVWP');
   </script>
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
-  <link rel="stylesheet" href="css/style.css?v=20261124-90hz-5">
-  <link rel="stylesheet" href="css/movie-api.css?v=20261124-90hz-5">
-  <link rel="stylesheet" href="css/watch-enhancements.css?v=20261124-90hz-5">
-  <link rel="stylesheet" href="css/cineverse-app-redesign.css?v=20261124-90hz-5">
-  <link rel="stylesheet" href="css/movie-api-account.css?v=20261124-90hz-5">
-  <link rel="stylesheet" href="css/liquid-glass-theme.css?v=20261124-90hz-5">
+  <link rel="stylesheet" href="css/style.css?v=20261124-90hz-6">
+  <link rel="stylesheet" href="css/movie-api.css?v=20261124-90hz-6">
+  <link rel="stylesheet" href="css/watch-enhancements.css?v=20261124-90hz-6">
+  <link rel="stylesheet" href="css/cineverse-app-redesign.css?v=20261124-90hz-6">
+  <link rel="stylesheet" href="css/movie-api-account.css?v=20261124-90hz-6">
+  <link rel="stylesheet" href="css/liquid-glass-theme.css?v=20261124-90hz-6">
   <style>
     .ms-download-page{max-width:920px;margin:0 auto;padding:6px 0 36px}
     .ms-download-brand{display:flex;justify-content:center;margin:8px 0 18px}
@@ -55,9 +55,9 @@
     @media(max-width:480px){.ms-download-poster{width:72px}.ms-download-card{border-radius:16px}.ms-download-meta span{font-size:11px;padding:7px 9px}}
   </style>
   <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script defer src="js/movie-api-download.js?v=20261124-90hz-5"></script>
-  <script defer src="js/movie-api-discovery.js?v=20261124-90hz-5"></script>
-  <script defer src="js/movie-api-account.js?v=20261124-90hz-5"></script>
+  <script defer src="js/movie-api-download.js?v=20261124-90hz-6"></script>
+  <script defer src="js/movie-api-discovery.js?v=20261124-90hz-6"></script>
+  <script defer src="js/movie-api-account.js?v=20261124-90hz-6"></script>
 </head>
 <body class="cv-home-body ms-watch-page">
   <header class="cv-topbar">
@@ -126,6 +126,10 @@
           <div id="downloadStatus" class="ms-download-status" aria-live="polite">Checking available download sources…</div>
           <a id="downloadAction" class="ms-download-action" href="#" aria-disabled="true"><span>ONE CLICK DOWNLOAD<small>Direct MP4 · Selected quality</small></span><b class="icon">↓</b></a>
           <button id="downloadSafeChunked" class="ms-download-action zip" type="button" hidden style="margin-top:0"><span>🛡 VERIFIED FULL DOWNLOAD<small>অর্ধেক আটকালে এটি চাপুন — ১০০% পূর্ণ ফাইল ডাউনলোড</small></span><b class="icon">✓</b></button>
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+            <a id="downloadDirectRaw" href="#" hidden style="color:#94a3b8;font-size:12px;text-decoration:underline">Copy / Direct Server Link (IDM / ADM)</a>
+            <button id="downloadCancelBtn" type="button" hidden style="padding:7px 14px;border-radius:10px;border:1px solid rgba(248,113,113,.45);background:rgba(248,113,113,.15);color:#fecaca;font-size:12px;font-weight:700;cursor:pointer">Cancel Download</button>
+          </div>
         </div>
         <section id="downloadEpisodeSection" class="ms-episode-section" hidden>
           <div class="section-head"><div><p class="eyebrow">SEASON &amp; EPISODE GUIDE</p><h2>Episodes <em id="downloadEpisodeCount"></em></h2></div></div>
@@ -136,7 +140,7 @@
         <button id="downloadZip" class="ms-download-action zip" type="button" hidden>DOWNLOAD FULL DRAMA ZIP</button>
         <div id="zipProgress" hidden>
           <div class="ms-download-progress"><i id="zipProgressBar"></i></div>
-          <div id="zipProgressText" class="ms-download-quality">Preparing ZIP…</div>
+          <div id="zipProgressText" class="ms-download-quality">Preparing download…</div>
         </div>
         <div class="ms-download-note">শুধু API থেকে পাওয়া অনুমোদিত সরাসরি MP4 source-ই এখানে দেখানো হবে। HLS/streaming-only link-কে MP4 download হিসেবে দেখানো হবে না। Full Drama ZIP-এ যেসব Episode পাওয়া যাবে সেগুলো যুক্ত হবে; কোনোটি ব্যর্থ হলে ZIP-এর ভিতরে report থাকবে।</div>
       </section>

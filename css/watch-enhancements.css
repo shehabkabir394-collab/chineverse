@@ -21,9 +21,8 @@
 /* Premium MovieBox-inspired playback interface */
 .ms-watch-player .cv-player{position:relative;isolation:isolate;background:#000;border:1px solid #ffffff18;box-shadow:0 18px 55px #0008;overflow:hidden}
 .ms-watch-player .cv-player video{width:100%;height:auto;max-height:78vh;aspect-ratio:16/9;object-fit:contain;background:#000;display:block}
-.ms-watch-player .cv-controls{opacity:0;transform:translateY(8px);transition:opacity .22s ease,transform .22s ease;pointer-events:none;padding:58px 16px 14px;background:linear-gradient(transparent,#05070de8);z-index:5}
-.ms-watch-player .cv-player.cv-ui-visible .cv-controls,
-.ms-watch-player .cv-player:focus-within .cv-controls{opacity:1;transform:none;pointer-events:auto}
+.ms-watch-player .cv-controls{opacity:0;transform:translateY(6px);transition:opacity .16s ease,transform .16s ease;pointer-events:none;padding:18px 14px 8px;background:linear-gradient(transparent,#05070dd9);z-index:5}
+.ms-watch-player .cv-player.cv-ui-visible .cv-controls{opacity:1;transform:none;pointer-events:auto}
 .ms-watch-player .cv-progress{height:22px}
 .ms-watch-player .cv-seek{height:5px;accent-color:#22c8ff;filter:drop-shadow(0 0 5px #22c8ff66)}
 .ms-watch-player .cv-control-row{gap:9px}
@@ -195,7 +194,7 @@
   border-radius: 0 !important;
 }
 
-/* Player top bar: hide redundant back button inline (shown only in fullscreen); keep title & selectors spacious */
+/* Player top bar: slim edge bar, hidden by default during playback, shown 1.7s on tap */
 .ms-watch-player .cv-player .cv-topbar {
   position: absolute !important;
   z-index: 12 !important;
@@ -204,18 +203,17 @@
   top: 0 !important;
   display: flex !important;
   align-items: center !important;
-  gap: 10px !important;
-  min-height: 52px !important;
-  padding: 8px 14px !important;
-  background: linear-gradient(180deg, rgba(0, 0, 0, 0.78) 0%, transparent 100%) !important;
+  gap: 8px !important;
+  min-height: 36px !important;
+  padding: 5px 12px !important;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.68) 0%, rgba(0, 0, 0, 0.22) 68%, transparent 100%) !important;
   color: #fff !important;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 160ms ease;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  transition: opacity 150ms ease;
 }
 
-.ms-watch-player .cv-player.cv-ui-visible .cv-topbar,
-.ms-watch-player .cv-player:focus-within .cv-topbar {
+.ms-watch-player .cv-player.cv-ui-visible .cv-topbar {
   opacity: 1 !important;
   pointer-events: auto !important;
 }
@@ -261,21 +259,29 @@
 }
 
 .ms-watch-player .cv-player .cv-top-right select,
-.ms-watch-player .cv-player .cv-audio-choice select {
+.ms-watch-player .cv-player .cv-audio-choice select,
+.ms-watch-player .cv-player .cv-top-right .cv-top-pill {
   width: auto !important;
-  max-width: clamp(78px, 22vw, 150px) !important;
+  max-width: clamp(78px, 24vw, 150px) !important;
   min-width: 0 !important;
-  height: 30px !important;
-  border: 1px solid rgba(255, 255, 255, 0.2) !important;
-  border-radius: 7px !important;
-  background: rgba(11, 13, 18, 0.72) !important;
+  height: 26px !important;
+  border: 1px solid rgba(255, 255, 255, 0.22) !important;
+  border-radius: 6px !important;
+  background: rgba(11, 13, 18, 0.78) !important;
   color: #fff !important;
   padding: 0 8px !important;
-  font-size: 11.5px !important;
+  font-size: 11px !important;
   font-weight: 600 !important;
   letter-spacing: 0.01em !important;
   white-space: nowrap !important;
+  overflow: hidden !important;
   text-overflow: ellipsis !important;
+  cursor: pointer;
+}
+
+.ms-watch-player .cv-player .cv-top-right .cv-top-pill:hover {
+  border-color: rgba(248, 113, 113, 0.7) !important;
+  background: rgba(24, 18, 28, 0.9) !important;
 }
 
 .ms-watch-player .cv-player .cv-top-right option {
@@ -283,14 +289,79 @@
   color: #fff;
 }
 
-/* Center Play + Symmetric -10/+10 Skip Cluster (kept clear of edge Lock button) */
+.ms-watch-player .cv-player .cv-top-menu {
+  position: absolute !important;
+  z-index: 25 !important;
+  top: 38px !important;
+  right: 10px !important;
+  min-width: 148px !important;
+  max-width: min(210px, calc(100% - 20px)) !important;
+  max-height: calc(100% - 80px) !important;
+  overflow-y: auto !important;
+  padding: 6px !important;
+  border-radius: 12px !important;
+  background: rgba(10, 14, 24, 0.95) !important;
+  border: 1px solid rgba(248, 180, 188, 0.24) !important;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.72) !important;
+  display: grid !important;
+  gap: 3px !important;
+}
+
+.ms-watch-player .cv-player .cv-top-menu[hidden] {
+  display: none !important;
+}
+
+.ms-watch-player .cv-player .cv-top-menu-head {
+  padding: 3px 8px 5px !important;
+  font-size: 10.5px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.04em !important;
+  text-transform: uppercase !important;
+  color: #98a2b3 !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+  margin-bottom: 2px !important;
+}
+
+.ms-watch-player .cv-player .cv-top-menu-item {
+  width: 100% !important;
+  min-height: 30px !important;
+  padding: 4px 9px !important;
+  border: 0 !important;
+  border-radius: 8px !important;
+  background: transparent !important;
+  color: #eef2f8 !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 10px !important;
+  text-align: left !important;
+  cursor: pointer;
+}
+
+.ms-watch-player .cv-player .cv-top-menu-item:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+}
+
+.ms-watch-player .cv-player .cv-top-menu-item.active {
+  background: rgba(239, 68, 68, 0.22) !important;
+  color: #fecaca !important;
+}
+
+.ms-watch-player .cv-player .cv-top-menu-item b {
+  color: #f87171 !important;
+  font-size: 12px !important;
+}
+
+/* Center Play/Pause + Symmetric -10/+10 Skip Cluster (kept clear of edge Lock button) */
 .ms-watch-player .cv-player .cv-center-play {
   position: absolute !important;
   left: 50% !important;
   top: 50% !important;
   transform: translate(-50%, -50%) scale(0.94) !important;
-  width: 60px !important;
-  height: 60px !important;
+  width: 54px !important;
+  height: 54px !important;
   border-radius: 50% !important;
   border: 1px solid rgba(255, 255, 255, 0.34) !important;
   background: rgba(11, 13, 18, 0.74) !important;
@@ -302,8 +373,10 @@
   pointer-events: none;
   box-shadow: 0 8px 26px rgba(0, 0, 0, 0.5) !important;
   backdrop-filter: none !important;
+  transition: opacity 150ms ease, transform 150ms ease;
 }
 
+.ms-watch-player .cv-player.cv-ui-visible .cv-center-play,
 .ms-watch-player .cv-player .cv-center-play.visible {
   opacity: 1 !important;
   pointer-events: auto !important;
@@ -311,8 +384,9 @@
 }
 
 .ms-watch-player .cv-player .cv-center-play span {
-  font-size: 22px !important;
-  margin-left: 3px !important;
+  font-size: 19px !important;
+  margin-left: 2px !important;
+  line-height: 1 !important;
 }
 
 .ms-watch-player .cv-player .cv-mid-skip {
@@ -369,29 +443,30 @@
   font-weight: 800 !important;
 }
 
-/* Lock Button pinned safely to far-left margin (zero collision with -10s) */
+/* Lock Button pinned safely to far-left margin (zero collision with -10s), auto-hides too */
 .ms-watch-player .cv-player .cv-lock {
   position: absolute !important;
   z-index: 14 !important;
   left: 10px !important;
   top: 50% !important;
   transform: translateY(-50%) !important;
-  width: 38px !important;
-  height: 38px !important;
+  width: 34px !important;
+  height: 34px !important;
   border: 1px solid rgba(255, 255, 255, 0.22) !important;
   border-radius: 50% !important;
-  background: rgba(11, 13, 18, 0.72) !important;
+  background: rgba(11, 13, 18, 0.68) !important;
   color: #fff !important;
-  font-size: 16px !important;
+  font-size: 14px !important;
   display: grid !important;
   place-items: center !important;
   cursor: pointer;
-  opacity: 0;
-  pointer-events: none;
+  opacity: 0 !important;
+  pointer-events: none !important;
   transition: opacity 150ms ease;
 }
 
-.ms-watch-player .cv-player.cv-ui-visible .cv-lock {
+.ms-watch-player .cv-player.cv-ui-visible .cv-lock,
+.ms-watch-player .cv-player.cv-locked.cv-ui-visible .cv-lock {
   opacity: 1 !important;
   pointer-events: auto !important;
 }
@@ -404,12 +479,7 @@
   pointer-events: none !important;
 }
 
-.ms-watch-player .cv-player.cv-locked .cv-lock {
-  opacity: 1 !important;
-  pointer-events: auto !important;
-}
-
-/* Bottom Controls: Seek bar + single horizontal flex row (Play, Time, Mute, Vol, Settings, PiP, Full) */
+/* Bottom Controls: Slim seek bar + compact single horizontal flex row */
 .ms-watch-player .cv-player .cv-controls {
   position: absolute !important;
   left: 0 !important;
@@ -419,30 +489,30 @@
   z-index: 11 !important;
   width: 100% !important;
   box-sizing: border-box !important;
-  padding: 28px 12px 10px !important;
+  padding: 14px 12px 6px !important;
   margin: 0 !important;
-  background: linear-gradient(180deg, transparent 0%, rgba(0, 0, 0, 0.78) 45%, rgba(0, 0, 0, 0.94) 100%) !important;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 160ms ease;
+  background: linear-gradient(180deg, transparent 0%, rgba(0, 0, 0, 0.56) 44%, rgba(0, 0, 0, 0.88) 100%) !important;
+  opacity: 0 !important;
+  transform: none !important;
+  pointer-events: none !important;
+  transition: opacity 150ms ease;
 }
 
-.ms-watch-player .cv-player.cv-ui-visible .cv-controls,
-.ms-watch-player .cv-player:focus-within .cv-controls {
+.ms-watch-player .cv-player.cv-ui-visible .cv-controls {
   opacity: 1 !important;
   pointer-events: auto !important;
 }
 
 .ms-watch-player .cv-player .cv-progress {
-  height: 18px !important;
-  margin: 0 0 4px !important;
+  height: 13px !important;
+  margin: 0 0 2px !important;
   display: flex;
   align-items: center;
 }
 
 .ms-watch-player .cv-player .cv-seek {
   width: 100%;
-  height: 5px !important;
+  height: 4px !important;
   accent-color: #ef4444 !important;
   filter: none !important;
   cursor: pointer;
@@ -452,7 +522,7 @@
   display: flex !important;
   flex-wrap: nowrap !important;
   align-items: center !important;
-  gap: 8px !important;
+  gap: 6px !important;
   width: 100% !important;
   min-width: 0 !important;
 }
@@ -461,15 +531,15 @@
   border: 0 !important;
   background: transparent !important;
   color: #fff !important;
-  width: 34px !important;
-  min-width: 34px !important;
-  height: 34px !important;
-  min-height: 34px !important;
+  width: 30px !important;
+  min-width: 30px !important;
+  height: 30px !important;
+  min-height: 30px !important;
   padding: 0 !important;
-  border-radius: 8px !important;
+  border-radius: 7px !important;
   display: inline-grid !important;
   place-items: center !important;
-  font-size: 17px !important;
+  font-size: 15px !important;
   line-height: 1 !important;
   flex-shrink: 0 !important;
   cursor: pointer;
@@ -581,98 +651,100 @@
   backdrop-filter: none !important;
 }
 
-@media (max-width: 600px) {
+@media (max-width: 640px) {
   .ms-watch-player .cv-player {
     width: 100% !important;
     max-width: 100% !important;
   }
   .ms-watch-player .cv-player .cv-topbar {
-    min-height: 40px !important;
-    padding: 6px 10px !important;
-    gap: 6px !important;
-  }
-  .ms-watch-player .cv-player .cv-title {
-    font-size: 11.5px !important;
-  }
-  .ms-watch-player .cv-player .cv-top-right {
+    min-height: 30px !important;
+    padding: 3px 8px !important;
     gap: 5px !important;
   }
+  .ms-watch-player .cv-player .cv-title {
+    font-size: 11px !important;
+  }
+  .ms-watch-player .cv-player .cv-top-right {
+    gap: 4px !important;
+  }
   .ms-watch-player .cv-player .cv-top-right select,
-  .ms-watch-player .cv-player .cv-audio-choice select {
+  .ms-watch-player .cv-player .cv-audio-choice select,
+  .ms-watch-player .cv-player .cv-top-right .cv-top-pill {
     max-width: 96px !important;
-    height: 27px !important;
+    height: 23px !important;
     padding: 0 6px !important;
-    font-size: 10.5px !important;
+    font-size: 10px !important;
+    border-radius: 6px !important;
+  }
+  .ms-watch-player .cv-player .cv-top-menu {
+    top: 32px !important;
+    right: 6px !important;
+    min-width: 132px !important;
+    max-height: calc(100% - 66px) !important;
   }
   .ms-watch-player .cv-player .cv-controls {
-    padding: 24px 8px 7px !important;
+    padding: 10px 8px 4px !important;
   }
   .ms-watch-player .cv-player .cv-progress {
-    height: 15px !important;
-    margin: 0 0 3px !important;
+    height: 11px !important;
+    margin: 0 0 1px !important;
+  }
+  .ms-watch-player .cv-player .cv-seek {
+    height: 3.5px !important;
   }
   .ms-watch-player .cv-player .cv-control-row {
-    gap: 3px !important;
+    gap: 2px !important;
   }
   .ms-watch-player .cv-player .cv-control-row button {
-    width: 28px !important;
-    min-width: 28px !important;
-    height: 28px !important;
-    min-height: 28px !important;
-    font-size: 14px !important;
+    width: 26px !important;
+    min-width: 26px !important;
+    height: 26px !important;
+    min-height: 26px !important;
+    font-size: 13px !important;
   }
   .ms-watch-player .cv-player .cv-control-row .cv-mute {
-    width: 28px !important;
-    min-width: 28px !important;
-    height: 28px !important;
-    font-size: 15px !important;
+    width: 26px !important;
+    min-width: 26px !important;
+    height: 26px !important;
+    font-size: 14px !important;
   }
   .ms-watch-player .cv-player .cv-control-row .cv-settings {
-    font-size: 15px !important;
+    font-size: 14px !important;
   }
   .ms-watch-player .cv-player .cv-control-row .cv-time {
-    font-size: 10.5px !important;
+    font-size: 10px !important;
     padding: 0 2px !important;
   }
   .ms-watch-player .cv-player .cv-control-row .cv-volume {
-    flex: 0 1 46px !important;
-    width: 46px !important;
-    min-width: 38px !important;
-    height: 20px !important;
+    display: none !important;
   }
   .ms-watch-player .cv-player .cv-center-play {
-    width: 46px !important;
-    height: 46px !important;
+    width: 44px !important;
+    height: 44px !important;
   }
   .ms-watch-player .cv-player .cv-center-play span {
-    font-size: 18px !important;
+    font-size: 17px !important;
   }
   .ms-watch-player .cv-player .cv-mid-skip {
-    gap: clamp(78px, 24vw, 130px) !important;
+    gap: clamp(72px, 22vw, 118px) !important;
   }
   .ms-watch-player .cv-player .cv-mid-skip button {
-    width: 36px !important;
-    height: 36px !important;
-    min-width: 36px !important;
+    width: 34px !important;
+    height: 34px !important;
+    min-width: 34px !important;
   }
   .ms-watch-player .cv-player .cv-mid-skip button span {
-    font-size: 16px !important;
-    line-height: 14px !important;
+    font-size: 15px !important;
+    line-height: 13px !important;
   }
   .ms-watch-player .cv-player .cv-mid-skip button small {
-    font-size: 8.5px !important;
+    font-size: 8px !important;
   }
   .ms-watch-player .cv-player .cv-lock {
     left: 8px !important;
-    width: 32px !important;
-    height: 32px !important;
-    font-size: 14px !important;
-  }
-}
-
-@media (max-width: 355px) {
-  .ms-watch-player .cv-player .cv-control-row .cv-volume {
-    display: none !important;
+    width: 30px !important;
+    height: 30px !important;
+    font-size: 13px !important;
   }
 }
 

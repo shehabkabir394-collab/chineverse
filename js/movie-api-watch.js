@@ -449,12 +449,17 @@
       } else {
         walkStream(streamRoot);
       }
+      const normQ = raw => {
+        const s = String(raw || "Auto").trim();
+        const m = /^(\d{3,4})\s*p?$/i.exec(s);
+        return m ? `${m[1]}p` : s || "Auto";
+      };
       let sources = [...new Map(sourceObjects.map(s => {
         const url = s.url || s.playUrl || s.play_url || s.src || s.file || s.videoUrl || s.video_url || s.streamUrl || s.stream_url || s.downloadUrl || s.download_url || s.m3u8 || s.mp4 || s.proxyUrl || s.proxy_url;
         const mime = s.type || s.mime || s.mimeType || (/\.m3u8(?:$|[?#])/i.test(url) ? "application/vnd.apple.mpegurl" : "video/mp4");
         return [url, {
           url,
-          quality: String(s.quality || s.resolution || s.label || s.name || "Auto"),
+          quality: normQ(s.quality || s.resolution || s.label || s.name || "Auto"),
           provider: s.provider || s.source || "MovieBox Direct",
           format: String(s.format || ""),
           mime,
@@ -532,9 +537,10 @@
 
       root.querySelector(".cv-stage-fallback")?.remove();
       if (streamMsg) {
+        const uniqueQ = [...new Set(sources.map(s => s.quality))];
         streamMsg.textContent = streamRoot?.isTrailer
           ? "Upcoming title · Playing Official Trailer"
-          : `${sources.map(s => s.quality).join(" · ")}${subtitles.length ? ` · ${subtitles.length} subtitles` : ""}`;
+          : `${uniqueQ.join(" · ")}${subtitles.length ? ` · ${subtitles.length} subtitles` : ""}`;
       }
 
       const historyMeta = {
@@ -847,20 +853,17 @@
                 </div>
               </div>
 
-              <div class="cv-utility-strip" aria-label="Player sound boost, subtitles and quality">
+              <div class="cv-utility-strip" aria-label="Player sound boost, subtitles, quality and actions">
                 <button type="button" id="cvUtilBoost" class="cv-util-pill"><span aria-hidden="true">🔊</span> Sound Boost: 100%</button>
                 <button type="button" id="cvUtilSub" class="cv-util-pill">Subtitles (CC)</button>
                 <button type="button" id="cvUtilQual" class="cv-util-pill">Auto</button>
-              </div>
-
-              <div class="cv-watch-actions-row">
-                <button type="button" id="cvWatchActionList" class="cv-action-btn"></button>
-                <button type="button" id="cvWatchActionShare" class="cv-action-btn">
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+                <button type="button" id="cvWatchActionList" class="cv-util-pill"></button>
+                <button type="button" id="cvWatchActionShare" class="cv-util-pill">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
                   <span>Share</span>
                 </button>
-                <a id="movieWatchDownload" class="cv-action-btn" href="download.html?path=${encodeURIComponent(path)}&title=${encodeURIComponent(d.title || "")}&episode=0">
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                <a id="movieWatchDownload" class="cv-util-pill" href="download.html?path=${encodeURIComponent(path)}&title=${encodeURIComponent(d.title || "")}&episode=0">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                   <span>Download</span>
                 </a>
               </div>
