@@ -476,7 +476,7 @@
             "position:absolute;inset:0;z-index:20;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:20px;text-align:center;background:rgba(11,13,16,.88);color:#f3f4f6;";
           box.innerHTML = `<div style="max-width:460px;font-size:14px;line-height:1.5">${esc(errText)}</div>
             <div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:center">
-              <button type="button" data-retry-stream class="cv-action-btn" style="background:#e50914;border-color:#e50914;color:#fff;cursor:pointer">↻ Retry Stream</button>
+              <button type="button" data-retry-stream class="cv-action-btn" style="background:var(--cv-red,#f87171);border-color:var(--cv-red,#f87171);color:#fff;cursor:pointer">↻ Retry Stream</button>
               ${altDub ? `<button type="button" data-switch-alt-dub class="cv-action-btn" style="cursor:pointer">Switch to ${esc(altDub.language || altDub.lanName || "Original Audio")}</button>` : ""}
             </div>`;
           box.querySelector("[data-retry-stream]")?.addEventListener("click", () => {
@@ -580,7 +580,7 @@
           box.style.cssText =
             "position:absolute;inset:0;z-index:20;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:20px;text-align:center;background:rgba(11,13,16,.88);color:#f3f4f6;";
           box.innerHTML = `<div style="max-width:460px;font-size:14px;line-height:1.5">${esc(msg)}</div>
-            <button type="button" data-retry-stream class="cv-action-btn" style="background:#e50914;border-color:#e50914;color:#fff;cursor:pointer">↻ Retry Stream</button>`;
+            <button type="button" data-retry-stream class="cv-action-btn" style="background:var(--cv-red,#f87171);border-color:var(--cv-red,#f87171);color:#fff;cursor:pointer">↻ Retry Stream</button>`;
           box.querySelector("[data-retry-stream]")?.addEventListener("click", () => {
             box.remove();
             playEpisode(idx, { ...opts, retryCount: 0 });
@@ -681,20 +681,28 @@
       try {
         const hr = await fetch("/api/movie-api/home");
         const hd = await hr.json();
-        items = [...(hd?.trending || []), ...(hd?.sections?.[0]?.items || [])];
+        items = [...(hd?.curated?.hindiMovies || []), ...(hd?.curated?.hindiSeries || []), ...(hd?.trending || [])];
       } catch {}
     }
 
-    const usable = items.filter(x => x?.path && x.path !== path).slice(0, 12);
+    const parseTs = x => {
+      const raw = x?.releaseDate || (x?.year && /^\d{4}$/.test(String(x.year)) ? `${x.year}-01-01` : "");
+      const t = Date.parse(String(raw || ""));
+      return Number.isFinite(t) && t > 0 ? t : 0;
+    };
+    const usable = items
+      .filter(x => x?.path && x.path !== path)
+      .sort((a, b) => parseTs(b) - parseTs(a) || (Number(b.views) || 0) - (Number(a.views) || 0))
+      .slice(0, 12);
     if (!usable.length) {
-      grid.innerHTML = `<div class="cv-status-banner">No related recommendations available.</div>`;
+      grid.innerHTML = `<div class="cv-status-banner">No Hindi-dubbed recommendations available.</div>`;
       return;
     }
 
     grid.innerHTML = usable
       .map(x => {
         const poster = safeImg(posterOf(x));
-        const lang = String(x.language || x.typeBadge || "").split("·")[0].trim();
+        const lang = x._hindiCatalog || x.isHindiDubbed ? "Hindi Dubbed" : String(x.language || x.typeBadge || "").split("·")[0].trim();
         const rate = x.rating && Number(x.rating) > 0 ? `★ ${esc(x.rating)}` : "";
         return `
           <a class="cv-card" href="watch.html?path=${encodeURIComponent(x.path)}&title=${encodeURIComponent(x.title || "")}">

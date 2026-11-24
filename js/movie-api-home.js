@@ -1,6 +1,7 @@
 (() => {
   "use strict";
   const $ = s => document.querySelector(s);
+  const $$ = s => Array.from(document.querySelectorAll(s));
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const imageValue = value => {
     if (typeof value === "string") return value;
@@ -21,35 +22,65 @@
   const sectionsRoot = $("#movieApiSections");
   const statusEl = $("#movieApiStatus");
   const platformEl = $("#cvPlatformsSection");
-  const navTabs = $("#cvHomeNavTabs");
+  const moreDropdown = $("#cvMoreDropdown");
 
-  const CATEGORIES = [
-    { title: "Hollywood", sub: "হলিউড মুভি", href: "catalog.html?category=%2Flanguage%2Fenglish" },
-    { title: "Bollywood", sub: "বলিউড হিন্দি", href: "catalog.html?category=%2Fbollywood" },
-    { title: "Bengali Movies", sub: "বাংলা মুভি ও নাটক", href: "catalog.html?category=%2Flanguage%2Fbengali" },
-    { title: "Hindi Dubbed", sub: "হিন্দি ডাবড", href: "catalog.html?category=%2Flanguage%2Fhindi-dubbed" },
-    { title: "K-Drama", sub: "কোরিয়ান ড্রামা", href: "catalog.html?category=%2Flanguage%2Fkorean" },
-    { title: "C-Drama", sub: "চাইনিজ ড্রামা", href: "catalog.html?category=%2Flanguage%2Fchinese" },
-    { title: "Anime", sub: "অ্যানিমে ও কার্টুন", href: "catalog.html?category=%2Fanime" },
-    { title: "Live Sports", sub: "লাইভ ফুটবল ও ম্যাচ", href: "sports.html" }
+  const EXPLORE_CATEGORIES = [
+    { icon: "🎬", title: "Bollywood", sub: "বলিউড হিন্দি মুভি", href: "catalog.html?category=%2Fbollywood" },
+    { icon: "🎥", title: "Hollywood", sub: "হলিউড ব্লকবাস্টার", href: "catalog.html?category=%2Flanguage%2Fenglish" },
+    { icon: "🇮🇳", title: "South Indian", sub: "সাউথ ইন্ডিয়ান অ্যাকশন", href: "catalog.html?category=%2FsouthIndian" },
+    { icon: "🇰🇷", title: "Korean Drama", sub: "জনপ্রিয় কে-ড্রামা", href: "catalog.html?category=%2Flanguage%2Fkorean" },
+    { icon: "🇨🇳", title: "Chinese Drama", sub: "সি-ড্রামা ও ফ্যান্টাসি", href: "catalog.html?category=%2Flanguage%2Fchinese" },
+    { icon: "🇯🇵", title: "Japanese Drama", sub: "জে-ড্রামা ও থ্রিলার", href: "catalog.html?category=%2Flanguage%2Fjapanese-drama" },
+    { icon: "🍥", title: "Anime", sub: "অ্যানিমে সিরিজ ও মুভি", href: "catalog.html?category=%2Fanime" },
+    { icon: "🇧🇩", title: "Bengali", sub: "বাংলা মুভি ও নাটক", href: "catalog.html?category=%2Flanguage%2Fbengali" }
   ];
 
   const PLATFORMS = [
-    { name: "Netflix", logo: "https://www.google.com/s2/favicons?domain=netflix.com&sz=64" },
-    { name: "Hoichoi", logo: "https://www.google.com/s2/favicons?domain=hoichoi.tv&sz=64" },
-    { name: "Zee5", logo: "https://www.google.com/s2/favicons?domain=zee5.com&sz=64" },
-    { name: "Prime Video", logo: "https://www.google.com/s2/favicons?domain=primevideo.com&sz=64" },
-    { name: "Disney+", logo: "https://www.google.com/s2/favicons?domain=disneyplus.com&sz=64" },
-    { name: "Apple TV+", logo: "https://www.google.com/s2/favicons?domain=tv.apple.com&sz=64" }
+    { name: "Netflix", short: "N", logo: "https://www.google.com/s2/favicons?domain=netflix.com&sz=128" },
+    { name: "Prime Video", short: "PV", logo: "https://www.google.com/s2/favicons?domain=primevideo.com&sz=128" },
+    { name: "Disney+", short: "D+", logo: "https://www.google.com/s2/favicons?domain=disneyplus.com&sz=128" },
+    { name: "Hoichoi", short: "H", logo: "https://www.google.com/s2/favicons?domain=hoichoi.tv&sz=128" },
+    { name: "Zee5", short: "Z5", logo: "https://www.google.com/s2/favicons?domain=zee5.com&sz=128" },
+    { name: "Apple TV+", short: "TV+", logo: "https://www.google.com/s2/favicons?domain=tv.apple.com&sz=128" },
+    { name: "Viu", short: "Viu", logo: "https://www.google.com/s2/favicons?domain=viu.com&sz=128" },
+    { name: "Hulu", short: "hulu", logo: "https://www.google.com/s2/favicons?domain=hulu.com&sz=128" }
   ];
+
+  const releaseTime = item => {
+    const raw = item?.releaseDate || item?.appointmentDate || item?.uploadedAtMs || (item?.year && /^\d{4}$/.test(String(item.year)) ? `${item.year}-01-01` : "");
+    if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) return raw;
+    const t = Date.parse(String(raw || ""));
+    return Number.isFinite(t) && t > 0 ? t : 0;
+  };
+
+  const sortNewestFirst = list => {
+    const now = Date.now();
+    return [...(Array.isArray(list) ? list : [])].sort((a, b) => {
+      const ta = releaseTime(a);
+      const tb = releaseTime(b);
+      const aFuture = ta > now;
+      const bFuture = tb > now;
+      if (aFuture !== bFuture) return aFuture ? 1 : -1;
+      if (aFuture && bFuture) return ta - tb;
+      if (tb !== ta) return tb - ta;
+      return (Number(b?.views) || 0) - (Number(a?.views) || 0);
+    });
+  };
 
   let homeData = null;
   let spotlightTimer = 0;
 
   function renderCategories() {
     if (!catGrid) return;
-    catGrid.innerHTML = CATEGORIES.map(
-      c => `<a class="cv-cat-card" href="${esc(c.href)}"><b>${esc(c.title)}</b><span>${esc(c.sub)}</span></a>`
+    catGrid.innerHTML = EXPLORE_CATEGORIES.map(
+      c => `<a class="cv-cat-card" href="${esc(c.href)}">
+        <span class="cv-cat-emoji" aria-hidden="true">${c.icon}</span>
+        <div class="cv-cat-copy">
+          <b>${esc(c.title)}</b>
+          <span>${esc(c.sub)}</span>
+        </div>
+        <span class="cv-cat-arrow" aria-hidden="true">›</span>
+      </a>`
     ).join("");
   }
 
@@ -57,31 +88,32 @@
     if (!platformEl) return;
     platformEl.hidden = false;
     platformEl.innerHTML = `
-      <div class="cv-section-header">
-        <div class="cv-section-title-group">
-          <h2 class="cv-section-title">Streaming Platforms</h2>
-          <span class="cv-section-sub">· Explore OTT originals</span>
-        </div>
-      </div>
-      <div class="cv-platform-strip">
+      <div class="cv-platform-logos-bar" role="list" aria-label="Streaming Platforms">
         ${PLATFORMS.map(
-          p => `<a class="cv-platform-pill" href="platform.html?name=${encodeURIComponent(p.name)}">
-            <img loading="lazy" referrerpolicy="no-referrer" src="${esc(p.logo)}" alt="" onerror="this.style.display='none'">
-            <span>${esc(p.name)}</span>
+          p => `<a class="cv-platform-logo" role="listitem" href="platform.html?name=${encodeURIComponent(p.name)}" aria-label="${esc(p.name)}" title="${esc(p.name)}">
+            <img loading="lazy" referrerpolicy="no-referrer" src="${esc(p.logo)}" alt="${esc(p.name)}" onerror="this.style.display='none';this.nextElementSibling.hidden=false">
+            <span class="cv-platform-logo-fallback" hidden>${esc(p.short)}</span>
           </a>`
         ).join("")}
       </div>
     `;
   }
 
-  function cardMarkup(item) {
+  function itemHref(item) {
     const title = String(item.title || "Untitled").trim();
     const path = String(item.path || "");
+    return path
+      ? `watch.html?path=${encodeURIComponent(path)}&title=${encodeURIComponent(title)}`
+      : `catalog.html?q=${encodeURIComponent(title)}`;
+  }
+
+  function cardMarkup(item) {
+    const title = String(item.title || "Untitled").trim();
     const poster = safeImg(posterOf(item));
-    const href = path ? `watch.html?path=${encodeURIComponent(path)}&title=${encodeURIComponent(title)}` : `catalog.html?q=${encodeURIComponent(title)}`;
+    const href = itemHref(item);
     const langTag = String(item.language || item.country || item.typeBadge || "").split("·")[0].trim();
     const rating = item.rating && Number(item.rating) > 0 ? `★ ${esc(item.rating)}` : "";
-    const subParts = [item.year, item.typeBadge].filter(Boolean).join(" · ");
+    const metaParts = [item.year, langTag || item.typeBadge, rating].filter(Boolean).join(" · ");
 
     return `
       <a class="cv-card" href="${esc(href)}">
@@ -89,13 +121,39 @@
           ${poster
             ? `<img loading="lazy" decoding="async" referrerpolicy="no-referrer" src="${esc(poster)}" alt="${esc(title)}" onerror="this.style.display='none';this.nextElementSibling.hidden=false"><div class="cv-card-fallback" hidden>${esc(title)}</div>`
             : `<div class="cv-card-fallback">${esc(title)}</div>`}
-          <div class="cv-card-top">
-            ${langTag ? `<span class="cv-card-lang">${esc(langTag)}</span>` : ""}
-            ${rating ? `<span class="cv-card-rate">${rating}</span>` : ""}
+          <div class="cv-card-hover-play" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+          </div>
+          ${item.quality ? `<span class="cv-card-quality">${esc(item.quality)}</span>` : ""}
+        </div>
+        <h3 class="cv-card-title">${esc(title)}</h3>
+        ${metaParts ? `<span class="cv-card-sub tabular-nums">${metaParts}</span>` : ""}
+      </a>
+    `;
+  }
+
+  function cardTop10Markup(item, rank) {
+    const title = String(item.title || "Untitled").trim();
+    const poster = safeImg(posterOf(item));
+    const href = itemHref(item);
+    const rating = item.rating && Number(item.rating) > 0 ? `★ ${esc(item.rating)}` : "";
+    const metaParts = [item.year, item.typeBadge, rating].filter(Boolean).join(" · ");
+
+    return `
+      <a class="cv-card cv-card-top10" href="${esc(href)}">
+        <div class="cv-top10-stage">
+          <span class="cv-top10-rank tabular-nums" aria-hidden="true">${rank}</span>
+          <div class="cv-card-thumb">
+            ${poster
+              ? `<img loading="lazy" decoding="async" referrerpolicy="no-referrer" src="${esc(poster)}" alt="${esc(title)}" onerror="this.style.display='none';this.nextElementSibling.hidden=false"><div class="cv-card-fallback" hidden>${esc(title)}</div>`
+              : `<div class="cv-card-fallback">${esc(title)}</div>`}
+            <div class="cv-card-hover-play" aria-hidden="true">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+            </div>
           </div>
         </div>
         <h3 class="cv-card-title">${esc(title)}</h3>
-        ${subParts ? `<span class="cv-card-sub tabular-nums">${esc(subParts)}</span>` : ""}
+        ${metaParts ? `<span class="cv-card-sub tabular-nums">${metaParts}</span>` : ""}
       </a>
     `;
   }
@@ -113,8 +171,7 @@
       const img = safeImg(posterOf(item));
       const title = String(item.title || "Featured");
       const year = item.year ? ` (${item.year})` : "";
-      const path = String(item.path || "");
-      const watchHref = path ? `watch.html?path=${encodeURIComponent(path)}&title=${encodeURIComponent(title)}` : `catalog.html?q=${encodeURIComponent(title)}`;
+      const watchHref = itemHref(item);
       const lang = String(item.language || "International").split("·")[0].trim();
       const ratingHtml = item.rating ? `<span class="cv-star">★ ${esc(item.rating)}</span><span aria-hidden="true">·</span>` : "";
 
@@ -124,10 +181,7 @@
           <div class="cv-spotlight-scrim" aria-hidden="true"></div>
 
           <div class="cv-spotlight-top">
-            <span class="cv-spotlight-label">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2c.7 3.2-.8 5.4-2.5 7.2-1.4 1.5-2.5 2.8-2.5 4.8a5 5 0 0 0 10 0c0-3.4-2.2-6.1-5-12Z"/></svg>
-              SPOTLIGHT
-            </span>
+            <span class="cv-spotlight-label">FEATURED SPOTLIGHT</span>
             <div class="cv-spotlight-dots">
               ${slides
                 .map((_, i) => `<button type="button" class="cv-spotlight-dot ${i === activeIdx ? "active" : ""}" data-spot-dot="${i}" aria-label="Spotlight slide ${i + 1}"></button>`)
@@ -142,6 +196,14 @@
               <span class="cv-lang-text">${esc(lang)}</span>
               <span aria-hidden="true">·</span>
               <span>${esc(item.quality || "1080p HD")}</span>
+              ${item.genre ? `<span aria-hidden="true">·</span><span>${esc(String(item.genre).split(",").slice(0, 2).join(" / "))}</span>` : ""}
+            </div>
+            <div class="cv-spotlight-cta-row">
+              <a class="cv-btn-blue-grad" href="${esc(watchHref)}">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+                <span>Watch Now</span>
+              </a>
+              <a class="cv-btn-glass" href="catalog.html?q=${encodeURIComponent(title)}">More Details</a>
             </div>
           </div>
 
@@ -149,8 +211,7 @@
             ${slides
               .map((s, i) => {
                 const sImg = safeImg(posterOf(s));
-                const sPath = String(s.path || "");
-                const sHref = sPath ? `watch.html?path=${encodeURIComponent(sPath)}&title=${encodeURIComponent(s.title || "")}` : watchHref;
+                const sHref = itemHref(s);
                 const sMeta = [s.year, String(s.genre || s.typeBadge || "").split(",")[0]].filter(Boolean).join(" · ");
                 return `
                   <div class="cv-spot-mini ${i === activeIdx ? "active" : ""}" data-spot-card="${i}" role="button" tabindex="0" aria-label="Select ${esc(s.title || "title")}">
@@ -160,7 +221,7 @@
                       <span>${esc(sMeta || lang)}</span>
                     </div>
                     <a class="cv-spot-play-circle" href="${esc(sHref)}" aria-label="Play ${esc(s.title || "title")}">
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
                     </a>
                   </div>
                 `;
@@ -197,7 +258,7 @@
         go(Number(dot.dataset.spotDot));
         return;
       }
-      const playLink = e.target.closest("a.cv-spot-play-circle");
+      const playLink = e.target.closest("a");
       if (playLink) return;
       const mini = e.target.closest("[data-spot-card]");
       if (mini) {
@@ -224,76 +285,16 @@
     resetTimer();
   }
 
-  function normalizeHomeResponse(raw) {
-    if (!raw || typeof raw !== "object") return raw;
-    // The current unified API nests content under source objects (e.g. moviebox),
-    // while the older homepage renderer expects top-level banners/trending/sections.
-    const out = { ...raw, banners: [], trending: [], sections: [] };
-    const seenArrays = new Set();
-    const isCard = x => x && typeof x === "object" &&
-      x.hasResource !== false &&
-      (x.title || x.name) &&
-      (posterOf(x) || x.path || x.url || x.subjectId);
-    const labelFor = key => String(key || "Featured")
-      .replace(/([a-z])([A-Z])/g, "$1 $2")
-      .replace(/[_-]+/g, " ")
-      .replace(/\b\w/g, ch => ch.toUpperCase());
-    const addArray = (key, arr) => {
-      if (!Array.isArray(arr) || seenArrays.has(arr)) return;
-      const items = arr.filter(isCard).map(item => ({
-        ...item,
-        title: item.title || item.name || "Untitled",
-        path: item.path || item.url || item.detailPath || "",
-        poster: posterOf(item)
-      }));
-      if (!items.length) return;
-      seenArrays.add(arr);
-      const k = String(key || "").toLowerCase();
-      if (/hero|banner|slideshow|spotlight|carousel/.test(k)) out.banners.push(...items);
-      else if (/trending|popular|most.?watch|hot|top.?view/.test(k)) out.trending.push(...items);
-      else out.sections.push({ title: labelFor(key), items });
-    };
-    const skipWalkKeys = new Set(["upcoming", "comingSoon", "categories", "platforms"]);
-    const walk = (node, parentKey = "", depth = 0) => {
-      if (!node || typeof node !== "object" || depth > 5) return;
-      if (Array.isArray(node)) {
-        addArray(parentKey, node);
-        return;
-      }
-      for (const [key, value] of Object.entries(node)) {
-        if (skipWalkKeys.has(key)) continue;
-        if (value && typeof value === "object") walk(value, key, depth + 1);
-      }
-    };
-    // Keep any legacy top-level fields and avoid duplicate processing.
-    for (const key of ["banners", "trending", "sections"]) {
-      if (Array.isArray(raw[key])) {
-        if (key === "sections") {
-          raw[key].forEach(section => {
-            if (section && Array.isArray(section.items)) {
-              out.sections.push({ ...section, items: section.items.filter(isCard) });
-              seenArrays.add(section.items);
-            }
-          });
-        } else addArray(key, raw[key]);
-      }
+  function dedupeList(list) {
+    const seen = new Set();
+    const out = [];
+    for (const item of Array.isArray(list) ? list : []) {
+      if (!item || isNigerian(item)) continue;
+      const key = item.path || item.subjectId || item.title;
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      out.push(item);
     }
-    walk(raw);
-    // Promote Hindi-language titles into a dedicated first shelf and spotlight candidates.
-    const allItems = [];
-    const collect = list => list.forEach(x => allItems.push(x));
-    collect(out.banners); collect(out.trending);
-    out.sections.forEach(s => collect(s.items || []));
-    const hindi = allItems.filter(x =>
-      /hindi|हिंदी|हिन्दी/i.test([x.language, x.audioLanguage, x.title, x.dubLanguage].filter(Boolean).join(" "))
-    );
-    if (hindi.length) {
-      out.sections.unshift({ title: "Hindi Dubbed & Hindi", items: [...new Map(hindi.map(x => [x.path || x.subjectId || x.title, x])).values()] });
-      if (!out.trending.length) out.trending = hindi.slice();
-    }
-    // Do not let an empty legacy shape hide valid source-nested content.
-    out.banners = [...new Map(out.banners.map(x => [x.path || x.subjectId || x.title, x])).values()];
-    out.trending = [...new Map(out.trending.map(x => [x.path || x.subjectId || x.title, x])).values()];
     return out;
   }
 
@@ -303,64 +304,134 @@
     renderPlatforms();
 
     const bannersRaw = [...(homeData.banners || []), ...(homeData.trending || [])];
-    const bannerUniq = new Map();
-    for (const item of bannersRaw) {
-      if (!item || isNigerian(item) || item.hasResource === false) continue;
-      const key = item.path || item.subjectId || item.title;
-      if (key && safeImg(posterOf(item)) && !bannerUniq.has(key)) {
-        bannerUniq.set(key, item);
+    const bannerUniq = dedupeList(bannersRaw).filter(item => safeImg(posterOf(item)) && item.hasResource !== false).slice(0, 7);
+    renderSpotlight(bannerUniq);
+
+    const curated = homeData.curated || {};
+    const sectionsPool = (Array.isArray(homeData.sections) ? homeData.sections : []).flatMap(s => s.items || []);
+    const allPool = dedupeList([
+      ...(curated.trending || []),
+      ...(homeData.trending || []),
+      ...(curated.hindiMovies || []),
+      ...(curated.latestMovies || []),
+      ...(curated.kDramas || []),
+      ...(curated.southIndian || []),
+      ...(curated.hollywood || []),
+      ...(curated.anime || []),
+      ...sectionsPool
+    ]);
+
+    const matchAny = (pred) => allPool.filter(pred);
+    const hasLang = (x, re) => re.test([x.language, x.audioLanguage, x.country, x.title, x.genre].filter(Boolean).join(" "));
+
+    const orderedShelves = [
+      {
+        title: "🔥 Trending Now",
+        items: sortNewestFirst(dedupeList(curated.trending?.length ? curated.trending : homeData.trending)),
+        moreHref: "catalog.html?category=%2Fmostwatch%2F7d"
+      },
+      {
+        title: "🏆 Top 10 This Week",
+        top10: true,
+        items: dedupeList(curated.top10?.length ? curated.top10 : allPool).slice(0, 10),
+        moreHref: "catalog.html?category=%2Fmostwatch%2F7d"
+      },
+      {
+        title: "🇮🇳 Hindi Dubbed Movies",
+        items: sortNewestFirst(dedupeList(curated.hindiMovies?.length ? curated.hindiMovies : matchAny(x => (x._hindiCatalog || hasLang(x, /hindi/i)) && !x.isSeries))),
+        moreHref: "catalog.html?category=%2Flanguage%2Fhindi-dubbed"
+      },
+      {
+        title: "🎬 Latest Movies",
+        items: sortNewestFirst(dedupeList(curated.latestMovies?.length ? curated.latestMovies : matchAny(x => x.type === "movie" || x.isMovie))),
+        moreHref: "catalog.html?category=%2Ftype%2Fmovies"
+      },
+      {
+        title: "📺 Hindi Dubbed Web Series",
+        items: sortNewestFirst(
+          dedupeList(
+            curated.hindiSeries?.length
+              ? curated.hindiSeries
+              : matchAny(x => (x._hindiCatalog || hasLang(x, /hindi/i)) && (x.isSeries || x.type === "series"))
+          )
+        ),
+        moreHref: "catalog.html?category=%2Flanguage%2Fhindi-dubbed-series"
+      },
+      {
+        title: "🇰🇷 Popular K-Dramas",
+        items: sortNewestFirst(dedupeList(curated.kDramas?.length ? curated.kDramas : matchAny(x => hasLang(x, /korea/i)))),
+        moreHref: "catalog.html?category=%2Flanguage%2Fkorean"
+      },
+      {
+        title: "🌏 South Indian Movies",
+        items: sortNewestFirst(dedupeList(curated.southIndian?.length ? curated.southIndian : matchAny(x => hasLang(x, /india|tamil|telugu|malayalam/i)))),
+        moreHref: "catalog.html?category=%2FsouthIndian"
+      },
+      {
+        title: "🍥 Anime Collection",
+        items: sortNewestFirst(dedupeList(curated.anime?.length ? curated.anime : matchAny(x => x.isAnime || x.type === "anime" || /anime/i.test(x.genre || "")))),
+        moreHref: "catalog.html?category=%2Fanime"
+      },
+      {
+        title: "🌍 Hollywood Movies",
+        items: sortNewestFirst(dedupeList(curated.hollywood?.length ? curated.hollywood : matchAny(x => hasLang(x, /united states|english|usa/i) && !x.isSeries))),
+        moreHref: "catalog.html?category=%2Flanguage%2Fenglish"
+      },
+      {
+        title: "🇧🇩 Bengali Movies",
+        items: sortNewestFirst(dedupeList(curated.bengali?.length ? curated.bengali : matchAny(x => hasLang(x, /bengali|bangla|bangladesh/i)))),
+        moreHref: "catalog.html?category=%2Flanguage%2Fbengali"
+      },
+      {
+        title: "🆕 Recently Added",
+        items: sortNewestFirst(dedupeList(curated.recentlyAdded?.length ? curated.recentlyAdded : allPool)),
+        moreHref: "catalog.html?category=%2Fnew"
+      },
+      {
+        title: "🔄 Recently Updated",
+        items: sortNewestFirst(dedupeList(curated.recentlyUpdated?.length ? curated.recentlyUpdated : matchAny(x => x.isSeries || x.type === "series"))),
+        moreHref: "catalog.html?category=%2Frecently-updated"
+      },
+      {
+        title: "⭐ IMDb Top Rated",
+        items: dedupeList(
+          curated.imdbTopRated?.length
+            ? curated.imdbTopRated
+            : [...allPool].sort((a, b) => Number(b.rating || 0) - Number(a.rating || 0))
+        ),
+        moreHref: "catalog.html?category=%2Ftop-rated"
+      },
+      {
+        title: "⏳ Upcoming Movies",
+        items: dedupeList(curated.upcoming?.length ? curated.upcoming : homeData.upcoming),
+        moreHref: "catalog.html?category=%2Fupcoming"
       }
-      if (bannerUniq.size >= 7) break;
-    }
-    renderSpotlight([...bannerUniq.values()]);
+    ];
 
-    const renderedIds = new Set();
-    const buildShelf = (title, sub, items, moreHref) => {
-      const filtered = (Array.isArray(items) ? items : []).filter(item => {
-        if (!item || isNigerian(item) || item.hasResource === false) return false;
-        const key = item.path || item.subjectId || item.title;
-        if (!key || renderedIds.has(key)) return false;
-        renderedIds.add(key);
-        return true;
-      });
-      if (!filtered.length) return "";
-      const visible = filtered.slice(0, 14);
-      return `
-        <section class="cv-section">
-          <div class="cv-section-header">
-            <div class="cv-section-title-group">
-              <h2 class="cv-section-title">${esc(title)}</h2>
-              ${sub ? `<span class="cv-section-sub">· ${esc(sub)}</span>` : ""}
+    const html = orderedShelves
+      .filter(s => s.items.length > 0)
+      .map(s => {
+        const visible = s.items.slice(0, s.top10 ? 10 : 14);
+        const rowClass = s.top10 ? "cv-shelf-row cv-shelf-top10" : "cv-shelf-row";
+        const cardsHtml = s.top10
+          ? visible.map((item, idx) => cardTop10Markup(item, idx + 1)).join("")
+          : visible.map(cardMarkup).join("");
+
+        return `
+          <section class="cv-section">
+            <div class="cv-section-header">
+              <div class="cv-section-title-group">
+                <h2 class="cv-section-title">${esc(s.title)}</h2>
+              </div>
+              <a class="cv-more-link" href="${esc(s.moreHref)}">View All ›</a>
             </div>
-            <a class="cv-more-link" href="${esc(moreHref)}">More ›</a>
-          </div>
-          <div class="cv-shelf-row">
-            ${visible.map(cardMarkup).join("")}
-          </div>
-        </section>
-      `;
-    };
-
-    const rawSections = Array.isArray(homeData.sections) ? homeData.sections : [];
-    let html = "";
-
-    // Prioritize popular & South Asia / Hindi / K-Drama / Movie / Anime shelves cleanly
-    const trending = Array.isArray(homeData.trending) ? homeData.trending : [];
-    const hindiSection = rawSections.find(s => /hindi/i.test(s.title));
-    if (hindiSection) {
-      html += buildShelf("Hindi Dubbed Movies & Series", "হিন্দি ডাবড", hindiSection.items, "catalog.html?category=%2Flanguage%2Fhindi-dubbed");
-    }
-    if (trending.length) {
-      html += buildShelf("Trending Now", "জনপ্রিয়", trending, "catalog.html?category=%2Fmostwatch%2F7d");
-    }
-
-    for (const s of rawSections) {
-      if (s === hindiSection) continue;
-      const t = String(s.title || "Featured").trim();
-      if (/nollywood|black shows|bl story/i.test(t)) continue;
-      const target = s.categoryPath || "/type/movies";
-      html += buildShelf(t, "", s.items, `catalog.html?category=${encodeURIComponent(target)}`);
-    }
+            <div class="${rowClass}">
+              ${cardsHtml}
+            </div>
+          </section>
+        `;
+      })
+      .join("");
 
     sectionsRoot.innerHTML = html || `<div class="cv-status-banner">No titles available right now.</div>`;
     statusEl.hidden = true;
@@ -382,7 +453,7 @@
           : `/api/movie-api/catalog?category=${encodeURIComponent(tabKey)}&page=1`;
       const r = await fetch(endpoint);
       const d = await r.json();
-      const items = (Array.isArray(d?.items) ? d.items : []).filter(x => x && !isNigerian(x));
+      const items = sortNewestFirst((Array.isArray(d?.items) ? d.items : []).filter(x => x && !isNigerian(x)));
       statusEl.hidden = true;
       sectionsRoot.innerHTML = `
         <section class="cv-section">
@@ -401,17 +472,68 @@
     }
   }
 
-  navTabs?.addEventListener("click", e => {
-    const btn = e.target.closest("button[data-home-tab]");
-    if (!btn) return;
-    navTabs.querySelectorAll(".cv-nav-tab").forEach(t => t.classList.toggle("active", t === btn));
-    const tabKey = btn.dataset.homeTab;
-    if (tabKey === "home") {
-      renderHomeView();
-    } else {
-      renderFilteredTab(tabKey, btn.textContent.trim());
+  function closeMoreDropdown() {
+    if (!moreDropdown || moreDropdown.hidden) return;
+    moreDropdown.hidden = true;
+    $$("[data-more-trigger]").forEach(btn => btn.setAttribute("aria-expanded", "false"));
+  }
+
+  function openMoreDropdown(trigger) {
+    if (!moreDropdown || !trigger) return;
+    const isSameOpen = !moreDropdown.hidden && moreDropdown._trigger === trigger;
+    if (isSameOpen) {
+      closeMoreDropdown();
+      return;
+    }
+    moreDropdown._trigger = trigger;
+    moreDropdown.hidden = false;
+    $$("[data-more-trigger]").forEach(btn => btn.setAttribute("aria-expanded", btn === trigger ? "true" : "false"));
+
+    const rect = trigger.getBoundingClientRect();
+    const dropWidth = Math.min(440, window.innerWidth - 24);
+    moreDropdown.style.width = `${dropWidth}px`;
+    const left = Math.max(12, Math.min(rect.left, window.innerWidth - dropWidth - 12));
+    const top = Math.min(rect.bottom + 8, window.innerHeight - 160);
+    moreDropdown.style.left = `${left}px`;
+    moreDropdown.style.top = `${top}px`;
+  }
+
+  function setActiveTab(tabKey) {
+    $$("[data-home-tab]").forEach(btn => {
+      btn.classList.toggle("active", btn.dataset.homeTab === tabKey);
+    });
+  }
+
+  document.addEventListener("click", e => {
+    const moreBtn = e.target.closest("[data-more-trigger]");
+    if (moreBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      openMoreDropdown(moreBtn);
+      return;
+    }
+    if (moreDropdown && !moreDropdown.hidden && !e.target.closest("#cvMoreDropdown")) {
+      closeMoreDropdown();
+    }
+
+    const tabBtn = e.target.closest("button[data-home-tab]");
+    if (tabBtn) {
+      closeMoreDropdown();
+      const tabKey = tabBtn.dataset.homeTab;
+      setActiveTab(tabKey);
+      if (tabKey === "home") {
+        renderHomeView();
+      } else {
+        renderFilteredTab(tabKey, tabBtn.textContent.trim());
+      }
     }
   });
+
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape") closeMoreDropdown();
+  });
+
+  window.addEventListener("resize", closeMoreDropdown, { passive: true });
 
   async function init() {
     renderCategories();
@@ -421,7 +543,7 @@
       const r = await fetch("/api/movie-api/home");
       const d = await r.json();
       if (!r.ok || d.ok !== true) throw new Error(d.error || "API unavailable");
-      homeData = normalizeHomeResponse(d);
+      homeData = d;
       renderHomeView();
     } catch (err) {
       statusEl.textContent = "Could not load catalog: " + (err?.message || "Network error");

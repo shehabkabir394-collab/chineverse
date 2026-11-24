@@ -338,8 +338,26 @@ export function buildPosterSvg(id) {
 </svg>`;
 }
 
+function parseReleaseTs(item) {
+  const candidates = [item?.releaseDate, item?.uploadedAtMs, item?.year ? `${item.year}-01-01` : ""];
+  for (const raw of candidates) {
+    if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) return raw;
+    const t = Date.parse(String(raw || ""));
+    if (Number.isFinite(t) && t > 0) return t;
+  }
+  return 0;
+}
+
+function sortByReleaseNewest(list) {
+  return [...(Array.isArray(list) ? list : [])].sort((a, b) => {
+    const dt = parseReleaseTs(b) - parseReleaseTs(a);
+    return dt !== 0 ? dt : (b.views || 0) - (a.views || 0);
+  });
+}
+
 export function handleMockMovieApi(legacy, query, baseUrl) {
-  const items = RAW_TITLES.map(t => hydrateItem(baseUrl, t));
+  const items = sortByReleaseNewest(RAW_TITLES.map(t => hydrateItem(baseUrl, t)));
+  const hindiPool = items.filter(i => i._hindiCatalog);
   const byCategory = (cat) => {
     const c = String(cat || "").toLowerCase();
     if (!c || c === "/" || c === "/new" || c === "/mostwatch/7d") return items;
@@ -347,11 +365,16 @@ export function handleMockMovieApi(legacy, query, baseUrl) {
     if (c.includes("series") || c.includes("drama")) return items.filter(i => i.type === "series");
     if (c.includes("korean")) return items.filter(i => /korea/i.test(i.country) || /korean/i.test(i.language));
     if (c.includes("chinese")) return items.filter(i => /china/i.test(i.country) || /chinese/i.test(i.language));
+    if (c.includes("hindi-dubbed-series")) return items.filter(i => i._hindiCatalog && i.type === "series");
     if (c.includes("hindi")) return items.filter(i => i._hindiCatalog);
-    if (c.includes("south")) return items.filter(i => /tamil|telugu|south/i.test(i.language + " " + i.genre));
-    if (c.includes("bollywood")) return items.filter(i => /india/i.test(i.country));
+    if (c.includes("south")) return items.filter(i => /tamil|telugu|south|india/i.test(i.language + " " + i.genre + " " + i.country));
+    if (c.includes("indian-series")) return items.filter(i => /india/i.test(i.country) && i.type === "series");
+    if (c.includes("bengali-series")) return items.filter(i => /bengali|bangladesh/i.test(i.language + " " + i.country) && i.type === "series");
+    if (c.includes("tamil") || c.includes("telugu") || c.includes("malayalam") || c.includes("punjabi") || c.includes("bollywood")) return items.filter(i => /india/i.test(i.country));
     if (c.includes("english")) return items.filter(i => /english/i.test(i.language));
     if (c.includes("bengali") || c.includes("bangladesh")) return items.filter(i => /bengali|bangladesh/i.test(i.language + " " + i.country));
+    if (c.includes("japanese")) return items.filter(i => /japan/i.test(i.country) || /japanese/i.test(i.language));
+    if (c.includes("turkish")) return items.filter(i => /turk/i.test(i.country + " " + i.language));
     if (c.includes("anime")) return items.filter(i => i.type === "anime" || i.isAnime);
     if (c.includes("india")) return items.filter(i => /india/i.test(i.country));
     if (c.includes("pakistan")) return items.filter(i => /pakistan/i.test(i.country));
@@ -367,15 +390,31 @@ export function handleMockMovieApi(legacy, query, baseUrl) {
         categories: CATEGORIES,
         platforms: PLATFORMS,
         banners: items.filter(i => i.type === "movie").slice(0, 5),
-        trending: [...items].sort((a, b) => b.views - a.views),
+        trending: items,
         upcoming: items.slice(0, 4),
         sections: [
-          { title: "Hindi Dubbed Hits", badge: "HINDI AUDIO", categoryPath: "/language/hindi-dubbed", items: items.filter(i => i._hindiCatalog) },
+          { title: "Hindi Dubbed Hits", badge: "HINDI AUDIO", categoryPath: "/language/hindi-dubbed", items: hindiPool },
           { title: "Trending Bengali Movies", badge: "DHAKA & KOLKATA", categoryPath: "/language/bengali", items: items.filter(i => /bengali|bangladesh/i.test(i.language + " " + i.country)) },
           { title: "K-Drama Favorites", badge: "KOREAN SERIES", categoryPath: "/language/korean", items: items.filter(i => /korea/i.test(i.country)) },
           { title: "South Indian & Bollywood", badge: "INDIA TRENDING", categoryPath: "/bollywood", items: items.filter(i => /india/i.test(i.country)) },
           { title: "Anime in Hindi", badge: "ANIME ZONE", categoryPath: "/anime", items: items.filter(i => i.type === "anime") }
-        ]
+        ],
+        curated: {
+          trending: items,
+          top10: [...items].sort((a, b) => b.views - a.views).slice(0, 10),
+          hindiMovies: items.filter(i => i._hindiCatalog && i.type === "movie"),
+          latestMovies: items.filter(i => i.type === "movie"),
+          hindiSeries: items.filter(i => i._hindiCatalog && i.type === "series"),
+          kDramas: items.filter(i => /korea/i.test(i.country)),
+          southIndian: items.filter(i => /india/i.test(i.country)),
+          anime: items.filter(i => i.type === "anime"),
+          hollywood: items.filter(i => /english/i.test(i.language)),
+          bengali: items.filter(i => /bengali|bangladesh/i.test(i.language + " " + i.country)),
+          recentlyAdded: items,
+          recentlyUpdated: items.filter(i => i.type === "series"),
+          imdbTopRated: items,
+          upcoming: items.slice(0, 6)
+        }
       };
 
     case "categories":
@@ -383,21 +422,28 @@ export function handleMockMovieApi(legacy, query, baseUrl) {
 
     case "catalog": {
       const cat = query.get("category") || query.get("path") || "";
-      const list = byCategory(cat);
+      const list = sortByReleaseNewest(byCategory(cat));
       return { ok: true, items: list, page: Number(query.get("page") || 1), totalPages: 1, hasMore: false };
     }
 
-    case "search":
-    case "suggest": {
+    case "search": {
       const q = String(query.get("q") || "").trim().toLowerCase();
       const matched = q
         ? items.filter(i => [i.title, i.genre, i.language, i.country, i.storyline].join(" ").toLowerCase().includes(q))
         : items;
-      return { ok: true, items: matched, page: 1, totalPages: 1 };
+      return { ok: true, items: sortByReleaseNewest(matched), page: 1, totalPages: 1 };
+    }
+
+    case "suggest": {
+      const q = String(query.get("q") || "").trim().toLowerCase();
+      const matched = q
+        ? hindiPool.filter(i => [i.title, i.genre, i.language, i.country, i.storyline].join(" ").toLowerCase().includes(q))
+        : hindiPool;
+      return { ok: true, items: matched.length ? matched : hindiPool, page: 1, totalPages: 1 };
     }
 
     case "hot-search":
-      return { ok: true, items: ["Shadow of Dhaka", "Seoul Midnight Express", "Vikram Protocol", "Hindi Dubbed", "K-Drama", "Anime"] };
+      return { ok: true, items: hindiPool.map(i => i.title), subjects: hindiPool };
 
     case "filter-options":
       return {
@@ -413,7 +459,7 @@ export function handleMockMovieApi(legacy, query, baseUrl) {
     case "platform": {
       const name = String(query.get("platform") || query.get("name") || "").toLowerCase();
       const list = name ? items.filter(i => i.platform.toLowerCase().includes(name)) : items;
-      return { ok: true, items: list.length ? list : items.slice(0, 6), page: Number(query.get("page") || 1), totalPages: 1 };
+      return { ok: true, items: sortByReleaseNewest(list.length ? list : items.slice(0, 6)), page: Number(query.get("page") || 1), totalPages: 1 };
     }
 
     case "upcoming":
@@ -495,7 +541,7 @@ export function handleMockMovieApi(legacy, query, baseUrl) {
       };
 
     case "related":
-      return { ok: true, items: items.slice(0, 6) };
+      return { ok: true, items: hindiPool.slice(0, 8) };
 
     case "comments":
       return {

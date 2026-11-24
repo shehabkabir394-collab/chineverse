@@ -124,6 +124,7 @@
 
   let activeType = "0";
   let hotCache = null;
+  let hotSubjectsCache = [];
   let searchTimer = 0;
   let reqSeq = 0;
 
@@ -133,8 +134,10 @@
       const r = await fetch("/api/movie-api/hot-search");
       const d = await r.json();
       hotCache = Array.isArray(d?.items) ? d.items.filter(x => typeof x === "string" || x?.title).slice(0, 14) : [];
+      hotSubjectsCache = Array.isArray(d?.subjects) ? d.subjects.slice(0, 10) : [];
     } catch {
-      hotCache = ["Hindi", "Squid Game", "Anime", "K-Drama", "Action", "Bollywood"];
+      hotCache = ["Hindi Dubbed Movies", "Hindi Dubbed Series", "South Indian Hindi Dubbed", "K-Drama Hindi", "Anime Hindi Dub", "Bollywood Hindi"];
+      hotSubjectsCache = [];
     }
     return hotCache;
   }
@@ -143,6 +146,42 @@
     const history = loadHistory();
     const hot = hotCache || [];
     const clockSvg = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`;
+
+    const suggestedCardsHtml = hotSubjectsCache.length
+      ? `
+        <div class="cv-recent-head" style="margin-top:20px">
+          <h3>Suggested Hindi Dubbed Movies &amp; Dramas</h3>
+          <a class="cv-more-link" href="catalog.html?category=%2Flanguage%2Fhindi-dubbed">View All ›</a>
+        </div>
+        <div class="cv-search-result-list">
+          ${hotSubjectsCache.slice(0, 8).map(item => {
+            const img = safeImg(item.poster || item.previewImage || item.cover);
+            const path = item.path || "";
+            const href = path ? `watch.html?path=${encodeURIComponent(path)}&title=${encodeURIComponent(item.title || "")}` : `catalog.html?q=${encodeURIComponent(item.title || "")}`;
+            const rating = item.rating ? `<span class="cv-star">★ ${esc(item.rating)}</span>` : "";
+            const meta = [item.year, "Hindi Dubbed", item.genre].filter(Boolean).slice(0, 3).map(esc);
+            const metaHtml = [rating, ...meta].filter(Boolean).join('<span aria-hidden="true">·</span>');
+            return `
+              <a class="cv-search-result-row" href="${esc(href)}">
+                ${img
+                  ? `<img class="cv-search-result-thumb" loading="lazy" referrerpolicy="no-referrer" src="${esc(img)}" alt="${esc(item.title || "Poster")}" onerror="this.style.visibility='hidden'">`
+                  : `<div class="cv-search-result-thumb"></div>`}
+                <div class="cv-search-result-copy">
+                  <b>${esc(item.title || "Untitled")}</b>
+                  <div class="cv-search-result-meta">
+                    <span>${esc(item.typeBadge || "Movie")}</span>
+                    ${metaHtml ? `<span aria-hidden="true">·</span>${metaHtml}` : ""}
+                  </div>
+                </div>
+                <span class="cv-search-play-circle" aria-hidden="true">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                </span>
+              </a>
+            `;
+          }).join("")}
+        </div>
+      `
+      : "";
 
     body.innerHTML = `
       ${history.length ? `
@@ -171,16 +210,17 @@
         </div>
       `}
       <div class="cv-recent-head">
-        <h3>Trending Searches</h3>
+        <h3>Hindi Dubbed Suggestions</h3>
       </div>
       <div class="cv-chip-wrap">
-        ${(hot.length ? hot : ["Hindi", "Action", "Anime", "K-Drama", "Comedy", "Thriller"])
+        ${(hot.length ? hot : ["Hindi Dubbed Movies", "Hindi Dubbed Series", "South Indian Hindi Dubbed", "K-Drama Hindi", "Anime Hindi Dub"])
           .map(x => {
             const q = typeof x === "string" ? x : String(x.title || x.word || "");
             return q ? `<button type="button" class="cv-search-chip" data-pick-query="${esc(q)}">${esc(q)}</button>` : "";
           })
           .join("")}
       </div>
+      ${suggestedCardsHtml}
     `;
   }
 

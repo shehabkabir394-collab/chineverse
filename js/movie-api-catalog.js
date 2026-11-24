@@ -38,6 +38,7 @@
  const releaseTime=item=>{
   const fields=[item?.releaseTimestamp,item?.releaseTime,item?.release_time,item?.releaseDate,item?.release_date,item?.releaseAt,item?.release_at,item?.firstAirDate,item?.first_air_date,item?.airDate,item?.air_date,item?.premiereDate,item?.premiere_date,item?.theatricalReleaseDate,item?.theatrical_release_date,item?.publishDate,item?.publish_date,item?.date];
   for(const value of fields){const time=dateValue(value);if(time)return time;}
+  if(item?.year&&/^\d{4}$/.test(String(item.year))){const yt=Date.parse(String(item.year)+"-01-01");if(Number.isFinite(yt))return yt;}
   return uploadTime(item);
  };
  const latestFirst=(a,b)=>{
@@ -51,7 +52,7 @@
   const textValue=[item?.title,item?.type,item?.typeBadge,item?.category,item?.categoryName,item?.categoryLabel,item?.categoryPath,item?.genre,item?.genres,item?.country,item?.language,...(Array.isArray(item?._sections)?item._sections:[])].flat().map(v=>typeof v==="object"?[v?.name,v?.label,v?.title,v?.path].filter(Boolean).join(" "):String(v||"")).join(" ").toLowerCase();
   return /k[- ]?drama|korean drama|south korea|korea drama/.test(textValue);
  };
- const categoryPriority=(a,b)=>latestFirst(a,b)||Number(isHindiDubbed(b))-Number(isHindiDubbed(a))||Number(isKDramaItem(b))-Number(isKDramaItem(a));
+ const categoryPriority=(a,b)=>selected==="/top-rated"?(Number(b?.rating||0)-Number(a?.rating||0)||latestFirst(a,b)):latestFirst(a,b);
  const vals=item=>{
   const out=[];
   ["categoryPath","category","categoryName","categoryLabel","categorySlug","type","typeBadge","genre","language","country"].forEach(k=>{
@@ -101,7 +102,29 @@
   (Array.isArray(d.banners)?d.banners:[]).forEach(x=>add(x,"Featured","banner"));
   return [...map.values()].filter(item=>!isNigerian(item)).sort(categoryPriority);
  }
- const customLabels={"cv:movie":"Movie","cv:anime":"Anime","cv:drama":"Drama","cv:kdrama":"K-Drama","cv:cdrama":"C-Drama","cv:south":"South Movies","cv:bollywood":"Bollywood","cv:hollywood":"Hollywood"};
+ const customLabels={
+  "cv:movie":"Movie",
+  "cv:anime":"Anime",
+  "cv:drama":"Drama",
+  "cv:kdrama":"K-Drama",
+  "cv:cdrama":"C-Drama",
+  "cv:south":"South Movies",
+  "cv:bollywood":"Bollywood",
+  "cv:hollywood":"Hollywood",
+  "/language/tamil":"Tamil Movies",
+  "/language/telugu":"Telugu Movies",
+  "/language/malayalam":"Malayalam Movies",
+  "/language/punjabi":"Punjabi Movies",
+  "/language/japanese-drama":"Japanese Drama (J-Drama)",
+  "/language/turkish":"Turkish Drama",
+  "/indian-series":"Indian Web Series",
+  "/bengali-series":"Bengali Series",
+  "/language/hindi-dubbed-series":"Hindi Dubbed Web Series",
+  "/top-rated":"IMDb Top Rated",
+  "/recently-updated":"Recently Updated",
+  "/new":"Recently Added",
+  "/mostwatch/7d":"Trending Now"
+ };
  function groupOf(item){
   const sections=(item._sections||[]).map(norm),type=norm(item.typeBadge||item.type),country=norm(item.country);
   if(sections.some(s=>s.includes("k drama")||s.includes("k-drama")))return "kdrama";
@@ -167,7 +190,7 @@
  function card(item){
   const image=posterOf(item),p=/^(?:https?:\/\/|\/\/|\/api\/)/i.test(image)?image:"";
   const title=text(item.title)||"Untitled",path=pathOf(item),b=badge(item);
-  return '<article class="movie-card movie-api-card"><button class="movie-api-poster" type="button" data-path="'+esc(path)+'" data-title="'+esc(title)+'" '+(!path?"disabled":"")+' aria-label="Open '+esc(title)+'">'+(p?'<img loading="lazy" decoding="async" src="'+esc(p)+'" alt="'+esc(title)+' poster">':'<span class="movie-api-placeholder">CINEVERSE</span>')+'<span class="quality">'+esc(item.quality||item.typeBadge||"HD")+'</span>'+(b?'<span class="movie-api-language-badge">'+b+'</span>':"")+'<span class="overlay">▶<small>View details &amp; watch</small></span></button><div class="movie-info"><h3>'+esc(title)+'</h3><p>'+esc(item.language||item.country||item.typeBadge||"")+'</p></div></article>';
+  return '<article class="movie-card movie-api-card"><button class="movie-api-poster" type="button" data-path="'+esc(path)+'" data-title="'+esc(title)+'" '+(!path?"disabled":"")+' aria-label="Open '+esc(title)+'">'+(p?'<img loading="lazy" decoding="async" src="'+esc(p)+'" alt="'+esc(title)+' poster">':'<span class="movie-api-placeholder">MOVIESTREAM BD</span>')+'<span class="quality">'+esc(item.quality||item.typeBadge||"HD")+'</span>'+(b?'<span class="movie-api-language-badge">'+b+'</span>':"")+'<span class="overlay">▶<small>View details &amp; watch</small></span></button><div class="movie-info"><h3>'+esc(title)+'</h3><p>'+esc(item.language||item.country||item.typeBadge||"")+'</p></div></article>';
  }
  function link(extra){const p=new URLSearchParams();if(selected)p.set("category",selected);if(letter)p.set("letter",letter);if(search?.value.trim())p.set("q",search.value.trim());Object.entries(extra||{}).forEach(([k,v])=>{if(v)p.set(k,String(v));else p.delete(k)});return "catalog.html?"+p.toString();}
  function render(){
@@ -206,7 +229,7 @@
    const label=text(c.label)||text(c.name)||text(c.title)||text(c.slug)||value,key=norm(value);
    if(value&&label&&!seen.has(key)){seen.add(key);items.push({value,label});}
   });
-  const custom=Object.entries(customLabels).map(([value,label])=>'<a class="catalog-chip '+(selected===value?"active":"")+'" href="catalog.html?category='+encodeURIComponent(value)+'">'+esc(label)+'</a>').join("");
+  const custom=Object.entries(customLabels).filter(([value])=>value.startsWith("cv:")).map(([value,label])=>'<a class="catalog-chip '+(selected===value?"active":"")+'" href="catalog.html?category='+encodeURIComponent(value)+'">'+esc(label)+'</a>').join("");
   nav.innerHTML='<a class="catalog-chip '+(!selected?"active":"")+'" href="catalog.html">ALL A–Z</a>'+custom+items.map(c=>'<a class="catalog-chip '+(norm(c.value)===norm(selected)?"active":"")+'" href="catalog.html?category='+encodeURIComponent(c.value)+'">'+esc(c.label)+'</a>').join("");
   const letters="ABCDEFGHIJKLMNOPQRSTUVWXYZ#".split("");
   az.innerHTML=letters.map(l=>'<a class="catalog-letter '+(letter===l?"active":"")+'" href="'+esc(link({letter:l,page:1}))+'">'+l+'</a>').join("");
