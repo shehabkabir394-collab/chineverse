@@ -1,5 +1,5 @@
-const ALLOWED_HOSTS = new Set(["chineverse.pages.dev", "chineverse4k.pages.dev"]);
-const ALLOWED_ORIGINS = new Set(["https://chineverse.pages.dev"]);
+const ALLOWED_HOSTS = new Set(["chineverse.pages.dev", "chineverse4k.pages.dev", "moviestreambd.fun", "www.moviestreambd.fun"]);
+const ALLOWED_ORIGINS = new Set(["https://chineverse.pages.dev", "https://moviestreambd.fun", "https://www.moviestreambd.fun"]);
 
 function blocked(status, message) {
   return new Response(JSON.stringify({ error: message }), {

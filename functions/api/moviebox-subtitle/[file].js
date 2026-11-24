@@ -5,6 +5,7 @@ import {
   convertSrtToVtt,
   verifyMediaToken
 } from "../../../moviebox-api.js";
+import { getActiveMlbdReferer } from "../../../movielinkbd-api.js";
 
 export async function onRequest({ request, env, params }) {
   if (request.method !== "GET" && request.method !== "HEAD") {
@@ -19,11 +20,13 @@ export async function onRequest({ request, env, params }) {
     return new Response("Invalid or missing subtitle token", { status: 400 });
   }
 
+  const referer = /movielink/i.test(targetUrl) ? getActiveMlbdReferer() : MOVIEBOX_PLAYER_REFERER;
+
   try {
     const upstream = await fetch(targetUrl, {
       headers: {
         "User-Agent": MOVIEBOX_UA,
-        Referer: MOVIEBOX_PLAYER_REFERER
+        Referer: referer
       },
       redirect: "follow",
       signal: AbortSignal.timeout(20000)

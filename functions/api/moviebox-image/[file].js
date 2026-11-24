@@ -4,6 +4,7 @@ import {
   configureMediaSecret,
   verifyMediaToken
 } from "../../../moviebox-api.js";
+import { getActiveMlbdReferer } from "../../../movielinkbd-api.js";
 
 export async function onRequest({ request, env }) {
   if (request.method !== "GET" && request.method !== "HEAD") {
@@ -18,7 +19,11 @@ export async function onRequest({ request, env }) {
     return new Response("Invalid or missing image token", { status: 400 });
   }
 
-  const referer = /aisports/i.test(targetUrl) ? "https://aisports.mobi/" : MOVIEBOX_REFERER;
+  const referer = /aisports/i.test(targetUrl)
+    ? "https://aisports.mobi/"
+    : /movielink/i.test(targetUrl)
+      ? getActiveMlbdReferer()
+      : MOVIEBOX_REFERER;
 
   try {
     const upstream = await fetch(targetUrl, {
