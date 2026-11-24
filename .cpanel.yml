@@ -1,0 +1,8 @@
+---
+# cPanel Git deployment configuration.
+# The Git repository is also the Node.js application root, so no file-copy
+# step is needed. cPanel will run this harmless task when Deploy HEAD Commit
+# is selected; restart the Node.js application from Setup Node.js App if needed.
+dep deployment:
+  tasks:
+    - /bin/echo "MovieStream BD: repository is already the application root."
