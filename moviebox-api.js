@@ -179,27 +179,56 @@ const subjectIndex = new Map();
 let lastGoodHomeFeed = null;
 
 export const CATEGORIES = [
-  { label: "Movies", path: "/type/movies" },
-  { label: "Web Series", path: "/type/series" },
-  { label: "Hindi Dubbed", path: "/language/hindi-dubbed" },
-  { label: "Hindi Dubbed Web Series", path: "/language/hindi-dubbed-series" },
-  { label: "K-Drama", path: "/language/korean" },
-  { label: "C-Drama", path: "/language/chinese" },
-  { label: "J-Drama", path: "/language/japanese-drama" },
-  { label: "Turkish Drama", path: "/language/turkish" },
-  { label: "South Indian", path: "/southIndian" },
-  { label: "Bollywood", path: "/bollywood" },
-  { label: "Hollywood", path: "/language/english" },
-  { label: "Tamil", path: "/language/tamil" },
-  { label: "Telugu", path: "/language/telugu" },
-  { label: "Malayalam", path: "/language/malayalam" },
-  { label: "Punjabi", path: "/language/punjabi" },
-  { label: "Indian Web Series", path: "/indian-series" },
-  { label: "Bengali", path: "/language/bengali" },
-  { label: "Bengali Series", path: "/bengali-series" },
-  { label: "Anime", path: "/anime" },
-  { label: "Short Drama", path: "/shorts" },
-  { label: "Upcoming", path: "/upcoming" }
+  { label: "Trending Now", path: "/mostwatch/7d", group: "Collections", icon: "🔥" },
+  { label: "Top 10 This Week", path: "/top10", group: "Collections", icon: "🏆" },
+  { label: "IMDb Top Rated", path: "/top-rated", group: "Collections", icon: "⭐" },
+  { label: "Movies", path: "/type/movies", group: "Collections", icon: "🎬" },
+  { label: "Web Series", path: "/type/series", group: "Collections", icon: "📺" },
+  { label: "Recently Added", path: "/new", group: "Collections", icon: "🆕" },
+  { label: "Recently Updated", path: "/recently-updated", group: "Collections", icon: "🔄" },
+  { label: "Short Drama", path: "/shorts", group: "Collections", icon: "⚡" },
+  { label: "Upcoming", path: "/upcoming", group: "Collections", icon: "⏳" },
+  { label: "Hindi Dubbed", path: "/language/hindi-dubbed", group: "Languages & Regions", icon: "🇮🇳" },
+  { label: "Hindi Dubbed Web Series", path: "/language/hindi-dubbed-series", group: "Languages & Regions", icon: "🎙️" },
+  { label: "Bollywood", path: "/bollywood", group: "Languages & Regions", icon: "🎬" },
+  { label: "Hollywood", path: "/language/english", group: "Languages & Regions", icon: "🎥" },
+  { label: "South Indian", path: "/southIndian", group: "Languages & Regions", icon: "🌏" },
+  { label: "K-Drama", path: "/language/korean", group: "Languages & Regions", icon: "🇰🇷" },
+  { label: "C-Drama", path: "/language/chinese", group: "Languages & Regions", icon: "🇨🇳" },
+  { label: "J-Drama", path: "/language/japanese-drama", group: "Languages & Regions", icon: "🇯🇵" },
+  { label: "Turkish Drama", path: "/language/turkish", group: "Languages & Regions", icon: "🇹🇷" },
+  { label: "Indian Web Series", path: "/indian-series", group: "Languages & Regions", icon: "🇮🇳" },
+  { label: "Bengali", path: "/language/bengali", group: "Languages & Regions", icon: "🇧🇩" },
+  { label: "Bengali Series", path: "/bengali-series", group: "Languages & Regions", icon: "🇧🇩" },
+  { label: "Bangla Dubbed", path: "/language/bangla-dubbed", group: "Languages & Regions", icon: "🎧" },
+  { label: "Tamil", path: "/language/tamil", group: "Languages & Regions", icon: "🎞️" },
+  { label: "Telugu", path: "/language/telugu", group: "Languages & Regions", icon: "🎞️" },
+  { label: "Malayalam", path: "/language/malayalam", group: "Languages & Regions", icon: "🎞️" },
+  { label: "Punjabi", path: "/language/punjabi", group: "Languages & Regions", icon: "🎵" },
+  { label: "Pakistani Drama", path: "/language/urdu", group: "Languages & Regions", icon: "🇵🇰" },
+  { label: "Thai Drama", path: "/language/thai", group: "Languages & Regions", icon: "🇹🇭" },
+  { label: "Indonesian", path: "/language/indonesian", group: "Languages & Regions", icon: "🇮🇩" },
+  { label: "Filipino", path: "/language/filipino", group: "Languages & Regions", icon: "🇵🇭" },
+  { label: "Spanish", path: "/language/spanish", group: "Languages & Regions", icon: "🇪🇸" },
+  { label: "French", path: "/language/french", group: "Languages & Regions", icon: "🇫🇷" },
+  { label: "Anime", path: "/anime", group: "Languages & Regions", icon: "🍥" },
+  { label: "Action", path: "/genre/action", group: "Genres", icon: "💥" },
+  { label: "Adventure", path: "/genre/adventure", group: "Genres", icon: "🧭" },
+  { label: "Animation", path: "/genre/animation", group: "Genres", icon: "🎨" },
+  { label: "Comedy", path: "/genre/comedy", group: "Genres", icon: "😂" },
+  { label: "Crime", path: "/genre/crime", group: "Genres", icon: "🕵️" },
+  { label: "Documentary", path: "/genre/documentary", group: "Genres", icon: "📽️" },
+  { label: "Drama", path: "/genre/drama", group: "Genres", icon: "🎭" },
+  { label: "Family", path: "/genre/family", group: "Genres", icon: "👨‍👩‍👧" },
+  { label: "History", path: "/genre/history", group: "Genres", icon: "🏛️" },
+  { label: "Horror", path: "/genre/horror", group: "Genres", icon: "👻" },
+  { label: "Music", path: "/genre/music", group: "Genres", icon: "🎶" },
+  { label: "Mystery", path: "/genre/mystery", group: "Genres", icon: "🔍" },
+  { label: "Romance", path: "/genre/romance", group: "Genres", icon: "❤️" },
+  { label: "Sci-Fi", path: "/genre/sci-fi", group: "Genres", icon: "🚀" },
+  { label: "Sport", path: "/genre/sport", group: "Genres", icon: "⚽" },
+  { label: "Thriller", path: "/genre/thriller", group: "Genres", icon: "🔪" },
+  { label: "War", path: "/genre/war", group: "Genres", icon: "⚔️" }
 ];
 
 const COUNTRY_LANGUAGE_MAP = {
@@ -444,6 +473,7 @@ export function normalizeSubject(raw, extra = {}) {
     trailerUrl,
     releaseDate,
     year: releaseDate.slice(0, 4),
+    duration: Number(s.duration || 0),
     genre: genreStr,
     country: String(s.countryName || s.country || "").trim(),
     rating: String(s.imdbRatingValue || "").trim(),
@@ -670,17 +700,54 @@ function categoryToFilterBody(category, page = 1) {
     body.country = "India";
   } else if (c.includes("bollywood") || c.includes("/trending/india")) {
     body.country = "India";
+  } else if (c.includes("bangla-dubbed") || c.includes("bangla dubbed")) {
+    body.country = "Bangladesh";
+    body.sort = "Latest";
   } else if (c.includes("bangla") || c.includes("bengali") || c.includes("bangladesh")) {
     body.country = "Bangladesh";
     body.sort = "Latest";
-  } else if (c.includes("pakistan")) {
+  } else if (c.includes("pakistan") || c.includes("urdu")) {
+    body.channelId = 2;
     body.country = "Pakistan";
+  } else if (c.includes("thai")) {
+    body.channelId = 2;
+    body.country = "Thailand";
+  } else if (c.includes("indonesian")) {
+    body.country = "Indonesia";
+  } else if (c.includes("filipino")) {
+    body.country = "Philippines";
+  } else if (c.includes("spanish")) {
+    body.channelId = 2;
+    body.country = "Spain";
+  } else if (c.includes("french")) {
+    body.country = "France";
   } else if (c.includes("english") || c.includes("hollywood")) {
     body.country = "United States";
   }
   if (c.startsWith("/genre/")) {
-    const g = category.split("/").pop() || "";
-    body.genre = g.charAt(0).toUpperCase() + g.slice(1);
+    const rawGenre = (category.split("/").pop() || "").toLowerCase();
+    const genreAliases = {
+      "sci-fi": "Sci-Fi",
+      scifi: "Sci-Fi",
+      action: "Action",
+      adventure: "Adventure",
+      animation: "Animation",
+      comedy: "Comedy",
+      crime: "Crime",
+      documentary: "Documentary",
+      drama: "Drama",
+      family: "Family",
+      fantasy: "Fantasy",
+      history: "History",
+      horror: "Horror",
+      music: "Music",
+      mystery: "Mystery",
+      romance: "Romance",
+      sport: "Sport",
+      thriller: "Thriller",
+      war: "War"
+    };
+    body.genre = genreAliases[rawGenre] || rawGenre.replace(/(^|-)\w/g, m => m.toUpperCase());
   }
   return body;
 }
@@ -1059,8 +1126,18 @@ export async function handleMovieBoxRoute(legacy, query) {
       if (lower === "/upcoming") {
         return await handleMovieBoxRoute("upcoming", query);
       }
+      if (lower === "/shorts" || lower === "/reels") {
+        return await handleMovieBoxRoute("shorts", query);
+      }
       if (lower === "/mostwatch/7d" || lower === "/new") {
         return await handleMovieBoxRoute("trending", query);
+      }
+      if (lower === "/top10") {
+        const home = await getHomeFeed();
+        const items = Array.isArray(home?.curated?.top10) && home.curated.top10.length
+          ? home.curated.top10
+          : (home?.trending || []).slice(0, 10);
+        return { ok: true, items, page: 1, totalPages: 1 };
       }
       if (lower === "/top-rated") {
         const home = await getHomeFeed();
@@ -1148,8 +1225,22 @@ export async function handleMovieBoxRoute(legacy, query) {
         items = [...new Map([...items, ...extraIn].map(x => [x.subjectId || x.path, x])).values()];
       }
 
-      // Fallback if a filter returns 0
-      if (!items.length && body.country === "Bangladesh") {
+      // Fallback if Bangla Dubbed / Genre / Bangladesh returns empty on primary channel
+      if (!items.length && lower.includes("bangla-dubbed")) {
+        const bdSearch = await handleMovieBoxRoute("search", new URLSearchParams({ q: "Bangla", page: String(page) })).catch(() => null);
+        if (Array.isArray(bdSearch?.items) && bdSearch.items.length) items = bdSearch.items;
+      } else if (!items.length && body.genre) {
+        const altCh = body.channelId === 2 ? 1 : 2;
+        const altRes = await mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/subject/filter`, {
+          method: "POST",
+          body: JSON.stringify({ ...body, channelId: altCh })
+        }, 120000).catch(() => null);
+        items = indexList(altRes?.data?.items, extra).filter(x => x.hasResource !== false);
+        if (!items.length) {
+          const gSearch = await handleMovieBoxRoute("search", new URLSearchParams({ q: body.genre, page: String(page) })).catch(() => null);
+          if (Array.isArray(gSearch?.items) && gSearch.items.length) items = gSearch.items;
+        }
+      } else if (!items.length && body.country === "Bangladesh") {
         const home = await getHomeFeed();
         items = [...home.trending, ...home.sections.flatMap(s => s.items)].filter(i => /bengali|bangla/i.test(i.language + " " + i.title)).slice(0, 24);
       }
@@ -1266,7 +1357,7 @@ export async function handleMovieBoxRoute(legacy, query) {
       const stars = (Array.isArray(j.data.stars) ? j.data.stars : []).map(st => ({
         staffId: String(st.staffId || ""),
         name: st.name || "",
-        role: st.character || "",
+        role: st.character || st.job || st.role || "Cast",
         avatarUrl: proxyImageUrl(st.avatarUrl || "", "avatar.jpg"),
         detailPath: st.detailPath || ""
       }));
@@ -1760,13 +1851,21 @@ export async function handleMovieBoxRoute(legacy, query) {
           id: String(m.id || ""),
           name: `${t1} vs ${t2}${scoreText}`,
           title: `${t1} vs ${t2}${scoreText}`,
+          team1Name: t1,
+          team2Name: t2,
+          team1Score: s1 !== "" ? String(s1) : "",
+          team2Score: s2 !== "" ? String(s2) : "",
           logo: proxyImageUrl(m.team1?.avatar || m.team2?.avatar || "", "team.png"),
           team1Logo: proxyImageUrl(m.team1?.avatar || "", "team1.png"),
           team2Logo: proxyImageUrl(m.team2?.avatar || "", "team2.png"),
           streamUrl: proxiedUrl,
           playUrl: proxiedUrl,
           url: proxiedUrl,
-          category: m.team1?.type || "Football",
+          category: m.team1?.type || m.type || "Football",
+          sportType: m.type || m.team1?.type || "Sports",
+          leagueName: m.league || m.matchRound || m.type || m.team1?.type || "Live Sports",
+          startTime: Number(m.startTime || m.arrangedTime || 0),
+          timeDesc: m.timeDesc || "",
           league: isLive
             ? `LIVE · ${m.timeDesc || m.league || "Match in progress"}`
             : m.status === "MatchNotStart"

@@ -323,16 +323,31 @@ function buildBoundedRangeHeader(rawRange) {
   return `bytes=${start}-${requestedEnd}`;
 }
 
-async function fetchMediaWithRetry(targetUrl, method, headers, clientAbortSignal, retries = 2) {
+function buildDownloadDisposition(rawName) {
+  const cleaned = String(rawName || "MovieStreamBD-Video.mp4")
+    .replace(/[\r\n"\\/;]+/g, " ")
+    .replace(/[<>:?*|]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 140) || "MovieStreamBD-Video.mp4";
+  const withExt = /\.[a-z0-9]{2,5}$/i.test(cleaned) ? cleaned : `${cleaned}.mp4`;
+  const ascii = withExt.replace(/[^\x20-\x7E]+/g, "_").replace(/"/g, "") || "MovieStreamBD-Video.mp4";
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(withExt)}`;
+}
+
+async function fetchMediaWithRetry(targetUrl, method, headers, clientAbortSignal, retries = 3, connectTimeoutMs = 30000) {
   let lastError = null;
   for (let attempt = 0; attempt <= retries; attempt++) {
     if (clientAbortSignal?.aborted) {
       throw new DOMException("Client aborted request", "AbortError");
     }
-    const timeoutSignal = AbortSignal.timeout(45000);
+    const connectController = new AbortController();
+    const timer = setTimeout(() => {
+      connectController.abort(new DOMException("Connect timeout", "TimeoutError"));
+    }, connectTimeoutMs);
     const signal = clientAbortSignal
-      ? AbortSignal.any([clientAbortSignal, timeoutSignal])
-      : timeoutSignal;
+      ? AbortSignal.any([clientAbortSignal, connectController.signal])
+      : connectController.signal;
     try {
       const upstream = await fetch(targetUrl, {
         method,
@@ -340,25 +355,34 @@ async function fetchMediaWithRetry(targetUrl, method, headers, clientAbortSignal
         redirect: "follow",
         signal
       });
+      clearTimeout(timer);
       if ((upstream.status >= 500 || upstream.status === 429) && attempt < retries) {
         try {
           await upstream.body?.cancel();
         } catch {}
-        await new Promise(r => setTimeout(r, 250 * (attempt + 1)));
+        await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
         continue;
       }
       return upstream;
     } catch (err) {
+      clearTimeout(timer);
       lastError = err;
       if (clientAbortSignal?.aborted || attempt >= retries) throw err;
-      await new Promise(r => setTimeout(r, 250 * (attempt + 1)));
+      await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
     }
   }
   throw lastError || new Error("Media upstream unavailable");
 }
 
 // Direct MP4 media proxy with Range support & MovieBox Referer header
-async function proxyMediaStream(req, res, targetUrl, extraHeaders = {}, forceDownload = false) {
+async function proxyMediaStream(req, res, targetUrl, extraHeaders = {}, forceDownload = false, customFilename = "") {
+  if (forceDownload) {
+    try {
+      req.setTimeout?.(0);
+      res.setTimeout?.(0);
+    } catch {}
+  }
+
   const headers = new Headers({
     "User-Agent": MOVIEBOX_UA,
     Accept: req.get("accept") || "*/*",
@@ -382,7 +406,7 @@ async function proxyMediaStream(req, res, targetUrl, extraHeaders = {}, forceDow
 
   let upstream;
   try {
-    upstream = await fetchMediaWithRetry(targetUrl, req.method, headers, abortController.signal, 2);
+    upstream = await fetchMediaWithRetry(targetUrl, req.method, headers, abortController.signal, 3, 30000);
     if (upstream.status === 403 && extraHeaders.Referer === MOVIEBOX_PLAYER_REFERER) {
       try {
         await upstream.body?.cancel();
@@ -390,7 +414,7 @@ async function proxyMediaStream(req, res, targetUrl, extraHeaders = {}, forceDow
       for (const altRef of ["https://moviebox.ph/", MOVIEBOX_REFERER]) {
         const altHeaders = new Headers(headers);
         altHeaders.set("Referer", altRef);
-        upstream = await fetchMediaWithRetry(targetUrl, req.method, altHeaders, abortController.signal, 1);
+        upstream = await fetchMediaWithRetry(targetUrl, req.method, altHeaders, abortController.signal, 1, 30000);
         if (upstream.ok || upstream.status === 206) break;
         try {
           await upstream.body?.cancel();
@@ -431,8 +455,10 @@ async function proxyMediaStream(req, res, targetUrl, extraHeaders = {}, forceDow
   if (!upstream.headers.get("accept-ranges")) {
     res.setHeader("accept-ranges", "bytes");
   }
+  res.setHeader("access-control-allow-origin", "*");
+  res.setHeader("access-control-expose-headers", "Content-Length, Content-Range, Accept-Ranges, Content-Disposition");
   if (forceDownload) {
-    res.setHeader("content-disposition", "attachment; filename=MovieStreamBD-Video.mp4");
+    res.setHeader("content-disposition", buildDownloadDisposition(customFilename));
     res.setHeader("cache-control", "private, no-store");
   } else {
     res.setHeader("vary", "Range");
@@ -471,6 +497,8 @@ app.all("/api/cinepulse-media", async (req, res) => {
     return res.status(405).set("Allow", "GET, HEAD").send("Method not allowed");
   }
 
+  const customFilename = String(req.query.filename || "");
+  const forceDownload = req.query.download === "1";
   const mbToken = String(req.query.mb || "");
   if (mbToken) {
     const targetUrl = verifyMediaToken(mbToken);
@@ -483,7 +511,8 @@ app.all("/api/cinepulse-media", async (req, res) => {
         res,
         targetUrl,
         { Referer: MOVIEBOX_PLAYER_REFERER },
-        req.query.download === "1"
+        forceDownload,
+        customFilename
       );
     } catch (error) {
       console.error("[cinepulse-media upstream error]", error?.name, error?.message, error?.cause?.code || "");
@@ -504,7 +533,8 @@ app.all("/api/cinepulse-media", async (req, res) => {
       res,
       `${CINEPULSE_UPSTREAM}/api/mb-stream.mp4?t=${encodeURIComponent(token)}`,
       { "x-api-key": apiKey },
-      req.query.download === "1"
+      forceDownload,
+      customFilename
     );
   } catch (error) {
     console.error("[cinepulse-media fallback error]", error?.name, error?.message);

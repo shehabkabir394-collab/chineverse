@@ -383,14 +383,41 @@
         items.length + "টি ম্যাচ পাওয়া গেছে (" + liveCount + "টি ● LIVE)। LIVE ম্যাচে ক্লিক করে দেখুন।";
       grid.onclick = e => {
         const c = e.target.closest("[data-index]");
-        if (c) play(items[Number(c.dataset.index)]);
+        if (c) {
+          grid.querySelectorAll(".sports-card.active").forEach(el => el.classList.remove("active"));
+          c.classList.add("active");
+          play(items[Number(c.dataset.index)]);
+        }
       };
       grid.onkeydown = e => {
         if ((e.key === "Enter" || e.key === " ") && e.target.matches("[data-index]")) {
           e.preventDefault();
+          grid.querySelectorAll(".sports-card.active").forEach(el => el.classList.remove("active"));
+          e.target.classList.add("active");
           play(items[Number(e.target.dataset.index)]);
         }
       };
+
+      const requestedMatch = (new URLSearchParams(location.search).get("match") || "").trim().toLowerCase();
+      if (requestedMatch) {
+        const matchIdx = items.findIndex(item => {
+          const id = String(item?.id || "").trim().toLowerCase();
+          const nm = nameOf(item).trim().toLowerCase();
+          const tPair = `${item?.team1Name || ""}-${item?.team2Name || ""}`.trim().toLowerCase();
+          return (id && id === requestedMatch) || tPair === requestedMatch || nm.includes(requestedMatch);
+        });
+        if (matchIdx >= 0) {
+          const matchedCard = grid.querySelector(`[data-index="${matchIdx}"]`);
+          matchedCard?.classList.add("active");
+          const matchedItem = items[matchIdx];
+          if (streamOf(matchedItem)) {
+            play(matchedItem);
+          } else {
+            status.textContent = `${nameOf(matchedItem)} — ${matchedItem?.league || "এই ম্যাচটি এখনো শুরু হয়নি বা স্ট্রিম এখনো আসেনি"}।`;
+            matchedCard?.scrollIntoView({ behavior: "smooth", block: "center" });
+          }
+        }
+      }
     } catch (e) {
       status.textContent = "Live Sports লোড হয়নি: " + e.message;
     }

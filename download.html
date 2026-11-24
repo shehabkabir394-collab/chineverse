@@ -5,13 +5,21 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#050711">
   <title>Download — MovieStream BD</title>
+  <!-- Google Analytics - MovieStream BD -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-VK18GBQVWP"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-VK18GBQVWP');
+  </script>
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
-  <link rel="stylesheet" href="css/style.css?v=20261124-90hz-3">
-  <link rel="stylesheet" href="css/movie-api.css?v=20261124-90hz-3">
-  <link rel="stylesheet" href="css/watch-enhancements.css?v=20261124-90hz-3">
-  <link rel="stylesheet" href="css/cineverse-app-redesign.css?v=20261124-90hz-3">
-  <link rel="stylesheet" href="css/movie-api-account.css?v=20261124-90hz-3">
-  <link rel="stylesheet" href="css/liquid-glass-theme.css?v=20261124-90hz-3">
+  <link rel="stylesheet" href="css/style.css?v=20261124-90hz-5">
+  <link rel="stylesheet" href="css/movie-api.css?v=20261124-90hz-5">
+  <link rel="stylesheet" href="css/watch-enhancements.css?v=20261124-90hz-5">
+  <link rel="stylesheet" href="css/cineverse-app-redesign.css?v=20261124-90hz-5">
+  <link rel="stylesheet" href="css/movie-api-account.css?v=20261124-90hz-5">
+  <link rel="stylesheet" href="css/liquid-glass-theme.css?v=20261124-90hz-5">
   <style>
     .ms-download-page{max-width:920px;margin:0 auto;padding:6px 0 36px}
     .ms-download-brand{display:flex;justify-content:center;margin:8px 0 18px}
@@ -47,9 +55,9 @@
     @media(max-width:480px){.ms-download-poster{width:72px}.ms-download-card{border-radius:16px}.ms-download-meta span{font-size:11px;padding:7px 9px}}
   </style>
   <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script defer src="js/movie-api-download.js?v=20261124-90hz-3"></script>
-  <script defer src="js/movie-api-discovery.js?v=20261124-90hz-3"></script>
-  <script defer src="js/movie-api-account.js?v=20261124-90hz-3"></script>
+  <script defer src="js/movie-api-download.js?v=20261124-90hz-5"></script>
+  <script defer src="js/movie-api-discovery.js?v=20261124-90hz-5"></script>
+  <script defer src="js/movie-api-account.js?v=20261124-90hz-5"></script>
 </head>
 <body class="cv-home-body ms-watch-page">
   <header class="cv-topbar">
@@ -117,6 +125,7 @@
           <label>SELECT DOWNLOAD QUALITY<select id="downloadQuality" disabled><option>Loading available qualities…</option></select></label>
           <div id="downloadStatus" class="ms-download-status" aria-live="polite">Checking available download sources…</div>
           <a id="downloadAction" class="ms-download-action" href="#" aria-disabled="true"><span>ONE CLICK DOWNLOAD<small>Direct MP4 · Selected quality</small></span><b class="icon">↓</b></a>
+          <button id="downloadSafeChunked" class="ms-download-action zip" type="button" hidden style="margin-top:0"><span>🛡 VERIFIED FULL DOWNLOAD<small>অর্ধেক আটকালে এটি চাপুন — ১০০% পূর্ণ ফাইল ডাউনলোড</small></span><b class="icon">✓</b></button>
         </div>
         <section id="downloadEpisodeSection" class="ms-episode-section" hidden>
           <div class="section-head"><div><p class="eyebrow">SEASON &amp; EPISODE GUIDE</p><h2>Episodes <em id="downloadEpisodeCount"></em></h2></div></div>

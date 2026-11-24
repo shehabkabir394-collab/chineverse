@@ -18,12 +18,20 @@
   <meta name="twitter:title" content="MovieStream BD — Movies &amp; Dramas">
   <meta name="twitter:description" content="Discover movies, series, anime, K-Dramas and live sports in one place.">
   <title>MovieStream BD — Movies &amp; Dramas</title>
-  <link rel="stylesheet" href="css/cineverse-app-redesign.css?v=20261124-90hz-3">
-  <link rel="stylesheet" href="css/movie-api-account.css?v=20261124-90hz-3">
-  <link rel="stylesheet" href="css/liquid-glass-theme.css?v=20261124-90hz-3">
-  <script defer src="js/movie-api-home.js?v=20261124-90hz-3"></script>
-  <script defer src="js/movie-api-discovery.js?v=20261124-90hz-3"></script>
-  <script defer src="js/movie-api-account.js?v=20261124-90hz-3"></script>
+  <!-- Google Analytics - MovieStream BD -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-VK18GBQVWP"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-VK18GBQVWP');
+  </script>
+  <link rel="stylesheet" href="css/cineverse-app-redesign.css?v=20261124-90hz-4">
+  <link rel="stylesheet" href="css/movie-api-account.css?v=20261124-90hz-4">
+  <link rel="stylesheet" href="css/liquid-glass-theme.css?v=20261124-90hz-4">
+  <script defer src="js/movie-api-home.js?v=20261124-90hz-4"></script>
+  <script defer src="js/movie-api-discovery.js?v=20261124-90hz-4"></script>
+  <script defer src="js/movie-api-account.js?v=20261124-90hz-4"></script>
 </head>
 <body class="cv-home-body">
   <header class="cv-topbar">
@@ -116,13 +124,15 @@
 
     <section id="cvPlatformsSection" class="cv-section cv-platforms-strip-section" aria-label="Streaming platforms" hidden></section>
 
+    <section id="cvLiveSportsSection" class="cv-section cv-live-sports-section" aria-label="Live Sports" hidden></section>
+
     <section id="cvCategorySection" class="cv-section cv-explorer-section" aria-label="Explore Categories">
       <div class="cv-section-header">
         <div class="cv-section-title-group">
           <h2 class="cv-section-title">Explore Categories</h2>
-          <span class="cv-section-sub">Homepage Collections — নতুন, জনপ্রিয় ও ট্রেন্ডিং কনটেন্টের জন্য।</span>
+          <span class="cv-section-sub">Homepage Collections</span>
         </div>
-        <a class="cv-more-link" href="catalog.html">All Categories ›</a>
+        <a class="cv-more-link" href="catalog.html?view=categories">All Categories ›</a>
       </div>
       <div id="cvCategoryGrid" class="cv-cat-grid"></div>
     </section>

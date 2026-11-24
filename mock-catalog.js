@@ -477,9 +477,54 @@ export function handleMockMovieApi(legacy, query, baseUrl) {
       return {
         ok: true,
         channels: [
-          { id: "sp-1", name: "CineSports HD 1", category: "Cricket", league: "International T20", quality: "1080p", live: true, logo: `${baseUrl}/images/moviestreambd-logo.svg` },
-          { id: "sp-2", name: "Football Arena Live", category: "Football", league: "Premier Matchday", quality: "1080p", live: true, logo: `${baseUrl}/images/moviestreambd-logo.svg` },
-          { id: "sp-3", name: "Asia Sports Network", category: "Multi-Sport", league: "Live Broadcast", quality: "720p", live: true, logo: `${baseUrl}/images/moviestreambd-logo.svg` }
+          {
+            id: "sp-1",
+            name: "Bangladesh vs India",
+            team1Name: "Bangladesh",
+            team2Name: "India",
+            team1Score: "168/5",
+            team2Score: "164/8",
+            category: "Cricket",
+            leagueName: "International T20",
+            league: "LIVE · International T20",
+            startTime: Date.now(),
+            timeDesc: "LIVE",
+            quality: "LIVE HD",
+            live: true,
+            logo: `${baseUrl}/images/moviestreambd-logo.svg`
+          },
+          {
+            id: "sp-2",
+            name: "Real Madrid vs Barcelona",
+            team1Name: "Real Madrid",
+            team2Name: "Barcelona",
+            team1Score: "2",
+            team2Score: "1",
+            category: "Football",
+            leagueName: "La Liga",
+            league: "LIVE · Premier Matchday",
+            startTime: Date.now(),
+            timeDesc: "78'",
+            quality: "LIVE HD",
+            live: true,
+            logo: `${baseUrl}/images/moviestreambd-logo.svg`
+          },
+          {
+            id: "sp-3",
+            name: "Los Angeles Lakers vs Boston Celtics",
+            team1Name: "LA Lakers",
+            team2Name: "Boston Celtics",
+            team1Score: "98",
+            team2Score: "95",
+            category: "Basketball",
+            leagueName: "NBA",
+            league: "Upcoming · NBA",
+            startTime: Date.now() + 3600000,
+            timeDesc: "Upcoming",
+            quality: "SOON",
+            live: false,
+            logo: `${baseUrl}/images/moviestreambd-logo.svg`
+          }
         ]
       };
 

@@ -22,17 +22,21 @@
   const sectionsRoot = $("#movieApiSections");
   const statusEl = $("#movieApiStatus");
   const platformEl = $("#cvPlatformsSection");
+  const liveSportsEl = $("#cvLiveSportsSection");
   const moreDropdown = $("#cvMoreDropdown");
 
+  const WATCHLIST_KEY = "cv_watchlist_v1";
+  const SPORTS_REMINDER_KEY = "cv_sports_reminders_v1";
+
   const EXPLORE_CATEGORIES = [
-    { icon: "🎬", title: "Bollywood", sub: "বলিউড হিন্দি মুভি", href: "catalog.html?category=%2Fbollywood" },
-    { icon: "🎥", title: "Hollywood", sub: "হলিউড ব্লকবাস্টার", href: "catalog.html?category=%2Flanguage%2Fenglish" },
-    { icon: "🇮🇳", title: "South Indian", sub: "সাউথ ইন্ডিয়ান অ্যাকশন", href: "catalog.html?category=%2FsouthIndian" },
-    { icon: "🇰🇷", title: "Korean Drama", sub: "জনপ্রিয় কে-ড্রামা", href: "catalog.html?category=%2Flanguage%2Fkorean" },
-    { icon: "🇨🇳", title: "Chinese Drama", sub: "সি-ড্রামা ও ফ্যান্টাসি", href: "catalog.html?category=%2Flanguage%2Fchinese" },
-    { icon: "🇯🇵", title: "Japanese Drama", sub: "জে-ড্রামা ও থ্রিলার", href: "catalog.html?category=%2Flanguage%2Fjapanese-drama" },
-    { icon: "🍥", title: "Anime", sub: "অ্যানিমে সিরিজ ও মুভি", href: "catalog.html?category=%2Fanime" },
-    { icon: "🇧🇩", title: "Bengali", sub: "বাংলা মুভি ও নাটক", href: "catalog.html?category=%2Flanguage%2Fbengali" }
+    { icon: "🎬", title: "Bollywood", href: "catalog.html?category=%2Fbollywood" },
+    { icon: "🎥", title: "Hollywood", href: "catalog.html?category=%2Flanguage%2Fenglish" },
+    { icon: "🇮🇳", title: "South Indian", href: "catalog.html?category=%2FsouthIndian" },
+    { icon: "🇰🇷", title: "K-Drama", href: "catalog.html?category=%2Flanguage%2Fkorean" },
+    { icon: "🇨🇳", title: "C-Drama", href: "catalog.html?category=%2Flanguage%2Fchinese" },
+    { icon: "🇯🇵", title: "J-Drama", href: "catalog.html?category=%2Flanguage%2Fjapanese-drama" },
+    { icon: "🍥", title: "Anime", href: "catalog.html?category=%2Fanime" },
+    { icon: "🇧🇩", title: "Bengali", href: "catalog.html?category=%2Flanguage%2Fbengali" }
   ];
 
   const PLATFORMS = [
@@ -68,7 +72,202 @@
   };
 
   let homeData = null;
+  let sportsChannels = [];
+  let spotlightSlides = [];
   let spotlightTimer = 0;
+  let resumeSpotlightFn = null;
+  let detailsModalSeq = 0;
+  let isHomeView = true;
+
+  function showToast(msg) {
+    document.querySelector(".cv-toast")?.remove();
+    const t = document.createElement("div");
+    t.className = "cv-toast";
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(() => t.remove(), 2600);
+  }
+
+  function loadJsonList(key) {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(key) || "[]");
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function saveJsonList(key, arr) {
+    try {
+      localStorage.setItem(key, JSON.stringify(arr));
+    } catch {}
+  }
+
+  function isInWatchlist(path) {
+    if (!path) return false;
+    return loadJsonList(WATCHLIST_KEY).some(x => x && x.path === path);
+  }
+
+  function toggleWatchlist(item) {
+    const path = String(item?.path || "");
+    if (!path) {
+      showToast("Watchlist unavailable for this item");
+      return false;
+    }
+    const list = loadJsonList(WATCHLIST_KEY);
+    const exists = list.some(x => x && x.path === path);
+    if (exists) {
+      saveJsonList(WATCHLIST_KEY, list.filter(x => x && x.path !== path));
+      showToast("Removed from My List");
+      return false;
+    }
+    const entry = {
+      path,
+      title: String(item.title || "Untitled"),
+      poster: safeImg(posterOf(item)),
+      typeBadge: String(item.typeBadge || item.quality || ""),
+      rating: item.rating || "",
+      folder: "watchLater",
+      savedAt: Date.now()
+    };
+    saveJsonList(WATCHLIST_KEY, [entry, ...list].slice(0, 100));
+    showToast("Saved to My List");
+    return true;
+  }
+
+  function getSportsReminders() {
+    return new Set(loadJsonList(SPORTS_REMINDER_KEY).map(String));
+  }
+
+  function toggleSportsReminder(key, matchName) {
+    const set = getSportsReminders();
+    let added = false;
+    if (set.has(key)) {
+      set.delete(key);
+      showToast(`Reminder removed for ${matchName}`);
+    } else {
+      set.add(key);
+      added = true;
+      showToast(`Notification set for ${matchName}`);
+    }
+    saveJsonList(SPORTS_REMINDER_KEY, [...set].slice(0, 60));
+    return added;
+  }
+
+  function initialsOf(name) {
+    const words = String(name || "").trim().split(/\s+/).filter(Boolean);
+    if (!words.length) return "SP";
+    if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+    return (words[0][0] + words[1][0]).toUpperCase();
+  }
+
+  function formatMatchTime(ch) {
+    const desc = String(ch?.timeDesc || "").trim();
+    if (desc) return desc;
+    const rawTs = Number(ch?.startTime || 0);
+    if (rawTs > 0) {
+      const ms = rawTs < 1e12 ? rawTs * 1000 : rawTs;
+      const d = new Date(ms);
+      if (!Number.isNaN(d.getTime())) {
+        try {
+          return new Intl.DateTimeFormat("en-US", {
+            month: "short",
+            day: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: false
+          }).format(d);
+        } catch {}
+      }
+    }
+    return ch?.live ? "LIVE NOW" : ch?.quality || "Upcoming";
+  }
+
+  function parseMatchTeams(ch) {
+    let t1 = String(ch?.team1Name || "").trim();
+    let t2 = String(ch?.team2Name || "").trim();
+    if (!t1 || !t2) {
+      const rawName = String(ch?.name || ch?.title || "").replace(/\([^)]*\)$/, "").trim();
+      const parts = rawName.split(/\s+vs\.?\s+/i);
+      t1 = t1 || parts[0] || "Team A";
+      t2 = t2 || parts[1] || "Team B";
+    }
+    return { t1, t2 };
+  }
+
+  function renderLiveSportsSection() {
+    if (!liveSportsEl) return;
+    if (!isHomeView || !sportsChannels.length) {
+      liveSportsEl.hidden = true;
+      return;
+    }
+    const reminders = getSportsReminders();
+    const visible = sportsChannels.slice(0, 12);
+    liveSportsEl.hidden = false;
+    liveSportsEl.innerHTML = `
+      <div class="cv-section-header">
+        <div class="cv-section-title-group">
+          <h2 class="cv-section-title">Live Sports</h2>
+        </div>
+        <a class="cv-more-link" href="sports.html">All ›</a>
+      </div>
+      <div class="cv-live-sports-row" role="list" aria-label="Live and upcoming sports matches">
+        ${visible.map(ch => {
+          const { t1, t2 } = parseMatchTeams(ch);
+          const matchKey = String(ch.id || `${t1}-${t2}`).trim();
+          const matchHref = `sports.html?match=${encodeURIComponent(matchKey)}`;
+          const league = String(ch.leagueName || ch.sportType || ch.category || "Sports").trim();
+          const s1 = ch.team1Score !== undefined && ch.team1Score !== "" ? String(ch.team1Score) : "";
+          const s2 = ch.team2Score !== undefined && ch.team2Score !== "" ? String(ch.team2Score) : "";
+          const hasScore = s1 !== "" && s2 !== "";
+          const centerScore = hasScore ? `${s1} - ${s2}` : "VS";
+          const timeText = formatMatchTime(ch);
+          const logo1 = safeImg(ch.team1Logo || ch.logo);
+          const logo2 = safeImg(ch.team2Logo || ch.logo);
+          const isLive = Boolean(ch.live);
+          const isReminded = reminders.has(matchKey);
+
+          const actionHtml = isLive && ch.streamUrl
+            ? `<a class="cv-match-btn cv-match-btn-live" href="${esc(matchHref)}">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+                <span>Watch Live</span>
+              </a>`
+            : `<button type="button" class="cv-match-btn ${isReminded ? "active" : ""}" data-sports-remind="${esc(matchKey)}" data-sports-name="${esc(`${t1} vs ${t2}`)}">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                <span>${isReminded ? "Notified" : "Notify Me"}</span>
+              </button>`;
+
+          return `
+            <article class="cv-match-card ${isLive ? "is-live" : ""}" role="listitem">
+              <div class="cv-match-league">
+                <span class="cv-match-dot ${isLive ? "live" : ""}" aria-hidden="true"></span>
+                <span class="cv-match-league-name">${esc(league)}</span>
+              </div>
+              <a class="cv-match-scoreboard" href="${esc(matchHref)}" aria-label="${esc(`${t1} vs ${t2}`)}">
+                <div class="cv-match-team">
+                  <div class="cv-match-crest">
+                    ${logo1 ? `<img loading="lazy" referrerpolicy="no-referrer" src="${esc(logo1)}" alt="${esc(t1)}" onerror="this.style.display='none';this.nextElementSibling.hidden=false"><span hidden>${esc(initialsOf(t1))}</span>` : `<span>${esc(initialsOf(t1))}</span>`}
+                  </div>
+                  <span class="cv-match-team-name">${esc(t1)}</span>
+                </div>
+                <div class="cv-match-center">
+                  <b class="cv-match-score tabular-nums">${esc(centerScore)}</b>
+                  <span class="cv-match-time tabular-nums">${esc(timeText)}</span>
+                </div>
+                <div class="cv-match-team">
+                  <div class="cv-match-crest">
+                    ${logo2 ? `<img loading="lazy" referrerpolicy="no-referrer" src="${esc(logo2)}" alt="${esc(t2)}" onerror="this.style.display='none';this.nextElementSibling.hidden=false"><span hidden>${esc(initialsOf(t2))}</span>` : `<span>${esc(initialsOf(t2))}</span>`}
+                  </div>
+                  <span class="cv-match-team-name">${esc(t2)}</span>
+                </div>
+              </a>
+              ${actionHtml}
+            </article>
+          `;
+        }).join("")}
+      </div>
+    `;
+  }
 
   function renderCategories() {
     if (!catGrid) return;
@@ -77,7 +276,6 @@
         <span class="cv-cat-emoji" aria-hidden="true">${c.icon}</span>
         <div class="cv-cat-copy">
           <b>${esc(c.title)}</b>
-          <span>${esc(c.sub)}</span>
         </div>
         <span class="cv-cat-arrow" aria-hidden="true">›</span>
       </a>`
@@ -105,6 +303,163 @@
     return path
       ? `watch.html?path=${encodeURIComponent(path)}&title=${encodeURIComponent(title)}`
       : `catalog.html?q=${encodeURIComponent(title)}`;
+  }
+
+  function downloadHref(item) {
+    const title = String(item.title || "Untitled").trim();
+    const path = String(item.path || "");
+    return path
+      ? `download.html?path=${encodeURIComponent(path)}&title=${encodeURIComponent(title)}`
+      : `catalog.html?q=${encodeURIComponent(title)}`;
+  }
+
+  function formatRuntime(dur) {
+    const n = Number(dur || 0);
+    if (!Number.isFinite(n) || n <= 0) return "";
+    const mins = n > 300 ? Math.round(n / 60) : Math.round(n);
+    if (mins < 60) return `${mins}m`;
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return m ? `${h}h ${m}m` : `${h}h`;
+  }
+
+  function closeSpotlightDetails() {
+    const modal = $("#cvSpotlightDetailsModal");
+    if (!modal) return;
+    modal.remove();
+    document.body.classList.remove("cv-modal-open");
+    if (typeof resumeSpotlightFn === "function") resumeSpotlightFn();
+  }
+
+  function renderDetailsModalBody(modal, item, detail, isLoading) {
+    const d = detail || item || {};
+    const title = String(d.title || item.title || "Featured");
+    const year = d.year || item.year || "";
+    const poster = safeImg(posterOf(d) || posterOf(item));
+    const rating = d.rating && Number(d.rating) > 0 ? `★ ${esc(d.rating)}` : "";
+    const lang = String(d.language || item.language || "International").split("·")[0].trim();
+    const runtime = formatRuntime(d.duration || item.duration);
+    const quality = d.quality || item.quality || "HD";
+    const country = d.country || item.country || "";
+    const genres = String(d.genre || item.genre || "").split(",").map(s => s.trim()).filter(Boolean).slice(0, 4).join(" · ");
+    const epSummary = Number(d.totalEpisodes) > 1 ? `${d.totalEpisodes} Episodes` : (d.typeBadge || item.typeBadge || "Movie");
+    const metaLine = [rating, year, runtime, epSummary, quality, lang, country].filter(Boolean).join(" · ");
+    const storyline = String(d.description || item.description || "").trim();
+    const dubs = Array.isArray(d.dubs) ? d.dubs.map(x => x.language || x.lanName).filter(Boolean) : [];
+    const staff = Array.isArray(d.staff) ? d.staff.filter(st => st && st.name) : [];
+    const inList = isInWatchlist(d.path || item.path);
+
+    const bodyEl = modal.querySelector(".cv-details-dynamic");
+    if (!bodyEl) return;
+
+    bodyEl.innerHTML = `
+      <div class="cv-details-hero">
+        <div class="cv-details-poster">
+          ${poster ? `<img referrerpolicy="no-referrer" src="${esc(poster)}" alt="${esc(title)}">` : `<div class="cv-card-fallback">${esc(title)}</div>`}
+        </div>
+        <div class="cv-details-head">
+          <h2 id="cvDetailsTitle" class="cv-details-title">${esc(title)}</h2>
+          ${metaLine ? `<p class="cv-details-meta tabular-nums">${esc(metaLine)}</p>` : ""}
+          ${genres ? `<p class="cv-details-genres">${esc(genres)}</p>` : ""}
+          ${dubs.length ? `<p class="cv-details-dubs"><b>Audio:</b> ${esc([...new Set(dubs)].join(", "))}</p>` : ""}
+          <div class="cv-details-actions">
+            <a class="cv-btn-blue-grad" href="${esc(itemHref(d))}">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+              <span>Watch Now</span>
+            </a>
+            <a class="cv-btn-glass" href="${esc(downloadHref(d))}">Download</a>
+            <button type="button" class="cv-btn-glass ${inList ? "active" : ""}" data-modal-watchlist>
+              ${inList ? "✓ In My List" : "+ My List"}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="cv-details-section">
+        <h3>Storyline</h3>
+        <p class="cv-details-synopsis">
+          ${storyline ? esc(storyline) : (isLoading ? "Loading storyline &amp; cast details…" : "Storyline details are not available for this title yet.")}
+        </p>
+      </div>
+
+      <div class="cv-details-section">
+        <h3>Cast &amp; Crew</h3>
+        ${isLoading && !staff.length
+          ? `<p class="cv-details-loading">Fetching cast &amp; crew…</p>`
+          : staff.length
+            ? `<div class="cv-details-cast-row">
+                ${staff.slice(0, 16).map(st => {
+                  const av = safeImg(st.avatarUrl);
+                  return `<a class="cv-details-cast-card" href="catalog.html?q=${encodeURIComponent(st.name)}">
+                    <div class="cv-details-cast-avatar">
+                      ${av ? `<img loading="lazy" referrerpolicy="no-referrer" src="${esc(av)}" alt="${esc(st.name)}" onerror="this.style.display='none';this.nextElementSibling.hidden=false"><span hidden>${esc(initialsOf(st.name))}</span>` : `<span>${esc(initialsOf(st.name))}</span>`}
+                    </div>
+                    <b>${esc(st.name)}</b>
+                    <span>${esc(st.role || "Cast")}</span>
+                  </a>`;
+                }).join("")}
+              </div>`
+            : `<p class="cv-details-loading">Cast &amp; crew information unavailable.</p>`}
+      </div>
+    `;
+
+    const wlBtn = bodyEl.querySelector("[data-modal-watchlist]");
+    if (wlBtn) {
+      wlBtn.onclick = () => {
+        const saved = toggleWatchlist(d.path ? d : item);
+        wlBtn.classList.toggle("active", saved);
+        wlBtn.textContent = saved ? "✓ In My List" : "+ My List";
+      };
+    }
+  }
+
+  async function openSpotlightDetails(item) {
+    if (!item) return;
+    clearInterval(spotlightTimer);
+    closeSpotlightDetails();
+
+    const seq = ++detailsModalSeq;
+    const modal = document.createElement("div");
+    modal.id = "cvSpotlightDetailsModal";
+    modal.className = "cv-details-modal";
+    modal.setAttribute("role", "dialog");
+    modal.setAttribute("aria-modal", "true");
+    modal.setAttribute("aria-labelledby", "cvDetailsTitle");
+    modal.innerHTML = `
+      <div class="cv-details-backdrop" data-close-details></div>
+      <div class="cv-details-sheet">
+        <button type="button" class="cv-details-close" data-close-details aria-label="Close details">×</button>
+        <div class="cv-details-dynamic"></div>
+      </div>
+    `;
+
+    document.body.appendChild(modal);
+    document.body.classList.add("cv-modal-open");
+    renderDetailsModalBody(modal, item, null, true);
+
+    modal.addEventListener("click", e => {
+      if (e.target.closest("[data-close-details]")) closeSpotlightDetails();
+    });
+    modal.querySelector(".cv-details-close")?.focus();
+
+    if (!item.path && !item.title) {
+      renderDetailsModalBody(modal, item, null, false);
+      return;
+    }
+
+    try {
+      const qs = new URLSearchParams();
+      if (item.path) qs.set("path", item.path);
+      if (item.title) qs.set("title", item.title);
+      const r = await fetch(`/api/movie-api/details?${qs.toString()}`);
+      const d = await r.json();
+      if (seq !== detailsModalSeq || !document.body.contains(modal)) return;
+      renderDetailsModalBody(modal, item, d?.ok ? d.detail : null, false);
+    } catch {
+      if (seq === detailsModalSeq && document.body.contains(modal)) {
+        renderDetailsModalBody(modal, item, null, false);
+      }
+    }
   }
 
   function cardMarkup(item) {
@@ -159,8 +514,10 @@
   }
 
   function renderSpotlight(slides) {
+    spotlightSlides = slides || [];
     if (!heroEl || !slides.length) {
       if (heroEl) heroEl.hidden = true;
+      resumeSpotlightFn = null;
       return;
     }
     heroEl.hidden = false;
@@ -203,7 +560,7 @@
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
                 <span>Watch Now</span>
               </a>
-              <a class="cv-btn-glass" href="catalog.html?q=${encodeURIComponent(title)}">More Details</a>
+              <button type="button" class="cv-btn-glass" data-spot-details="${activeIdx}">More Details</button>
             </div>
           </div>
 
@@ -245,14 +602,21 @@
 
     const resetTimer = () => {
       clearInterval(spotlightTimer);
-      if (slides.length > 1 && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      if (slides.length > 1 && !matchMedia("(prefers-reduced-motion: reduce)").matches && !$("#cvSpotlightDetailsModal")) {
         spotlightTimer = setInterval(() => {
-          if (!document.hidden) go(activeIdx + 1);
+          if (!document.hidden && !$("#cvSpotlightDetailsModal")) go(activeIdx + 1);
         }, 7000);
       }
     };
+    resumeSpotlightFn = resetTimer;
 
     heroEl.onclick = e => {
+      const detailsBtn = e.target.closest("[data-spot-details]");
+      if (detailsBtn) {
+        e.preventDefault();
+        openSpotlightDetails(slides[Number(detailsBtn.dataset.spotDetails)] || slides[activeIdx]);
+        return;
+      }
       const dot = e.target.closest("[data-spot-dot]");
       if (dot) {
         go(Number(dot.dataset.spotDot));
@@ -269,6 +633,13 @@
         } else {
           go(idx);
         }
+      }
+    };
+
+    heroEl.onkeydown = e => {
+      if ((e.key === "Enter" || e.key === " ") && e.target.matches("[data-spot-card]")) {
+        e.preventDefault();
+        go(Number(e.target.dataset.spotCard));
       }
     };
 
@@ -300,8 +671,10 @@
 
   function renderHomeView() {
     if (!homeData) return;
+    isHomeView = true;
     catSection.hidden = false;
     renderPlatforms();
+    renderLiveSportsSection();
 
     const bannersRaw = [...(homeData.banners || []), ...(homeData.trending || [])];
     const bannerUniq = dedupeList(bannersRaw).filter(item => safeImg(posterOf(item)) && item.hasResource !== false).slice(0, 7);
@@ -334,7 +707,7 @@
         title: "🏆 Top 10 This Week",
         top10: true,
         items: dedupeList(curated.top10?.length ? curated.top10 : allPool).slice(0, 10),
-        moreHref: "catalog.html?category=%2Fmostwatch%2F7d"
+        moreHref: "catalog.html?category=%2Ftop10"
       },
       {
         title: "🇮🇳 Hindi Dubbed Movies",
@@ -438,10 +811,12 @@
   }
 
   async function renderFilteredTab(tabKey, label) {
+    isHomeView = false;
     clearInterval(spotlightTimer);
     heroEl.hidden = true;
     catSection.hidden = true;
     if (platformEl) platformEl.hidden = true;
+    if (liveSportsEl) liveSportsEl.hidden = true;
     statusEl.hidden = false;
     statusEl.textContent = `Loading ${label}…`;
     sectionsRoot.innerHTML = "";
@@ -505,6 +880,19 @@
   }
 
   document.addEventListener("click", e => {
+    const remindBtn = e.target.closest("[data-sports-remind]");
+    if (remindBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const key = remindBtn.dataset.sportsRemind || "";
+      const name = remindBtn.dataset.sportsName || "Match";
+      const active = toggleSportsReminder(key, name);
+      remindBtn.classList.toggle("active", active);
+      const labelSpan = remindBtn.querySelector("span");
+      if (labelSpan) labelSpan.textContent = active ? "Notified" : "Notify Me";
+      return;
+    }
+
     const moreBtn = e.target.closest("[data-more-trigger]");
     if (moreBtn) {
       e.preventDefault();
@@ -530,15 +918,30 @@
   });
 
   document.addEventListener("keydown", e => {
-    if (e.key === "Escape") closeMoreDropdown();
+    if (e.key === "Escape") {
+      closeSpotlightDetails();
+      closeMoreDropdown();
+    }
   });
 
   window.addEventListener("resize", closeMoreDropdown, { passive: true });
+
+  async function loadSportsPreview() {
+    try {
+      const r = await fetch("/api/movie-api/sports", { cache: "no-store" });
+      const d = await r.json();
+      if (r.ok && d?.ok && Array.isArray(d.channels) && d.channels.length) {
+        sportsChannels = d.channels;
+        renderLiveSportsSection();
+      }
+    } catch {}
+  }
 
   async function init() {
     renderCategories();
     statusEl.hidden = false;
     statusEl.textContent = "Loading featured movies and dramas…";
+    loadSportsPreview();
     try {
       const r = await fetch("/api/movie-api/home");
       const d = await r.json();

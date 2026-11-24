@@ -130,7 +130,23 @@
         : allBtn + btns;
   }
 
+  function updateDownloadLink() {
+    const dlBtn = $("#movieWatchDownload");
+    if (!dlBtn) return;
+    const qs = new URLSearchParams({
+      path: String(path || ""),
+      title: String(watchDetail?.title || requestedTitle || ""),
+      episode: String(selectedEpIdx)
+    });
+    const activeQual = playerApi?.getState?.().activeQuality;
+    if (activeQual && /\d{3,4}/.test(String(activeQual))) {
+      qs.set("quality", String(activeQual).match(/\d{3,4}/)[0] + "p");
+    }
+    dlBtn.href = `download.html?${qs.toString()}`;
+  }
+
   function syncPlayerUiState() {
+    updateDownloadLink();
     if (!playerApi) return;
     const st = playerApi.getState();
 
@@ -368,10 +384,7 @@
     if (streamMsg) streamMsg.textContent = "Loading video stream…";
 
     root.querySelectorAll("[data-watch-ep]").forEach(b => b.classList.toggle("active", Number(b.dataset.watchEp) === idx));
-    const dlBtn = $("#movieWatchDownload");
-    if (dlBtn) {
-      dlBtn.href = `download.html?path=${encodeURIComponent(path)}&title=${encodeURIComponent(watchDetail?.title || "")}&episode=${idx}`;
-    }
+    updateDownloadLink();
 
     const se = Number(ep.seasonNumber ?? ep.se ?? 0) || 0;
     const epNum = ep.ep != null ? Number(ep.ep) : Number(ep.episodeNumber ?? ep.number ?? 1);

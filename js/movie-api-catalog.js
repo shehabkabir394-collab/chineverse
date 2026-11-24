@@ -12,10 +12,11 @@
  const posterOf=item=>imageValue(item?.poster||item?.posterUrl||item?.poster_url||item?.previewImage||item?.preview_image||item?.bannerImage||item?.banner_image||item?.cover||item?.coverUrl||item?.coverImage||item?.image||item?.imageUrl||item?.image_url||item?.thumbnail||item?.thumbnailUrl||item?.thumbnail_url||item?.pic||item?.img);
  const norm=v=>text(v).toLowerCase().replace(/[_-]+/g," ").replace(/\s+/g," ").trim();
  const params=new URLSearchParams(location.search);
- const selected=params.get("category")||"", letter=(params.get("letter")||"").toUpperCase(), page=Math.max(1,Number(params.get("page"))||1);
+ const selected=params.get("category")||"", letter=(params.get("letter")||"").toUpperCase(), page=Math.max(1,Number(params.get("page"))||1), viewAllCats=params.get("view")==="categories";
  const root=$("#catalogGrid"),status=$("#catalogStatus"),pager=$("#catalogPager"),nav=$("#catalogCategories"),az=$("#catalogAZ"),search=$("#catalogSearch"),heading=$("#catalogHeading");
+ const allCatsPanel=$("#catalogAllCatsPanel"),allCatsToggle=$("#catalogAllCatsToggle");
  const pageSize=24;
- let data=null,all=[],apiCatalogMode=false,apiMeta=null;
+ let data=null,all=[],apiCatalogMode=false,apiMeta=null,allApiCategories=[];
  const isNigerian=item=>{
   const fields=[item?.country,item?.originCountry,item?.productionCountry,item?.originalCountry,item?.nationality,item?.region,item?.title,item?.language,item?.originalLanguage,item?.productionCountries,item?.countries,item?.description,...(Array.isArray(item?._sections)?item._sections:[])];
   return fields.some(v=>Array.isArray(v)?v.some(x=>/nigeria|nigerian|nollywood|naija/i.test(String(x?.name||x?.code||x||""))):/nigeria|nigerian|nollywood|naija/i.test(String(v||"")));
@@ -221,16 +222,51 @@
   if(safePage<pages)html+='<a class="btn ghost" href="'+esc(link({page:safePage+1}))+'">Next ›</a>';
   pager.innerHTML=html;
  }
+ function setAllCatsOpen(open){
+  if(!allCatsPanel||!allCatsToggle)return;
+  allCatsPanel.hidden=!open;
+  allCatsToggle.setAttribute("aria-expanded",open?"true":"false");
+  const total=allApiCategories.length||(Array.isArray(data?.categories)?data.categories.length:0);
+  allCatsToggle.textContent=(open?"Hide Categories ▴":"All Categories"+(total?" ("+total+")":"")+" ▾");
+ }
+ function renderAllCatsPanel(cats){
+  if(!allCatsPanel)return;
+  if(!cats.length){allCatsPanel.hidden=true;return;}
+  const groupsOrder=["Collections","Languages & Regions","Genres"];
+  const grouped=new Map();
+  cats.forEach(c=>{
+   const g=text(c.group)||"Collections";
+   if(!grouped.has(g))grouped.set(g,[]);
+   grouped.get(g).push(c);
+  });
+  const orderedGroups=[...new Set([...groupsOrder,...grouped.keys()])].filter(g=>grouped.has(g));
+  allCatsPanel.innerHTML=orderedGroups.map(groupName=>{
+   const list=grouped.get(groupName)||[];
+   return '<div class="cv-all-cats-group"><div class="cv-all-cats-group-title">'+esc(groupName)+' <span>('+list.length+')</span></div><div class="cv-all-cats-grid">'+
+    list.map(c=>{
+     const value=text(c.path)||text(c.slug)||text(c.label);
+     const label=text(c.label)||text(c.name)||text(c.title)||value;
+     const icon=text(c.icon)||"🎬";
+     const active=norm(value)===norm(selected);
+     return '<a class="cv-all-cat-item '+(active?"active":"")+'" href="catalog.html?category='+encodeURIComponent(value)+'"><span class="cv-all-cat-ico" aria-hidden="true">'+icon+'</span><b>'+esc(label)+'</b></a>';
+    }).join("")+
+   '</div></div>';
+  }).join("");
+  const shouldOpen=viewAllCats||allCatsToggle?.getAttribute("aria-expanded")==="true";
+  setAllCatsOpen(shouldOpen);
+ }
  function renderNav(){
-  const cats=Array.isArray(data.categories)?data.categories:[];
+  const cats=allApiCategories.length?allApiCategories:(Array.isArray(data?.categories)?data.categories:[]);
   const seen=new Set(),items=[];
   cats.forEach(c=>{
    const value=text(c.path)||text(c.slug)||text(c.label)||text(c.name)||text(c.title);
    const label=text(c.label)||text(c.name)||text(c.title)||text(c.slug)||value,key=norm(value);
-   if(value&&label&&!seen.has(key)){seen.add(key);items.push({value,label});}
+   if(value&&label&&!seen.has(key)){seen.add(key);items.push({value,label,group:c.group,icon:c.icon});}
   });
-  const custom=Object.entries(customLabels).filter(([value])=>value.startsWith("cv:")).map(([value,label])=>'<a class="catalog-chip '+(selected===value?"active":"")+'" href="catalog.html?category='+encodeURIComponent(value)+'">'+esc(label)+'</a>').join("");
-  nav.innerHTML='<a class="catalog-chip '+(!selected?"active":"")+'" href="catalog.html">ALL A–Z</a>'+custom+items.map(c=>'<a class="catalog-chip '+(norm(c.value)===norm(selected)?"active":"")+'" href="catalog.html?category='+encodeURIComponent(c.value)+'">'+esc(c.label)+'</a>').join("");
+  const topQuick=items.filter(c=>c.group!=="Genres").slice(0,18);
+  const quickList=topQuick.length?topQuick:items;
+  nav.innerHTML='<a class="catalog-chip '+(!selected?"active":"")+'" href="catalog.html">ALL A–Z</a>'+quickList.map(c=>'<a class="catalog-chip '+(norm(c.value)===norm(selected)?"active":"")+'" href="catalog.html?category='+encodeURIComponent(c.value)+'">'+esc(c.label)+'</a>').join("");
+  renderAllCatsPanel(cats);
   const letters="ABCDEFGHIJKLMNOPQRSTUVWXYZ#".split("");
   az.innerHTML=letters.map(l=>'<a class="catalog-letter '+(letter===l?"active":"")+'" href="'+esc(link({letter:l,page:1}))+'">'+l+'</a>').join("");
  }
@@ -244,15 +280,26 @@
   }catch{}
  }
  ["#catalogLanguageFilter","#catalogTypeFilter","#catalogGenreFilter"].forEach(id=>$(id)?.addEventListener("change",render));
+ async function ensureCategories(){
+  if(allApiCategories.length)return allApiCategories;
+  try{
+   const r=await fetch("/api/movie-api/categories",{headers:{Accept:"application/json"},cache:"default"});
+   const d=await r.json();
+   if(r.ok&&d?.ok&&Array.isArray(d.categories)){allApiCategories=d.categories;return allApiCategories;}
+  }catch{}
+  return [];
+ }
  async function load(){
   const q=params.get("q")||"";
   if(search)search.value=q;
   apiCatalogMode=false;
   apiMeta=null;
   try{
+   const catsPromise=ensureCategories();
    if(q){
     /* Search directly. Do not wait for homepage data or download every Hindi catalog page. */
-    data={categories:[]};
+    const cats=await catsPromise;
+    data={categories:cats};
     status.textContent="Searching movies and dramas…";
     const response=await fetch("/api/movie-api/search?q="+encodeURIComponent(q)+"&page="+page,{headers:{Accept:"application/json"},cache:"default"});
     const payload=await response.json();
@@ -266,10 +313,15 @@
     if(!all.length)status.textContent="No matching movies or dramas found.";
    }else{
     status.textContent="Loading Movie API catalog…";
-    const response=await fetch("/api/movie-api/home",{headers:{Accept:"application/json"},cache:"default"});
+    const [response,cats]=await Promise.all([
+     fetch("/api/movie-api/home",{headers:{Accept:"application/json"},cache:"default"}),
+     catsPromise
+    ]);
     const payload=await response.json();
     if(!response.ok||payload.ok!==true)throw new Error(payload.error||"Movie API unavailable");
     data=payload;
+    if(cats.length)data.categories=cats;
+    else if(Array.isArray(payload.categories)&&payload.categories.length)allApiCategories=payload.categories;
     const customPaths={
      "cv:movie":"/type/movies",
      "cv:anime":"/anime",
@@ -284,18 +336,9 @@
     const apiPath=customPaths[selected]||text(category?.path)||(selected.startsWith("/")?selected:(!selected?"/type/movies":""));
     if(apiPath&&apiPath!=="/"){
      status.textContent="Loading "+(category?.label||customLabels[selected]||"Category")+" · Page "+page+"…";
-     const cr=await fetch("/api/movie-api/catalog?path="+encodeURIComponent(apiPath)+"&page=1");
-     const cd=await cr.json();
-     if(!cr.ok||cd.ok!==true)throw new Error(cd.error||"Movie Catalog API unavailable");
-     /* Fetch only the page the visitor requested. Previously this downloaded every
-        page in the category (sometimes dozens) before showing the first posters. */
-     const requestedPage=Math.max(1,Math.min(100,page));
-     let pagePayload=cd;
-     if(requestedPage!==1){
-      const pageResponse=await fetch("/api/movie-api/catalog?path="+encodeURIComponent(apiPath)+"&page="+requestedPage,{headers:{Accept:"application/json"},cache:"default"});
-      pagePayload=await pageResponse.json();
-      if(!pageResponse.ok||pagePayload.ok!==true)throw new Error(pagePayload.error||"Movie Catalog API page "+requestedPage+" unavailable");
-     }
+     const cr=await fetch("/api/movie-api/catalog?category="+encodeURIComponent(apiPath)+"&page="+Math.max(1,Math.min(100,page)),{headers:{Accept:"application/json"},cache:"default"});
+     const pagePayload=await cr.json();
+     if(!cr.ok||pagePayload.ok!==true)throw new Error(pagePayload.error||"Movie Catalog API unavailable");
      const unique=new Map();
      (Array.isArray(pagePayload.items)?pagePayload.items:[]).forEach(item=>{
       const key=pathOf(item)||norm(item.title);
@@ -352,6 +395,7 @@
   if(params.get("q"))saveSearchHistory(params.get("q"));
   search?.addEventListener("keydown",e=>{if(e.key==="Enter"){saveSearchHistory(search.value);location.href=link({page:1});}});
   $("#catalogSearchButton")?.addEventListener("click",()=>{saveSearchHistory(search?.value);location.href=link({page:1});});
+  allCatsToggle?.addEventListener("click",()=>{const isOpen=allCatsToggle.getAttribute("aria-expanded")==="true";setAllCatsOpen(!isOpen);});
   $("#catalogRefresh")?.addEventListener("click",load);
   renderCatalogHistory();loadFilterOptions();load();
  })();

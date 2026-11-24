@@ -7,15 +7,23 @@
   <meta name="theme-color" content="#050711">
   <meta name="description" content="Browse all MovieStream BD movies and dramas by category, language and A–Z.">
   <title>All Movies &amp; Dramas — MovieStream BD</title>
-  <link rel="stylesheet" href="css/style.css?v=20261124-90hz-3">
-  <link rel="stylesheet" href="css/movie-api.css?v=20261124-90hz-3">
-  <link rel="stylesheet" href="css/movie-api-catalog.css?v=20261124-90hz-3">
-  <link rel="stylesheet" href="css/cineverse-app-redesign.css?v=20261124-90hz-3">
-  <link rel="stylesheet" href="css/movie-api-account.css?v=20261124-90hz-3">
-  <link rel="stylesheet" href="css/liquid-glass-theme.css?v=20261124-90hz-3">
-  <script defer src="js/movie-api-catalog.js?v=20261124-90hz-3"></script>
-  <script defer src="js/movie-api-discovery.js?v=20261124-90hz-3"></script>
-  <script defer src="js/movie-api-account.js?v=20261124-90hz-3"></script>
+  <!-- Google Analytics - MovieStream BD -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-VK18GBQVWP"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-VK18GBQVWP');
+  </script>
+  <link rel="stylesheet" href="css/style.css?v=20261124-90hz-4">
+  <link rel="stylesheet" href="css/movie-api.css?v=20261124-90hz-4">
+  <link rel="stylesheet" href="css/movie-api-catalog.css?v=20261124-90hz-4">
+  <link rel="stylesheet" href="css/cineverse-app-redesign.css?v=20261124-90hz-4">
+  <link rel="stylesheet" href="css/movie-api-account.css?v=20261124-90hz-4">
+  <link rel="stylesheet" href="css/liquid-glass-theme.css?v=20261124-90hz-4">
+  <script defer src="js/movie-api-catalog.js?v=20261124-90hz-4"></script>
+  <script defer src="js/movie-api-discovery.js?v=20261124-90hz-4"></script>
+  <script defer src="js/movie-api-account.js?v=20261124-90hz-4"></script>
 </head>
 <body class="cv-home-body">
   <header class="cv-topbar">
@@ -58,7 +66,11 @@
         </div>
         <button id="catalogRefresh" class="cv-action-btn" type="button">↻ Refresh</button>
       </div>
-      <div class="catalog-nav-title">CATEGORIES</div>
+      <div class="cv-all-cats-bar">
+        <div class="catalog-nav-title">CATEGORIES</div>
+        <button id="catalogAllCatsToggle" class="cv-all-cats-toggle" type="button" aria-expanded="false" aria-controls="catalogAllCatsPanel">All Categories ▾</button>
+      </div>
+      <div id="catalogAllCatsPanel" class="cv-all-cats-panel" hidden></div>
       <nav id="catalogCategories" class="catalog-category-nav" aria-label="Movie categories"><a class="catalog-chip active" href="catalog.html">ALL A–Z</a></nav>
       <div class="catalog-nav-title">BROWSE A–Z</div>
       <nav id="catalogAZ" class="catalog-az-nav" aria-label="Browse titles alphabetically"></nav>
