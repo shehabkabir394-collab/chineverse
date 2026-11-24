@@ -4,30 +4,87 @@
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const safeImg = u => (/^(?:https?:\/\/|\/api\/)/i.test(String(u || "")) ? String(u) : "");
   const RECENT_KEY = "cv_recent_searches_v1";
+  const MAX_HISTORY = 15;
 
-  function loadRecent() {
+  function normalizeEntry(raw) {
+    if (typeof raw === "string") {
+      const q = raw.trim();
+      return q ? { q, type: "0", ts: 0 } : null;
+    }
+    if (raw && typeof raw === "object") {
+      const q = String(raw.q || raw.query || "").trim();
+      if (!q) return null;
+      return {
+        q,
+        type: String(raw.type || "0"),
+        ts: Number(raw.ts) || 0
+      };
+    }
+    return null;
+  }
+
+  function loadHistory() {
     try {
       const list = JSON.parse(localStorage.getItem(RECENT_KEY) || "[]");
-      return Array.isArray(list) ? list.filter(x => typeof x === "string" && x.trim()).slice(0, 12) : [];
+      if (!Array.isArray(list)) return [];
+      const seen = new Set();
+      const out = [];
+      for (const raw of list) {
+        const entry = normalizeEntry(raw);
+        if (!entry) continue;
+        const key = entry.q.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(entry);
+        if (out.length >= MAX_HISTORY) break;
+      }
+      return out;
     } catch {
       return [];
     }
   }
 
-  function saveRecent(term) {
+  function persistHistory(list) {
+    try {
+      localStorage.setItem(RECENT_KEY, JSON.stringify(list.slice(0, MAX_HISTORY)));
+    } catch {}
+    window.dispatchEvent(new CustomEvent("cv:search-history-change"));
+  }
+
+  function saveRecent(term, type = activeType) {
     const clean = String(term || "").trim();
     if (clean.length < 2) return;
-    const prev = loadRecent().filter(x => x.toLowerCase() !== clean.toLowerCase());
-    const next = [clean, ...prev].slice(0, 10);
-    try {
-      localStorage.setItem(RECENT_KEY, JSON.stringify(next));
-    } catch {}
+    const prev = loadHistory().filter(x => x.q.toLowerCase() !== clean.toLowerCase());
+    const next = [{ q: clean, type: String(type || "0"), ts: Date.now() }, ...prev].slice(0, MAX_HISTORY);
+    persistHistory(next);
+  }
+
+  function removeRecent(term) {
+    const target = String(term || "").trim().toLowerCase();
+    if (!target) return;
+    const next = loadHistory().filter(x => x.q.toLowerCase() !== target);
+    persistHistory(next);
   }
 
   function clearRecent() {
     try {
       localStorage.removeItem(RECENT_KEY);
     } catch {}
+    window.dispatchEvent(new CustomEvent("cv:search-history-change"));
+  }
+
+  function formatAgo(ts) {
+    if (!ts) return "";
+    const diff = Math.max(0, Date.now() - ts);
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return "Just now";
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    const days = Math.floor(hrs / 24);
+    if (days === 1) return "Yesterday";
+    if (days < 7) return `${days}d ago`;
+    return new Date(ts).toLocaleDateString();
   }
 
   function createOverlay() {
@@ -83,18 +140,36 @@
   }
 
   function renderIdleState(body) {
-    const recent = loadRecent();
+    const history = loadHistory();
     const hot = hotCache || [];
+    const clockSvg = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`;
+
     body.innerHTML = `
-      ${recent.length ? `
+      ${history.length ? `
         <div class="cv-recent-head">
-          <h3>Recent Searches</h3>
-          <button type="button" id="cvRecentClearBtn" class="cv-clear-btn">Clear</button>
+          <h3>Search History (${history.length})</h3>
+          <button type="button" id="cvRecentClearBtn" class="cv-clear-btn">Clear All</button>
         </div>
-        <div class="cv-chip-wrap">
-          ${recent.map(q => `<button type="button" class="cv-search-chip" data-pick-query="${esc(q)}">${esc(q)}</button>`).join("")}
+        <div class="cv-history-search-list">
+          ${history.map(item => {
+            const ago = formatAgo(item.ts);
+            return `
+              <div class="cv-history-search-row">
+                <button type="button" class="cv-history-search-pick" data-pick-query="${esc(item.q)}">
+                  <span class="cv-history-search-icon" aria-hidden="true">${clockSvg}</span>
+                  <span class="cv-history-search-text">${esc(item.q)}</span>
+                  ${ago ? `<span class="cv-history-search-time">${esc(ago)}</span>` : ""}
+                </button>
+                <button type="button" class="cv-history-search-remove" data-remove-history="${esc(item.q)}" aria-label="Remove ${esc(item.q)} from search history" title="Remove">×</button>
+              </div>
+            `;
+          }).join("")}
         </div>
-      ` : ""}
+      ` : `
+        <div class="cv-status-banner" style="margin-bottom:18px">
+          Your recent searches will appear here automatically.
+        </div>
+      `}
       <div class="cv-recent-head">
         <h3>Trending Searches</h3>
       </div>
@@ -110,8 +185,19 @@
   }
 
   function renderResults(body, items, query) {
+    const historyMatches = loadHistory()
+      .filter(h => h.q.toLowerCase().includes(query.toLowerCase()) && h.q.toLowerCase() !== query.toLowerCase())
+      .slice(0, 4);
+
+    const historyStrip = historyMatches.length
+      ? `<div class="cv-chip-wrap" style="margin-bottom:14px">
+          ${historyMatches.map(h => `<button type="button" class="cv-search-chip" data-pick-query="${esc(h.q)}">↺ ${esc(h.q)}</button>`).join("")}
+        </div>`
+      : "";
+
     if (!items.length) {
       body.innerHTML = `
+        ${historyStrip}
         <div class="cv-status-banner">
           No results found for “${esc(query)}” in this filter. Try switching to <b>All</b> or searching another keyword.
         </div>
@@ -120,9 +206,10 @@
     }
 
     body.innerHTML = `
+      ${historyStrip}
       <div class="cv-recent-head">
         <h3>Results (${items.length})</h3>
-        <a class="cv-more-link" href="catalog.html?q=${encodeURIComponent(query)}">Full catalog ›</a>
+        <a class="cv-more-link" data-save-search href="catalog.html?q=${encodeURIComponent(query)}">Full catalog ›</a>
       </div>
       <div class="cv-search-result-list">
         ${items
@@ -186,7 +273,9 @@
 
     overlay.hidden = false;
     document.body.style.overflow = "hidden";
-    if (initialQuery) input.value = initialQuery;
+    if (typeof initialQuery === "string" && initialQuery.trim()) {
+      input.value = initialQuery;
+    }
     clearBtn.hidden = !input.value;
     setTimeout(() => input.focus(), 40);
 
@@ -211,14 +300,15 @@
     const clearBtn = $("#cvSearchOverlayClear");
     const body = $("#cvSearchOverlayBody");
 
-    // Wire existing search inputs on page (Home, Watch, Catalog)
     document.querySelectorAll("#movieApiSearch, #siteGlobalSearch, [data-open-search]").forEach(el => {
       if (el.tagName === "INPUT") {
         el.addEventListener("focus", () => openSearchOverlay(el.value));
         el.addEventListener("click", () => openSearchOverlay(el.value));
         el.form?.addEventListener("submit", e => {
           e.preventDefault();
-          openSearchOverlay(el.value);
+          const q = el.value.trim();
+          if (q) saveRecent(q);
+          openSearchOverlay(q);
         });
       } else {
         el.addEventListener("click", e => {
@@ -241,7 +331,7 @@
       e.preventDefault();
       const q = input.value.trim();
       if (!q) return;
-      saveRecent(q);
+      saveRecent(q, activeType);
       runSearch(q, body);
     });
 
@@ -254,12 +344,18 @@
         return;
       }
       searchTimer = setTimeout(() => {
-        saveRecent(q);
         runSearch(q, body);
       }, 240);
     });
 
     overlay.addEventListener("click", e => {
+      const removeBtn = e.target.closest("[data-remove-history]");
+      if (removeBtn) {
+        e.stopPropagation();
+        removeRecent(removeBtn.dataset.removeHistory || "");
+        renderIdleState(body);
+        return;
+      }
       const tab = e.target.closest("[data-search-type]");
       if (tab) {
         activeType = tab.dataset.searchType || "0";
@@ -276,7 +372,7 @@
         const q = pick.dataset.pickQuery || "";
         input.value = q;
         clearBtn.hidden = !q;
-        saveRecent(q);
+        saveRecent(q, activeType);
         runSearch(q, body);
         return;
       }
@@ -285,9 +381,8 @@
         renderIdleState(body);
         return;
       }
-      const row = e.target.closest(".cv-search-result-row");
-      if (row && input.value.trim()) {
-        saveRecent(input.value.trim());
+      if (e.target.closest(".cv-search-result-row") || e.target.closest("[data-save-search]")) {
+        if (input.value.trim()) saveRecent(input.value.trim(), activeType);
       }
     });
 
@@ -296,6 +391,13 @@
     });
   }
 
-  window.CineVerseSearch = { open: openSearchOverlay, close: closeSearchOverlay };
+  window.CineVerseSearch = {
+    open: openSearchOverlay,
+    close: closeSearchOverlay,
+    getHistory: loadHistory,
+    saveHistory: saveRecent,
+    removeHistory: removeRecent,
+    clearHistory: clearRecent
+  };
   bindTriggers();
 })();

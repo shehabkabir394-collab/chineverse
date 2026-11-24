@@ -10,11 +10,12 @@
   <link rel="stylesheet" href="css/style.css">
   <link rel="stylesheet" href="css/movie-api.css">
   <link rel="stylesheet" href="css/movie-api-catalog.css">
-  <link rel="stylesheet" href="css/cineverse-app-redesign.css?v=20261123-fix-7">
-  <link rel="stylesheet" href="css/movie-api-account.css?v=20261123-fix-7">
-  <script defer src="js/movie-api-catalog.js?v=20261123-fix-7"></script>
-  <script defer src="js/movie-api-discovery.js?v=20261123-fix-7"></script>
-  <script defer src="js/movie-api-account.js?v=20261123-fix-7"></script>
+  <link rel="stylesheet" href="css/cineverse-app-redesign.css?v=20261123-glass-1">
+  <link rel="stylesheet" href="css/movie-api-account.css?v=20261123-glass-1">
+  <link rel="stylesheet" href="css/liquid-glass-theme.css?v=20261123-glass-1">
+  <script defer src="js/movie-api-catalog.js?v=20261123-glass-1"></script>
+  <script defer src="js/movie-api-discovery.js?v=20261123-glass-1"></script>
+  <script defer src="js/movie-api-account.js?v=20261123-glass-1"></script>
 </head>
 <body class="cv-home-body">
   <header class="cv-topbar">
@@ -63,6 +64,7 @@
         <input id="catalogSearch" type="search" placeholder="Filter current catalog…" aria-label="Filter titles" style="flex:1 1 200px;min-height:44px;padding:0 14px;border-radius:10px;border:1px solid var(--cv-border-strong);background:var(--cv-surface);color:#fff">
         <button id="catalogSearchButton" class="cv-action-btn" type="button" style="background:var(--cv-red);border-color:var(--cv-red)">Filter</button>
       </div>
+      <div id="catalogSearchHistory" class="cv-catalog-history-bar" hidden></div>
       <div id="catalogStatus" class="cv-status-banner" aria-live="polite">Loading catalog…</div>
       <div id="catalogGrid" class="grid"></div>
       <nav id="catalogPager" class="catalog-pagination" aria-label="Catalog pages"></nav>

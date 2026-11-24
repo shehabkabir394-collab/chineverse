@@ -289,9 +289,46 @@
    render();
   }catch(e){status.textContent="Catalog load failed: "+(e.message||"Unknown error");}
  }
- root.addEventListener("click",e=>{const b=e.target.closest("[data-path]");if(b?.dataset.path)location.href="watch.html?path="+encodeURIComponent(b.dataset.path)+"&title="+encodeURIComponent(b.dataset.title||"");});
- search?.addEventListener("keydown",e=>{if(e.key==="Enter")location.href=link({page:1});});
- $("#catalogSearchButton")?.addEventListener("click",()=>location.href=link({page:1}));
- $("#catalogRefresh")?.addEventListener("click",load);
- loadFilterOptions();load();
-})();
+  root.addEventListener("click",e=>{const b=e.target.closest("[data-path]");if(b?.dataset.path)location.href="watch.html?path="+encodeURIComponent(b.dataset.path)+"&title="+encodeURIComponent(b.dataset.title||"");});
+  function saveSearchHistory(q){
+   const clean=String(q||"").trim();
+   if(clean.length<2)return;
+   if(window.CineVerseSearch?.saveHistory){window.CineVerseSearch.saveHistory(clean);return;}
+   try{
+    const list=JSON.parse(localStorage.getItem("cv_recent_searches_v1")||"[]");
+    const arr=(Array.isArray(list)?list:[]).filter(x=>(typeof x==="string"?x:x?.q||"").toLowerCase()!==clean.toLowerCase());
+    localStorage.setItem("cv_recent_searches_v1",JSON.stringify([{q:clean,type:"0",ts:Date.now()},...arr].slice(0,15)));
+   }catch{}
+  }
+  function renderCatalogHistory(){
+   const bar=$("#catalogSearchHistory");if(!bar)return;
+   let items=[];
+   if(window.CineVerseSearch?.getHistory){items=window.CineVerseSearch.getHistory();}
+   else{try{items=(JSON.parse(localStorage.getItem("cv_recent_searches_v1")||"[]")||[]).map(x=>typeof x==="string"?{q:x}:x).filter(x=>x?.q);}catch{items=[];}}
+   if(!items.length){bar.hidden=true;bar.innerHTML="";return;}
+   bar.hidden=false;
+   bar.innerHTML='<span class="cv-catalog-history-label">Recent Searches:</span>'+
+    items.slice(0,8).map(item=>'<span class="cv-history-pill"><a class="cv-history-pill-link" href="catalog.html?q='+encodeURIComponent(item.q)+'">'+esc(item.q)+'</a><button type="button" class="cv-history-pill-del" data-cat-del-history="'+esc(item.q)+'" aria-label="Remove '+esc(item.q)+'">×</button></span>').join("")+
+    '<button type="button" class="cv-clear-btn" id="catalogHistoryClear" style="margin-left:auto">Clear</button>';
+  }
+  $("#catalogSearchHistory")?.addEventListener("click",e=>{
+   const del=e.target.closest("[data-cat-del-history]");
+   if(del){
+    const q=del.dataset.catDelHistory||"";
+    if(window.CineVerseSearch?.removeHistory)window.CineVerseSearch.removeHistory(q);
+    else{try{const list=JSON.parse(localStorage.getItem("cv_recent_searches_v1")||"[]").filter(x=>(typeof x==="string"?x:x?.q||"").toLowerCase()!==q.toLowerCase());localStorage.setItem("cv_recent_searches_v1",JSON.stringify(list));}catch{}}
+    renderCatalogHistory();return;
+   }
+   if(e.target.closest("#catalogHistoryClear")){
+    if(window.CineVerseSearch?.clearHistory)window.CineVerseSearch.clearHistory();
+    else{try{localStorage.removeItem("cv_recent_searches_v1");}catch{}}
+    renderCatalogHistory();
+   }
+  });
+  window.addEventListener("cv:search-history-change",renderCatalogHistory);
+  if(params.get("q"))saveSearchHistory(params.get("q"));
+  search?.addEventListener("keydown",e=>{if(e.key==="Enter"){saveSearchHistory(search.value);location.href=link({page:1});}});
+  $("#catalogSearchButton")?.addEventListener("click",()=>{saveSearchHistory(search?.value);location.href=link({page:1});});
+  $("#catalogRefresh")?.addEventListener("click",load);
+  renderCatalogHistory();loadFilterOptions();load();
+ })();

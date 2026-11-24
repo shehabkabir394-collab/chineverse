@@ -7,8 +7,9 @@
 
   const WATCHLIST_KEY = "cv_watchlist_v1";
   const HISTORY_KEY = "cv_watch_history_v1";
+  const SEARCH_HISTORY_KEY = "cv_recent_searches_v1";
   let deferredPrompt = null;
-  let meViewMode = "hub"; // "hub" | "history" | "install"
+  let meViewMode = "hub"; // "hub" | "history" | "search-history" | "install"
   let recentUploadsCount = null;
 
   window.addEventListener("beforeinstallprompt", e => {
@@ -23,6 +24,15 @@
     } catch {
       return [];
     }
+  }
+
+  function loadSearchHistory() {
+    if (window.CineVerseSearch?.getHistory) {
+      return window.CineVerseSearch.getHistory();
+    }
+    return loadJsonList(SEARCH_HISTORY_KEY)
+      .map(x => (typeof x === "string" ? { q: x.trim(), ts: 0 } : { q: String(x?.q || "").trim(), ts: Number(x?.ts) || 0 }))
+      .filter(x => x.q);
   }
 
   async function fetchRecentCount() {
@@ -82,6 +92,7 @@
 
     const watchlist = loadJsonList(WATCHLIST_KEY);
     const history = loadJsonList(HISTORY_KEY);
+    const searchHistory = loadSearchHistory();
 
     if (meViewMode === "history") {
       content.innerHTML = `
@@ -104,6 +115,32 @@
                   .join("")}
               </div>`
             : `<p class="cv-me-empty-note">Your watch history is empty.</p>`
+        }
+      `;
+      return;
+    }
+
+    if (meViewMode === "search-history") {
+      content.innerHTML = `
+        <div class="cv-me-subhead">
+          <button type="button" class="cv-me-back-btn" data-me-view="hub">‹ Search History (${searchHistory.length})</button>
+          ${searchHistory.length ? `<button type="button" id="cvClearSearchHistoryBtn" class="cv-clear-btn">Clear All</button>` : ""}
+        </div>
+        ${
+          searchHistory.length
+            ? `<div class="cv-me-history-list">
+                ${searchHistory
+                  .map(item => `
+                    <div class="cv-history-search-row">
+                      <a class="cv-history-search-pick" href="catalog.html?q=${encodeURIComponent(item.q)}">
+                        <span class="cv-history-search-text">${esc(item.q)}</span>
+                      </a>
+                      <button type="button" class="cv-history-search-remove" data-me-del-search="${esc(item.q)}" aria-label="Remove ${esc(item.q)}">×</button>
+                    </div>
+                  `)
+                  .join("")}
+              </div>`
+            : `<p class="cv-me-empty-note">Your search history is empty. Search any movie, drama, or anime to save it here.</p>`
         }
       `;
       return;
@@ -133,7 +170,6 @@
       return;
     }
 
-    // Default Hub View matching reference screenshot WA0067
     content.innerHTML = `
       <div class="cv-me-hub-card">
         <div class="cv-me-hub-block">
@@ -146,6 +182,14 @@
           </button>
           ${renderWatchHistoryCards(history)}
         </div>
+
+        <button type="button" class="cv-me-hub-row" data-me-view="search-history">
+          <span class="cv-me-row-left">
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+            <span>Search History</span>
+          </span>
+          <span class="cv-me-row-right"><span>${searchHistory.length}</span><span class="cv-me-chevron">›</span></span>
+        </button>
 
         <a class="cv-me-hub-row" href="saved.html">
           <span class="cv-me-row-left">
@@ -208,6 +252,27 @@
           renderMeContent();
           return;
         }
+        const delSearch = e.target.closest("[data-me-del-search]");
+        if (delSearch) {
+          const q = delSearch.dataset.meDelSearch || "";
+          if (window.CineVerseSearch?.removeHistory) {
+            window.CineVerseSearch.removeHistory(q);
+          } else {
+            const next = loadSearchHistory().filter(x => x.q.toLowerCase() !== q.toLowerCase());
+            try { localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(next)); } catch {}
+          }
+          renderMeContent();
+          return;
+        }
+        if (e.target.closest("#cvClearSearchHistoryBtn")) {
+          if (window.CineVerseSearch?.clearHistory) {
+            window.CineVerseSearch.clearHistory();
+          } else {
+            try { localStorage.removeItem(SEARCH_HISTORY_KEY); } catch {}
+          }
+          renderMeContent();
+          return;
+        }
         if (e.target.closest("#cvClearHistoryBtn")) {
           try {
             localStorage.removeItem(HISTORY_KEY);
@@ -229,6 +294,11 @@
     modal.hidden = false;
     renderMeContent();
   }
+
+  window.addEventListener("cv:search-history-change", () => {
+    const modal = $("#cvMePanel");
+    if (modal && !modal.hidden) renderMeContent();
+  });
 
   document.addEventListener("click", e => {
     if (e.target.closest("#cvMeOpen, [data-open-me]")) {

@@ -6,7 +6,7 @@
   "main": "server.js",
   "description": "MovieStream BD (CineVerse) — Movies & Dramas streaming catalog",
   "scripts": {
-    "dev": "node server.js",
+    "dev": "PORT=3000 node server.js",
     "start": "node server.js",
     "build": "node -e \"console.log('Static site build verified')\"",
     "lint": "node --check moviebox-api.js && node --check server.js"
