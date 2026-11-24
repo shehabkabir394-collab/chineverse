@@ -127,6 +127,7 @@
   let hotSubjectsCache = [];
   let searchTimer = 0;
   let reqSeq = 0;
+  let activeSearchCtrl = null;
 
   async function fetchHot() {
     if (hotCache) return hotCache;
@@ -284,26 +285,74 @@
     `;
   }
 
+  async function fetchSearchJson(url, signal) {
+    const r = await fetch(url, {
+      headers: { Accept: "application/json" },
+      signal
+    });
+    const text = await r.text();
+    let d = null;
+    try {
+      d = JSON.parse(text);
+    } catch {
+      throw new Error(`Invalid search response (${r.status})`);
+    }
+    if (!r.ok || d?.ok === false) {
+      throw new Error(d?.error || `HTTP ${r.status}`);
+    }
+    return d;
+  }
+
   async function runSearch(query, body) {
     const q = String(query || "").trim();
     if (q.length < 2) {
+      if (activeSearchCtrl) {
+        try { activeSearchCtrl.abort(); } catch {}
+        activeSearchCtrl = null;
+      }
       await fetchHot();
       renderIdleState(body);
       return;
     }
     const id = ++reqSeq;
+    if (activeSearchCtrl) {
+      try { activeSearchCtrl.abort(); } catch {}
+    }
+    const ctrl = typeof AbortController === "function" ? new AbortController() : null;
+    activeSearchCtrl = ctrl;
     body.innerHTML = `<div class="cv-status-banner">Searching “${esc(q)}”…</div>`;
+
+    const candidates = activeType === "0"
+      ? [
+          `/api/suggest?q=${encodeURIComponent(q)}`,
+          `/api/movie-api/search?q=${encodeURIComponent(q)}&subjectType=0`,
+          `/api/catalog?path=%2Fsearch&q=${encodeURIComponent(q)}`
+        ]
+      : [
+          `/api/movie-api/search?q=${encodeURIComponent(q)}&subjectType=${encodeURIComponent(activeType)}`,
+          `/api/suggest?q=${encodeURIComponent(q)}`
+        ];
+
     try {
-      const endpoint = activeType === "0"
-        ? `/api/suggest?q=${encodeURIComponent(q)}`
-        : `/api/movie-api/search?q=${encodeURIComponent(q)}&subjectType=${encodeURIComponent(activeType)}`;
-      const r = await fetch(endpoint);
-      const d = await r.json();
+      let data = null;
+      let lastErr = null;
+      for (const endpoint of candidates) {
+        try {
+          const d = await fetchSearchJson(endpoint, ctrl?.signal);
+          if (id !== reqSeq) return;
+          data = d;
+          if (Array.isArray(d?.items) && d.items.length > 0) break;
+        } catch (err) {
+          if (err?.name === "AbortError" || id !== reqSeq) return;
+          lastErr = err;
+        }
+      }
       if (id !== reqSeq) return;
-      const items = Array.isArray(d?.items) ? d.items : [];
+      if (!data) throw lastErr || new Error("Search failed");
+      const items = Array.isArray(data?.items) ? data.items : [];
       renderResults(body, items, q);
-    } catch {
-      if (id !== reqSeq) return;
+    } catch (err) {
+      if (err?.name === "AbortError" || id !== reqSeq) return;
       body.innerHTML = `<div class="cv-status-banner">Search could not complete right now. Please try again.</div>`;
     }
   }
