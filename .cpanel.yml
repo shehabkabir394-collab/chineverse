@@ -5,4 +5,5 @@
 # after deployment if the running process does not reload automatically.
 deployment:
   tasks:
-    - /bin/echo "MovieStream BD: repository is already the application root."
+    - /bin/echo "MovieStream BD: triggering Node.js restart..."
+    - /bin/mkdir -p tmp && /bin/touch tmp/restart.txt
