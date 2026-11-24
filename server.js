@@ -374,7 +374,87 @@ async function fetchMediaWithRetry(targetUrl, method, headers, clientAbortSignal
   throw lastError || new Error("Media upstream unavailable");
 }
 
-// Direct MP4 media proxy with Range support & MovieBox Referer header
+async function fetchUpstreamMedia(targetUrl, method, headers, clientAbortSignal, retries = 4, connectTimeoutMs = 30000) {
+  let upstream = await fetchMediaWithRetry(targetUrl, method, headers, clientAbortSignal, retries, connectTimeoutMs);
+  if (upstream.status === 403 && headers.get("Referer") === MOVIEBOX_PLAYER_REFERER) {
+    try {
+      await upstream.body?.cancel();
+    } catch {}
+    for (const altRef of ["https://moviebox.ph/", MOVIEBOX_REFERER]) {
+      const altHeaders = new Headers(headers);
+      altHeaders.set("Referer", altRef);
+      upstream = await fetchMediaWithRetry(targetUrl, method, altHeaders, clientAbortSignal, 1, connectTimeoutMs);
+      if (upstream.ok || upstream.status === 206) {
+        return { upstream, usedHeaders: altHeaders };
+      }
+      try {
+        await upstream.body?.cancel();
+      } catch {}
+    }
+  }
+  return { upstream, usedHeaders: headers };
+}
+
+function parseContentRangeInfo(headerVal) {
+  const m = /^bytes\s+(\d+)-(\d+)\/(\d+|\*)$/i.exec(String(headerVal || "").trim());
+  if (!m) return null;
+  const start = Number(m[1]);
+  const end = Number(m[2]);
+  const total = m[3] === "*" ? 0 : Number(m[3]);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return null;
+  return { start, end, total, length: end - start + 1 };
+}
+
+function writeChunkWithBackpressure(res, chunk, abortSignal) {
+  return new Promise((resolve, reject) => {
+    if (abortSignal?.aborted || res.destroyed || res.writableEnded) {
+      return reject(new DOMException("Client aborted request", "AbortError"));
+    }
+    const ok = res.write(chunk);
+    if (ok) return resolve();
+    const onDrain = () => {
+      cleanup();
+      resolve();
+    };
+    const onClose = () => {
+      cleanup();
+      reject(new DOMException("Client closed connection", "AbortError"));
+    };
+    const onError = err => {
+      cleanup();
+      reject(err);
+    };
+    const cleanup = () => {
+      res.off("drain", onDrain);
+      res.off("close", onClose);
+      res.off("error", onError);
+    };
+    res.once("drain", onDrain);
+    res.once("close", onClose);
+    res.once("error", onError);
+  });
+}
+
+async function readChunkWithTimeout(reader, timeoutMs, abortSignal) {
+  if (abortSignal?.aborted) {
+    throw new DOMException("Client aborted request", "AbortError");
+  }
+  let timer = null;
+  try {
+    return await Promise.race([
+      reader.read(),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new DOMException("Upstream stream stalled", "TimeoutError"));
+        }, timeoutMs);
+      })
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+// Direct MP4 media proxy with Range support, MovieBox Referer header & mid-stream auto-resume
 async function proxyMediaStream(req, res, targetUrl, extraHeaders = {}, forceDownload = false, customFilename = "") {
   if (forceDownload) {
     try {
@@ -404,22 +484,16 @@ async function proxyMediaStream(req, res, targetUrl, extraHeaders = {}, forceDow
   });
 
   let upstream;
+  let activeHeaders;
   try {
-    upstream = await fetchMediaWithRetry(targetUrl, req.method, headers, abortController.signal, 4, 30000);
-    if (upstream.status === 403 && extraHeaders.Referer === MOVIEBOX_PLAYER_REFERER) {
-      try {
-        await upstream.body?.cancel();
-      } catch {}
-      for (const altRef of ["https://moviebox.ph/", MOVIEBOX_REFERER]) {
-        const altHeaders = new Headers(headers);
-        altHeaders.set("Referer", altRef);
-        upstream = await fetchMediaWithRetry(targetUrl, req.method, altHeaders, abortController.signal, 1, 30000);
-        if (upstream.ok || upstream.status === 206) break;
-        try {
-          await upstream.body?.cancel();
-        } catch {}
-      }
-    }
+    ({ upstream, usedHeaders: activeHeaders } = await fetchUpstreamMedia(
+      targetUrl,
+      req.method,
+      headers,
+      abortController.signal,
+      4,
+      30000
+    ));
   } catch (err) {
     if (abortController.signal.aborted) {
       if (!res.headersSent) res.status(499).end();
@@ -467,20 +541,143 @@ async function proxyMediaStream(req, res, targetUrl, extraHeaders = {}, forceDow
   if (req.method === "HEAD" || !upstream.body) {
     return res.end();
   }
-  const nodeStream = Readable.fromWeb(upstream.body);
-  res.on("close", () => {
-    if (!res.writableFinished) {
-      abortController.abort();
+
+  if (!forceDownload) {
+    const nodeStream = Readable.fromWeb(upstream.body);
+    res.on("close", () => {
+      if (!res.writableFinished) {
+        abortController.abort();
+        try {
+          nodeStream.destroy();
+        } catch {}
+      }
+    });
+    nodeStream.on("error", () => {
+      if (!res.headersSent) res.status(502).end();
+      else res.end();
+    });
+    nodeStream.pipe(res);
+    return;
+  }
+
+  // Full download mode: stream with transparent upstream Range auto-resume so CDN drops never truncate the file
+  const rangeInfo = parseContentRangeInfo(upstream.headers.get("content-range"));
+  const initialContentLength = Number(upstream.headers.get("content-length") || 0);
+  const startOffset = rangeInfo ? rangeInfo.start : 0;
+  const expectedLength = rangeInfo
+    ? rangeInfo.length
+    : (Number.isFinite(initialContentLength) && initialContentLength > 0 ? initialContentLength : 0);
+  const targetEndByte = rangeInfo
+    ? rangeInfo.end
+    : (expectedLength > 0 ? expectedLength - 1 : null);
+
+  let bytesSent = 0;
+  let currentUpstream = upstream;
+  let resumeAttempts = 0;
+  const MAX_RESUME_ATTEMPTS = 12;
+
+  while (!abortController.signal.aborted && !res.destroyed && !res.writableEnded) {
+    let streamBroken = false;
+    if (currentUpstream && currentUpstream.body) {
+      let reader = null;
       try {
-        nodeStream.destroy();
-      } catch {}
+        reader = currentUpstream.body.getReader();
+        while (!abortController.signal.aborted) {
+          const { done, value } = await readChunkWithTimeout(reader, 45000, abortController.signal);
+          if (done) break;
+          if (value && value.byteLength > 0) {
+            let slice = value;
+            if (expectedLength > 0 && bytesSent + slice.byteLength > expectedLength) {
+              slice = slice.subarray(0, expectedLength - bytesSent);
+            }
+            if (slice.byteLength > 0) {
+              await writeChunkWithBackpressure(res, slice, abortController.signal);
+              bytesSent += slice.byteLength;
+            }
+            if (expectedLength > 0 && bytesSent >= expectedLength) break;
+          }
+        }
+      } catch (err) {
+        streamBroken = true;
+        try {
+          await reader?.cancel();
+        } catch {}
+        if (abortController.signal.aborted || res.destroyed || res.writableEnded) {
+          return;
+        }
+        console.warn(
+          `[cinepulse-media stream interrupted at ${bytesSent}/${expectedLength || "?"}]`,
+          err?.name || "",
+          err?.message || ""
+        );
+      } finally {
+        try {
+          reader?.releaseLock();
+        } catch {}
+        currentUpstream = null;
+      }
+    } else {
+      streamBroken = true;
     }
-  });
-  nodeStream.on("error", () => {
-    if (!res.headersSent) res.status(502).end();
-    else res.end();
-  });
-  nodeStream.pipe(res);
+
+    if (abortController.signal.aborted || res.destroyed || res.writableEnded) {
+      return;
+    }
+
+    const doneAll = expectedLength > 0 ? bytesSent >= expectedLength : !streamBroken;
+    if (doneAll) {
+      return res.end();
+    }
+
+    resumeAttempts++;
+    if (resumeAttempts > MAX_RESUME_ATTEMPTS) {
+      console.error(`[cinepulse-media gave up after ${MAX_RESUME_ATTEMPTS} resume attempts at ${bytesSent}/${expectedLength}]`);
+      return res.destroy();
+    }
+
+    const nextByte = startOffset + bytesSent;
+    const rangeEndStr = targetEndByte != null ? String(targetEndByte) : "";
+    const resumeHeaders = new Headers(activeHeaders);
+    resumeHeaders.delete("if-range");
+    resumeHeaders.set("range", `bytes=${nextByte}-${rangeEndStr}`);
+
+    const delayMs = Math.min(5000, 600 * resumeAttempts);
+    await new Promise(r => setTimeout(r, delayMs));
+    if (abortController.signal.aborted || res.destroyed || res.writableEnded) {
+      return;
+    }
+
+    try {
+      const resumed = await fetchUpstreamMedia(
+        targetUrl,
+        "GET",
+        resumeHeaders,
+        abortController.signal,
+        2,
+        30000
+      );
+      if (!resumed.upstream.ok && resumed.upstream.status !== 206) {
+        try {
+          await resumed.upstream.body?.cancel();
+        } catch {}
+        continue;
+      }
+
+      const resumedRange = parseContentRangeInfo(resumed.upstream.headers.get("content-range"));
+      if (nextByte > 0 && (resumed.upstream.status !== 206 || !resumedRange || resumedRange.start !== nextByte)) {
+        try {
+          await resumed.upstream.body?.cancel();
+        } catch {}
+        return res.destroy();
+      }
+
+      currentUpstream = resumed.upstream;
+      activeHeaders = resumed.usedHeaders;
+    } catch (resumeErr) {
+      if (abortController.signal.aborted) return;
+      console.warn("[cinepulse-media resume fetch error]", resumeErr?.message || resumeErr);
+    }
+  }
 }
 
 app.all("/api/cinepulse-media", async (req, res) => {

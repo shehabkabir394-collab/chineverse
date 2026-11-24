@@ -12,9 +12,9 @@
   const safeName = s =>
     String(s || "MovieStreamBD").replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 100) || "MovieStreamBD";
 
-  const CHUNK_SIZE = 5 * 1024 * 1024; // 5 MiB verified chunks: stays safely below proxy 32 MiB cap & resumes on drops
-  const CHUNK_TIMEOUT_MS = 35000;
-  const CHUNK_MAX_RETRIES = 5;
+  const CHUNK_SIZE = 15 * 1024 * 1024; // 15 MiB verified chunks: cuts Range request count 3x to avoid CDN rate limits
+  const CHUNK_TIMEOUT_MS = 60000;
+  const CHUNK_MAX_RETRIES = 8;
 
   let episodes = [];
   let selected = requested;
@@ -158,15 +158,18 @@
     action.dataset.dlUrl = finalUrl;
     action.dataset.dlFilename = filename;
     action.setAttribute("aria-disabled", "false");
-    action.innerHTML = `<span>⚡ ONE CLICK DOWNLOAD · ${esc(src.quality)}<small>${esc(metaLabel || "Full File · Verified Chunked")}</small></span><b class="icon">↓</b>`;
+    action.innerHTML = `<span>⚡ ONE CLICK DOWNLOAD · ${esc(src.quality)}<small>${esc(metaLabel || "Direct Storage · Browser Download")}</small></span><b class="icon">↓</b>`;
 
     if (safeBtn) {
-      safeBtn.hidden = true; // Primary ONE CLICK button now uses verified chunked download directly
+      safeBtn.hidden = false;
+      safeBtn.dataset.dlUrl = finalUrl;
+      safeBtn.dataset.dlFilename = filename;
     }
     if (rawLink) {
       rawLink.hidden = false;
       rawLink.href = finalUrl;
-      rawLink.setAttribute("download", filename);
+      rawLink.dataset.dlUrl = finalUrl;
+      rawLink.removeAttribute("download");
     }
   }
 
@@ -325,6 +328,16 @@
     return m ? Number(m[1]) : 0;
   }
 
+  function parseContentRangeSpan(headerVal) {
+    const m = /^bytes\s+(\d+)-(\d+)\/(\d+|\*)$/i.exec(String(headerVal || "").trim());
+    if (!m) return null;
+    return {
+      start: Number(m[1]),
+      end: Number(m[2]),
+      total: m[3] === "*" ? 0 : Number(m[3])
+    };
+  }
+
   async function fetchChunkWithRetry(url, start, end, outerSignal, retries = CHUNK_MAX_RETRIES) {
     let lastErr = null;
     for (let attempt = 0; attempt <= retries; attempt++) {
@@ -342,7 +355,11 @@
         });
         clearTimeout(timer);
         if ((res.status === 429 || res.status >= 500) && attempt < retries) {
-          await new Promise(r => setTimeout(r, 600 * (attempt + 1)));
+          const retryAfterSec = Number(res.headers.get("retry-after") || 0);
+          const backoffMs = res.status === 429
+            ? Math.max(retryAfterSec * 1000, 2000 * (attempt + 1))
+            : 900 * (attempt + 1);
+          await new Promise(r => setTimeout(r, Math.min(backoffMs, 15000)));
           continue;
         }
         if (!res.ok && res.status !== 206) {
@@ -352,15 +369,22 @@
         if (ct.includes("json") || ct.includes("text/html")) {
           throw new Error("Server returned an error page instead of video");
         }
-        const buf = await res.arrayBuffer();
-        const total = parseTotalFromContentRange(res.headers.get("content-range")) || Number(res.headers.get("content-length") || 0);
+        let buf = await res.arrayBuffer();
+        const span = parseContentRangeSpan(res.headers.get("content-range"));
+        if (res.status === 200 && start > 0) {
+          buf = buf.slice(start, end + 1);
+        } else if (res.status === 206 && span && span.start < start) {
+          const offset = start - span.start;
+          buf = buf.slice(offset, offset + (end - start + 1));
+        }
+        const total = span?.total || parseTotalFromContentRange(res.headers.get("content-range")) || Number(res.headers.get("content-length") || 0);
         return { buf, status: res.status, total };
       } catch (err) {
         clearTimeout(timer);
         if (outerSignal?.aborted) throw new DOMException("Download cancelled", "AbortError");
         lastErr = err;
         if (attempt >= retries) throw err;
-        await new Promise(r => setTimeout(r, 600 * (attempt + 1)));
+        await new Promise(r => setTimeout(r, Math.min(10000, 900 * (attempt + 1))));
       }
     }
     throw lastErr || new Error("Chunk download failed");
@@ -485,7 +509,7 @@
     progress.hidden = false;
     bar.style.width = "0%";
     label.textContent = "Connecting to download server…";
-    status.textContent = "ডাউনলোড শুরু হচ্ছে — প্রতিটি অংশ (5 MB chunk) যাচাই করে নামানো হচ্ছে…";
+    status.textContent = "Verified download শুরু হচ্ছে — 15 MB chunk যাচাই করে পূর্ণাঙ্গ ফাইল নামানো হচ্ছে…";
 
     try {
       const res = await downloadVerifiedFullFile(
@@ -526,21 +550,66 @@
   });
 
   $("#downloadAction").addEventListener("click", e => {
-    e.preventDefault();
     const action = $("#downloadAction");
-    if (action.getAttribute("aria-disabled") === "true") return;
-    const url = action.dataset.dlUrl || action.getAttribute("href");
-    const filename = action.dataset.dlFilename || action.getAttribute("download") || "MovieStreamBD-Video.mp4";
+    if (action.getAttribute("aria-disabled") === "true" || action.getAttribute("href") === "#") {
+      e.preventDefault();
+      return;
+    }
+    const status = $("#downloadStatus");
+    if (status) {
+      status.textContent = "সরাসরি স্টোরেজে ডাউনলোড শুরু হয়েছে — ব্রাউজারের Download Manager-এ প্রোগ্রেস দেখুন।";
+    }
+  });
+
+  $("#downloadSafeChunked")?.addEventListener("click", () => {
+    const safeBtn = $("#downloadSafeChunked");
+    const action = $("#downloadAction");
+    const url = safeBtn?.dataset.dlUrl || action?.dataset.dlUrl || action?.getAttribute("href");
+    const filename = safeBtn?.dataset.dlFilename || action?.dataset.dlFilename || action?.getAttribute("download") || "MovieStreamBD-Video.mp4";
+    if (!url || url === "#") return;
     startVerifiedSingleDownload(url, filename);
+  });
+
+  $("#downloadDirectRaw")?.addEventListener("click", async e => {
+    const rawLink = $("#downloadDirectRaw");
+    const rawHref = rawLink?.dataset.dlUrl || rawLink?.getAttribute("href");
+    if (!rawHref || rawHref === "#") return;
+    e.preventDefault();
+    const absUrl = new URL(rawHref, location.origin).href;
+    const status = $("#downloadStatus");
+    try {
+      await navigator.clipboard.writeText(absUrl);
+      if (status) status.textContent = "Direct Server Link (IDM / ADM) কপি করা হয়েছে — এখন IDM/ADM-এ paste করুন।";
+    } catch {
+      const ta = document.createElement("textarea");
+      ta.value = absUrl;
+      ta.setAttribute("readonly", "");
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      try {
+        document.execCommand("copy");
+        if (status) status.textContent = "Direct Server Link (IDM / ADM) কপি করা হয়েছে।";
+      } catch {
+        if (status) status.textContent = `Direct Link: ${absUrl}`;
+      }
+      ta.remove();
+    }
   });
 
   $("#downloadLinks").addEventListener("click", e => {
     const link = e.target.closest(".ms-download-link");
     if (!link) return;
-    e.preventDefault();
-    const url = link.dataset.dlUrl || link.getAttribute("href");
-    const filename = link.dataset.dlFilename || link.getAttribute("download") || "MovieStreamBD-Video.mp4";
-    startVerifiedSingleDownload(url, filename);
+    const href = link.getAttribute("href");
+    if (!href || href === "#") {
+      e.preventDefault();
+      return;
+    }
+    const status = $("#downloadStatus");
+    if (status) {
+      status.textContent = "সরাসরি স্টোরেজে ডাউনলোড শুরু হয়েছে — ব্রাউজারের Download Manager-এ প্রোগ্রেস দেখুন।";
+    }
   });
 
   async function fetchEpisodeBlobOnly(item, index) {

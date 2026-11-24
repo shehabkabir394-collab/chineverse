@@ -55,7 +55,7 @@
     @media(max-width:480px){.ms-download-poster{width:72px}.ms-download-card{border-radius:16px}.ms-download-meta span{font-size:11px;padding:7px 9px}}
   </style>
   <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script defer src="js/movie-api-download.js?v=20261124-90hz-6"></script>
+  <script defer src="js/movie-api-download.js?v=20261125-dl-fix-1"></script>
   <script defer src="js/movie-api-discovery.js?v=20261124-90hz-6"></script>
   <script defer src="js/movie-api-account.js?v=20261124-90hz-6"></script>
 </head>
@@ -120,12 +120,12 @@
           <span>Multiple Quality</span>
           <span>Direct MP4 Source</span>
         </div>
-        <div class="ms-download-notice"><b>NOTICE</b>ডাউনলোড শুরু না হলে অন্য Quality নির্বাচন করে আবার চেষ্টা করুন। ZIP তৈরি হতে সময় লাগতে পারে—পেজ বন্ধ করবেন না।</div>
+        <div class="ms-download-notice"><b>NOTICE</b>⚡ ONE CLICK DOWNLOAD বা নিচের Quality লিংকে চাপলে সরাসরি ব্রাউজারের Download Manager দিয়ে ফাইল স্টোরেজে সেভ হবে। নেটওয়ার্ক সমস্যায় ডাউনলোড অর্ধেক আটকালে "VERIFIED FULL DOWNLOAD" বা "Copy Direct Server Link (IDM / ADM)" ব্যবহার করতে পারেন।</div>
         <div class="ms-download-form">
           <label>SELECT DOWNLOAD QUALITY<select id="downloadQuality" disabled><option>Loading available qualities…</option></select></label>
           <div id="downloadStatus" class="ms-download-status" aria-live="polite">Checking available download sources…</div>
-          <a id="downloadAction" class="ms-download-action" href="#" aria-disabled="true"><span>ONE CLICK DOWNLOAD<small>Direct MP4 · Selected quality</small></span><b class="icon">↓</b></a>
-          <button id="downloadSafeChunked" class="ms-download-action zip" type="button" hidden style="margin-top:0"><span>🛡 VERIFIED FULL DOWNLOAD<small>অর্ধেক আটকালে এটি চাপুন — ১০০% পূর্ণ ফাইল ডাউনলোড</small></span><b class="icon">✓</b></button>
+          <a id="downloadAction" class="ms-download-action" href="#" aria-disabled="true"><span>⚡ ONE CLICK DOWNLOAD<small>Direct Storage · Selected quality</small></span><b class="icon">↓</b></a>
+          <button id="downloadSafeChunked" class="ms-download-action zip" type="button" hidden style="margin-top:0"><span>🛡 VERIFIED FULL DOWNLOAD (FALLBACK)<small>ব্রাউজার ডাউনলোড আটকালে এটি চাপুন — ইন-পেজ রিজিউম ডাউনলোড</small></span><b class="icon">✓</b></button>
           <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
             <a id="downloadDirectRaw" href="#" hidden style="color:#94a3b8;font-size:12px;text-decoration:underline">Copy / Direct Server Link (IDM / ADM)</a>
             <button id="downloadCancelBtn" type="button" hidden style="padding:7px 14px;border-radius:10px;border:1px solid rgba(248,113,113,.45);background:rgba(248,113,113,.15);color:#fecaca;font-size:12px;font-weight:700;cursor:pointer">Cancel Download</button>
