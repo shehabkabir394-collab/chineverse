@@ -55,25 +55,69 @@
     { name: "Hulu", short: "hulu", logo: "https://www.google.com/s2/favicons?domain=hulu.com&sz=128" }
   ];
 
+  const stripCatBrand = s => String(s || "")
+    .replace(/\bmovie\s*(?:stream|link)\s*bd\b(?:\.com|\.at)?/gi, "")
+    .replace(/\s*[—–\-|:]+\s*$/g, "")
+    .replace(/^\s*[—–\-|:]+\s*/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const getEndOfTodayMs = () => {
+    const bdt = new Date(Date.now() + 6 * 3600 * 1000);
+    return Date.UTC(bdt.getUTCFullYear(), bdt.getUTCMonth(), bdt.getUTCDate(), 23, 59, 59, 999) - 6 * 3600 * 1000;
+  };
+
+  const parseFlexibleDateMs = raw => {
+    if (raw == null || raw === "") return 0;
+    if (typeof raw === "number") return Number.isFinite(raw) && raw > 0 ? (raw < 1e12 ? raw * 1000 : raw) : 0;
+    const s = String(raw).trim();
+    if (!s) return 0;
+    if (/^\d{9,16}$/.test(s)) {
+      const n = Number(s);
+      return n < 1e12 ? n * 1000 : n;
+    }
+    const lower = s.toLowerCase();
+    const now = Date.now();
+    if (/\b(?:just now|now|today)\b/.test(lower)) return now;
+    if (/\byesterday\b/.test(lower)) return now - 86400 * 1000;
+    const ago = /(\d+)\s*(sec(?:ond)?s?|min(?:ute)?s?|hrs?|hours?|days?|weeks?|months?|years?)\s*ago/i.exec(lower);
+    if (ago) {
+      const n = Number(ago[1]) || 1;
+      const u = ago[2].toLowerCase();
+      const mult = u.startsWith("sec") ? 1000
+        : u.startsWith("min") ? 60 * 1000
+        : u.startsWith("h") ? 3600 * 1000
+        : u.startsWith("d") ? 86400 * 1000
+        : u.startsWith("w") ? 7 * 86400 * 1000
+        : u.startsWith("mo") ? 30 * 86400 * 1000
+        : 365 * 86400 * 1000;
+      return Math.max(1, now - n * mult);
+    }
+    const t = Date.parse(s);
+    return Number.isFinite(t) && t > 0 ? t : 0;
+  };
+
   const releaseTime = item => {
-    const nowLimit = Date.now() + 36 * 3600 * 1000;
-    let best = 0;
-    for (const raw of [item?.uploadedAtMs, item?.uploadTimestamp, item?.updatedAt, item?.createdAt]) {
-      if (typeof raw === "number" && Number.isFinite(raw) && raw > 0 && raw <= nowLimit) {
-        best = Math.max(best, raw);
-      } else if (raw) {
-        const t = Date.parse(String(raw || ""));
-        if (Number.isFinite(t) && t > 0 && t <= nowLimit) best = Math.max(best, t);
+    const nowLimit = getEndOfTodayMs();
+    let bestUpload = 0;
+    for (const raw of [item?.uploadedAtMs, item?.uploadTimestamp, item?.uploadTime, item?.updatedAt, item?.createdAt]) {
+      const t = parseFlexibleDateMs(raw);
+      if (t > 0 && t <= nowLimit) bestUpload = Math.max(bestUpload, t);
+    }
+    let bestRelease = 0;
+    for (const raw of [item?.releaseDate, item?.appointmentDate, item?.year && /^\d{4}$/.test(String(item.year)) ? `${item.year}-01-01` : ""]) {
+      const t = parseFlexibleDateMs(raw);
+      if (t > 0) {
+        bestRelease = t;
+        break;
       }
     }
-    const relRaw = item?.releaseDate || item?.appointmentDate || (item?.year && /^\d{4}$/.test(String(item.year)) ? `${item.year}-01-01` : "");
-    const relT = typeof relRaw === "number" ? relRaw : Date.parse(String(relRaw || ""));
-    if (Number.isFinite(relT) && relT > 0) best = Math.max(best, relT);
-    return best;
+    if (bestUpload > 0 && bestRelease > nowLimit) return bestUpload;
+    return Math.max(bestUpload, bestRelease);
   };
 
   const sortNewestFirst = list => {
-    const futureCutoff = Date.now() + 36 * 3600 * 1000;
+    const futureCutoff = getEndOfTodayMs();
     return [...(Array.isArray(list) ? list : [])].sort((a, b) => {
       const ta = releaseTime(a);
       const tb = releaseTime(b);
@@ -377,7 +421,8 @@
     const deduped = [];
     for (const c of list) {
       const path = String(c?.path || "").trim();
-      const label = String(c?.label || "").trim();
+      const rawLabel = String(c?.label || "").trim();
+      const label = stripCatBrand(rawLabel) || rawLabel;
       if (!path || !label || seen.has(path)) continue;
       seen.add(path);
       deduped.push({ path, label, group: c.group || "Collections", icon: c.icon || "🎬" });
@@ -838,18 +883,36 @@
     const mlbdItems = mlbdBanglaDistinct.length ? mlbdBanglaDistinct : mlbdBanglaRaw;
     const hasLang = (x, re) => re.test([x.language, x.audioLanguage, x.country, x.title, x.genre].filter(Boolean).join(" "));
 
+    const curatedPoolsForCat = {
+      "/new": [...(curated.recentlyAdded || []), ...(curated.trending || [])],
+      "/type/movies": curated.latestMovies || [],
+      "/type/series": curated.recentlyUpdated || [],
+      "/language/hindi": [...(curated.hindiMovies || []), ...(curated.hindiSeries || [])],
+      "/language/hindi-dubbed": [...(curated.hindiMovies || []), ...(curated.hindiSeries || [])],
+      "/southindian": curated.southIndian || [],
+      "/language/korean": curated.kDramas || [],
+      "/anime": curated.anime || [],
+      "/language/bangla": curated.bengali || [],
+      "/genre/action": matchAny(x => /action/i.test(`${x.genre || ""}`)),
+      "/genre/thriller": matchAny(x => /thriller|horror|mystery|crime/i.test(`${x.genre || ""}`))
+    };
+
     const mlbdSectionShelves = mlbdSections
       .map(sec => {
-        const cleanTitle = String(sec?.title || "").trim();
-        const items = dedupeList(sec?.items || []);
+        const cleanTitle = stripCatBrand(String(sec?.title || "").trim());
+        const catPath = String(sec?.categoryPath || "/new").trim();
+        const extraCurated = curatedPoolsForCat[catPath.toLowerCase()] || [];
+        const items = dedupeList([...(sec?.items || []), ...extraCurated]);
         if (!cleanTitle || !items.length) return null;
         return {
           title: cleanTitle,
           items: sortNewestFirst(items),
-          moreHref: `catalog.html?category=${encodeURIComponent(sec.categoryPath || "/new")}`
+          moreHref: `catalog.html?category=${encodeURIComponent(catPath)}`
         };
       })
       .filter(Boolean);
+
+    const minFreshThreshold = Date.UTC(new Date(Date.now() + 6 * 3600 * 1000).getUTCFullYear() - 1, 0, 1);
 
     const orderedShelves = [
       {
@@ -860,7 +923,7 @@
       ...(mlbdItems.length
         ? [{
             title: "🟢 Latest & Bangla",
-            items: sortNewestFirst(mlbdItems),
+            items: sortNewestFirst(dedupeList([...mlbdItems, ...(curated.bengali || [])])),
             moreHref: "catalog.html?category=%2Flanguage%2Fbangla"
           }]
         : []),
@@ -868,53 +931,52 @@
       {
         title: "🏆 Top 10 This Week",
         top10: true,
-        items: dedupeList(curated.top10?.length ? curated.top10 : allPool).slice(0, 10),
+        items: sortNewestFirst(dedupeList(curated.top10?.length ? curated.top10 : allPool)).slice(0, 10),
         moreHref: "catalog.html?category=%2Ftop10"
       },
       {
         title: "🇮🇳 Hindi Dubbed Movies",
-        items: sortNewestFirst(dedupeList(curated.hindiMovies?.length ? curated.hindiMovies : matchAny(x => (x._hindiCatalog || hasLang(x, /hindi/i)) && !x.isSeries))),
+        items: sortNewestFirst(dedupeList([...(curated.hindiMovies || []), ...matchAny(x => (x._hindiCatalog || hasLang(x, /hindi/i)) && !x.isSeries)])),
         moreHref: "catalog.html?category=%2Flanguage%2Fhindi-dubbed"
       },
       {
         title: "🎬 Latest Movies",
-        items: sortNewestFirst(dedupeList(curated.latestMovies?.length ? curated.latestMovies : matchAny(x => x.type === "movie" || x.isMovie))),
+        items: sortNewestFirst(dedupeList([...(curated.latestMovies || []), ...matchAny(x => x.type === "movie" || x.isMovie)])),
         moreHref: "catalog.html?category=%2Ftype%2Fmovies"
       },
       {
         title: "📺 Hindi Dubbed Web Series",
         items: sortNewestFirst(
-          dedupeList(
-            curated.hindiSeries?.length
-              ? curated.hindiSeries
-              : matchAny(x => (x._hindiCatalog || hasLang(x, /hindi/i)) && (x.isSeries || x.type === "series"))
-          )
+          dedupeList([
+            ...(curated.hindiSeries || []),
+            ...matchAny(x => (x._hindiCatalog || hasLang(x, /hindi/i)) && (x.isSeries || x.type === "series"))
+          ])
         ),
         moreHref: "catalog.html?category=%2Flanguage%2Fhindi-dubbed-series"
       },
       {
         title: "🇰🇷 Popular K-Dramas",
-        items: sortNewestFirst(dedupeList(curated.kDramas?.length ? curated.kDramas : matchAny(x => hasLang(x, /korea/i)))),
+        items: sortNewestFirst(dedupeList([...(curated.kDramas || []), ...matchAny(x => hasLang(x, /korea/i))])),
         moreHref: "catalog.html?category=%2Flanguage%2Fkorean"
       },
       {
         title: "🌏 South Indian Movies",
-        items: sortNewestFirst(dedupeList(curated.southIndian?.length ? curated.southIndian : matchAny(x => hasLang(x, /india|tamil|telugu|malayalam/i)))),
+        items: sortNewestFirst(dedupeList([...(curated.southIndian || []), ...matchAny(x => hasLang(x, /india|tamil|telugu|malayalam/i))])),
         moreHref: "catalog.html?category=%2FsouthIndian"
       },
       {
         title: "🍥 Anime Collection",
-        items: sortNewestFirst(dedupeList(curated.anime?.length ? curated.anime : matchAny(x => x.isAnime || x.type === "anime" || /anime/i.test(x.genre || "")))),
+        items: sortNewestFirst(dedupeList([...(curated.anime || []), ...matchAny(x => x.isAnime || x.type === "anime" || /anime/i.test(x.genre || ""))])),
         moreHref: "catalog.html?category=%2Fanime"
       },
       {
         title: "🌍 Hollywood Movies",
-        items: sortNewestFirst(dedupeList(curated.hollywood?.length ? curated.hollywood : matchAny(x => hasLang(x, /united states|english|usa/i) && !x.isSeries))),
+        items: sortNewestFirst(dedupeList([...(curated.hollywood || []), ...matchAny(x => hasLang(x, /united states|english|usa/i) && !x.isSeries)])),
         moreHref: "catalog.html?category=%2Flanguage%2Fenglish"
       },
       {
         title: "🇧🇩 Bengali Movies",
-        items: sortNewestFirst(dedupeList(curated.bengali?.length ? curated.bengali : matchAny(x => hasLang(x, /bengali|bangla|bangladesh/i)))),
+        items: sortNewestFirst(dedupeList([...(curated.bengali || []), ...matchAny(x => hasLang(x, /bengali|bangla|bangladesh/i))])),
         moreHref: "catalog.html?category=%2Flanguage%2Fbengali"
       },
       {
@@ -924,7 +986,7 @@
       },
       {
         title: "🔄 Recently Updated",
-        items: sortNewestFirst(dedupeList(curated.recentlyUpdated?.length ? curated.recentlyUpdated : matchAny(x => x.isSeries || x.type === "series"))),
+        items: sortNewestFirst(dedupeList([...(curated.recentlyUpdated || []), ...matchAny(x => x.isSeries || x.type === "series")])),
         moreHref: "catalog.html?category=%2Frecently-updated"
       },
       {
@@ -932,13 +994,15 @@
         items: dedupeList(
           curated.imdbTopRated?.length
             ? curated.imdbTopRated
-            : [...allPool].sort((a, b) => Number(b.rating || 0) - Number(a.rating || 0))
+            : sortNewestFirst(allPool).sort((a, b) => Number(b.rating || 0) - Number(a.rating || 0))
         ),
         moreHref: "catalog.html?category=%2Ftop-rated"
       },
       {
         title: "⏳ Upcoming Movies",
-        items: dedupeList(curated.upcoming?.length ? curated.upcoming : homeData.upcoming),
+        items: dedupeList(curated.upcoming?.length ? curated.upcoming : homeData.upcoming).filter(
+          x => releaseTime(x) >= Date.now() - 14 * 86400 * 1000
+        ),
         moreHref: "catalog.html?category=%2Fupcoming"
       }
     ];
@@ -958,9 +1022,10 @@
 
     const extraLiveSections = (Array.isArray(homeData.sections) ? homeData.sections : [])
       .map(sec => {
-        const cleanTitle = String(sec?.title || "").trim();
-        const items = dedupeList(sec?.items || []);
+        const cleanTitle = stripCatBrand(String(sec?.title || "").trim());
+        const items = sortNewestFirst(dedupeList(sec?.items || []));
         if (!cleanTitle || !items.length) return null;
+        if (releaseTime(items[0]) < minFreshThreshold) return null;
         const nTitle = normShelfTitle(cleanTitle);
         const catPath = String(sec?.categoryPath || "").trim();
         if (usedShelfTitles.has(nTitle)) return null;
@@ -969,7 +1034,7 @@
         if (catPath) usedCategoryPaths.add(catPath.toLowerCase());
         return {
           title: cleanTitle,
-          items: sortNewestFirst(items),
+          items,
           moreHref: catPath ? `catalog.html?category=${encodeURIComponent(catPath)}` : "catalog.html"
         };
       })

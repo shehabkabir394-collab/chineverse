@@ -18,6 +18,8 @@
  const pageSize=24;
  let data=null,all=[],apiCatalogMode=false,apiMeta=null,allApiCategories=[];
  const isNigerian=()=>false;
+ const stripCatBrand=s=>String(s||"").replace(/\bmovie\s*(?:stream|link)\s*bd\b(?:\.com|\.at)?/gi,"").replace(/\s*[—–\-|:]+\s*$/g,"").replace(/^\s*[—–\-|:]+\s*/g,"").replace(/\s+/g," ").trim();
+ const getEndOfTodayMs=()=>{const bdt=new Date(Date.now()+6*3600*1000);return Date.UTC(bdt.getUTCFullYear(),bdt.getUTCMonth(),bdt.getUTCDate(),23,59,59,999)-6*3600*1000;};
  const dateValue=value=>{
   if(value==null||value==="")return 0;
   const raw=typeof value==="object"?(value.timestamp||value.date||value.value||""):value;
@@ -25,7 +27,16 @@
    const n=Number(raw);
    if(Number.isFinite(n)&&n>0)return n<1e12?n*1000:n;
   }
-  const parsed=Date.parse(String(raw));
+  const s=String(raw).trim(),lower=s.toLowerCase(),now=Date.now();
+  if(/\b(?:just now|now|today)\b/.test(lower))return now;
+  if(/\byesterday\b/.test(lower))return now-86400*1000;
+  const ago=/(\d+)\s*(sec(?:ond)?s?|min(?:ute)?s?|hrs?|hours?|days?|weeks?|months?|years?)\s*ago/i.exec(lower);
+  if(ago){
+   const n=Number(ago[1])||1,u=ago[2].toLowerCase();
+   const mult=u.startsWith("sec")?1000:u.startsWith("min")?60*1000:u.startsWith("h")?3600*1000:u.startsWith("d")?86400*1000:u.startsWith("w")?7*86400*1000:u.startsWith("mo")?30*86400*1000:365*86400*1000;
+   return Math.max(1,now-n*mult);
+  }
+  const parsed=Date.parse(s);
   return Number.isFinite(parsed)&&parsed>0?parsed:0;
  };
  const uploadTime=item=>{
@@ -34,16 +45,18 @@
   return 0;
  };
  const releaseTime=item=>{
-  const nowLimit=Date.now()+36*3600*1000;
+  const nowLimit=getEndOfTodayMs();
   const up=uploadTime(item);
-  let best=up&&up<=nowLimit?up:0;
+  const validUp=up&&up<=nowLimit?up:0;
+  let rel=0;
   const fields=[item?.releaseTimestamp,item?.releaseTime,item?.release_time,item?.releaseDate,item?.release_date,item?.releaseAt,item?.release_at,item?.firstAirDate,item?.first_air_date,item?.airDate,item?.air_date,item?.premiereDate,item?.premiere_date,item?.theatricalReleaseDate,item?.theatrical_release_date,item?.publishDate,item?.publish_date,item?.date];
-  for(const value of fields){const time=dateValue(value);if(time){best=Math.max(best,time);return best;}}
-  if(item?.year&&/^\d{4}$/.test(String(item.year))){const yt=Date.parse(String(item.year)+"-01-01");if(Number.isFinite(yt))best=Math.max(best,yt);}
-  return best||up;
+  for(const value of fields){const time=dateValue(value);if(time){rel=time;break;}}
+  if(!rel&&item?.year&&/^\d{4}$/.test(String(item.year))){const yt=Date.parse(String(item.year)+"-01-01");if(Number.isFinite(yt))rel=yt;}
+  if(validUp>0&&rel>nowLimit)return validUp;
+  return Math.max(validUp,rel)||up;
  };
  const latestFirst=(a,b)=>{
-  const futureCutoff=Date.now()+36*3600*1000,ta=releaseTime(a),tb=releaseTime(b);
+  const futureCutoff=getEndOfTodayMs(),ta=releaseTime(a),tb=releaseTime(b);
   const aFuture=(a?.hasResource===false||a?.isUpcoming===true||ta>futureCutoff)&&ta>futureCutoff;
   const bFuture=(b?.hasResource===false||b?.isUpcoming===true||tb>futureCutoff)&&tb>futureCutoff;
   if(aFuture!==bFuture)return aFuture?1:-1;
@@ -55,7 +68,9 @@
   const textValue=[item?.title,item?.type,item?.typeBadge,item?.category,item?.categoryName,item?.categoryLabel,item?.categoryPath,item?.genre,item?.genres,item?.country,item?.language,...(Array.isArray(item?._sections)?item._sections:[])].flat().map(v=>typeof v==="object"?[v?.name,v?.label,v?.title,v?.path].filter(Boolean).join(" "):String(v||"")).join(" ").toLowerCase();
   return /k[- ]?drama|korean drama|south korea|korea drama/.test(textValue);
  };
- const categoryPriority=(a,b)=>selected==="/top-rated"?(Number(b?.rating||0)-Number(a?.rating||0)||latestFirst(a,b)):latestFirst(a,b);
+ const recentYearCutoff=new Date(Date.now()+6*3600*1000).getUTCFullYear()-1;
+ const isRecentTopRated=item=>Number(item?.year||0)>=recentYearCutoff||releaseTime(item)>=Date.UTC(recentYearCutoff,0,1);
+ const categoryPriority=(a,b)=>selected==="/top-rated"?((isRecentTopRated(b)?1:0)-(isRecentTopRated(a)?1:0)||Number(b?.rating||0)-Number(a?.rating||0)||latestFirst(a,b)):latestFirst(a,b);
  const vals=item=>{
   const out=[];
   ["categoryPath","category","categoryName","categoryLabel","categorySlug","type","typeBadge","genre","language","country"].forEach(k=>{
@@ -115,7 +130,7 @@
   return [...map.values()].filter(item=>!isNigerian(item)).sort(categoryPriority);
  }
  const customLabels={
-  "/":"MovieStreamBD Home Feed",
+  "/":"All Releases",
   "cv:movie":"Movie",
   "cv:anime":"Anime",
   "cv:drama":"Drama",
@@ -249,7 +264,7 @@
   const items=apiCatalogMode?filtered:filtered.slice(start,start+pageSize);
   root.innerHTML=items.map(card).join("")||'<p class="muted">এই Category-তে কোনো title পাওয়া যায়নি। অন্য Category নির্বাচন করো।</p>';
   const c=(data.categories||[]).find(x=>[x.path,x.slug,x.label,x.name,x.title].some(v=>norm(v)===norm(selected)));
-  heading.textContent=selected?(customLabels[selected]||c?.label||c?.name||c?.title||selected):"All Movies & Dramas A–Z";
+  heading.textContent=selected?stripCatBrand(customLabels[selected]||c?.label||c?.name||c?.title||selected)||selected:"All Movies & Dramas A–Z";
   status.textContent=apiCatalogMode
    ? "Page "+safePage+" of "+pages+" · Showing "+items.length+" titles"
    : filtered.length+" titles · Page "+safePage+" of "+pages+" · Showing "+(filtered.length?start+1:0)+"–"+Math.min(start+pageSize,filtered.length);
@@ -289,7 +304,7 @@
    return '<div class="cv-all-cats-group"><div class="cv-all-cats-group-title">'+esc(groupName)+' <span>('+list.length+')</span></div><div class="cv-all-cats-grid">'+
     list.map(c=>{
      const value=text(c.path)||text(c.slug)||text(c.label);
-     const label=text(c.label)||text(c.name)||text(c.title)||value;
+     const label=stripCatBrand(text(c.label)||text(c.name)||text(c.title)||value)||value;
      const icon=text(c.icon)||"🎬";
      const active=norm(value)===norm(selected);
      return '<a class="cv-all-cat-item '+(active?"active":"")+'" href="catalog.html?category='+encodeURIComponent(value)+'"><span class="cv-all-cat-ico" aria-hidden="true">'+icon+'</span><b>'+esc(label)+'</b></a>';
@@ -304,7 +319,8 @@
   const seen=new Set(),items=[];
   cats.forEach(c=>{
    const value=text(c.path)||text(c.slug)||text(c.label)||text(c.name)||text(c.title);
-   const label=text(c.label)||text(c.name)||text(c.title)||text(c.slug)||value,key=norm(value);
+   const rawLabel=text(c.label)||text(c.name)||text(c.title)||text(c.slug)||value;
+   const label=stripCatBrand(rawLabel)||rawLabel,key=norm(value);
    if(value&&label&&!seen.has(key)){seen.add(key);items.push({value,label,group:c.group,icon:c.icon});}
   });
   const topQuick=items.filter(c=>c.group!=="Genres");
@@ -378,7 +394,7 @@
     const category=(data.categories||[]).find(x=>[x.path,x.slug,x.label,x.name,x.title].some(v=>norm(v)===norm(selected)));
     const apiPath=customPaths[selected]||text(category?.path)||(selected.startsWith("/")?selected:(!selected?"/all":""));
     if(apiPath&&(apiPath!=="/"||selected==="/")){
-     status.textContent="Loading "+(category?.label||customLabels[selected]||"All Content")+" · Page "+page+"…";
+     status.textContent="Loading "+(stripCatBrand(category?.label||customLabels[selected]||"All Content")||"All Content")+" · Page "+page+"…";
      const {res:cr,data:pagePayload}=await fetchJsonSafe("/api/movie-api/catalog?category="+encodeURIComponent(apiPath)+"&page="+Math.max(1,Math.min(100,page)),{headers:{Accept:"application/json"},cache:"default"});
      if(!cr.ok||pagePayload.ok!==true)throw new Error(pagePayload.error||"Movie Catalog API unavailable");
      const unique=new Map();

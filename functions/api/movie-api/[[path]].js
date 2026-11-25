@@ -293,18 +293,18 @@ export async function onRequest({ request, env, params }) {
     if (legacy === "catalog") {
       const catPath = String(query.get("category") || query.get("path") || "/");
       const page = Math.max(1, Number(query.get("page")) || 1);
-      const isMlbdOnlyCategory = /^\/(?:language\/(?:dual-audio|gujrati|kannada|marathi|malaysian|vietnamese|german|italian|portuguese|others)|genre\/(?:biographical|historical|musical|sports|superhero|survival|suspense)|category\/|collection\/|collections|popular)/i.test(catPath);
+      const isMlbdOnlyCategory = /^\/(?:language\/(?:dual-audio|gujrati|kannada|marathi|malaysian|vietnamese|german|italian|portuguese|others)|genre\/(?:biographical|historical|musical|sports|superhero|survival|suspense)|category\/|collection\/|collections)/i.test(catPath);
       if (isMlbdOnlyCategory) {
         try {
           const mlbdCat = await getMlbdCatalog({ path: catPath, page });
           if (Array.isArray(mlbdCat?.items) && mlbdCat.items.length > 0) {
-            return json(mlbdCat, 200, "public, max-age=60");
+            return json({ ...mlbdCat, items: sortByReleaseNewest(mlbdCat.items) }, 200, "public, max-age=60");
           }
         } catch {}
         try {
           const mbFallback = await handleMovieBoxRoute("catalog", query);
           if (mbFallback?.ok && Array.isArray(mbFallback.items)) {
-            return json(mbFallback, 200, "public, max-age=60");
+            return json({ ...mbFallback, items: sortByReleaseNewest(mbFallback.items) }, 200, "public, max-age=60");
           }
         } catch {}
         return json({ ok: true, items: [], maxPage: 1, page }, 200, "no-store");

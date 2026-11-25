@@ -1,4 +1,4 @@
-import { configureMediaSecret } from "../../moviebox-api.js";
+import { configureMediaSecret, sortByReleaseNewest } from "../../moviebox-api.js";
 import { getMlbdCatalog } from "../../movielinkbd-api.js";
 
 function json(data, status = 200, cacheControl = "public, max-age=90") {
@@ -23,6 +23,9 @@ export async function onRequest({ request, env }) {
     const q = String(url.searchParams.get("q") || "");
     const page = Math.max(1, Number(url.searchParams.get("page")) || 1);
     const data = await getMlbdCatalog({ path: pathParam, q, page });
+    if (!q && Array.isArray(data?.items)) {
+      data.items = sortByReleaseNewest(data.items);
+    }
     return json(data, 200, "public, max-age=90");
   } catch (err) {
     return json({ ok: false, error: err?.message || "Catalog unavailable" }, 502, "no-store");

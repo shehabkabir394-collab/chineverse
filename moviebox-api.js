@@ -611,52 +611,88 @@ function mapPlatformName(name) {
   return map[key] || raw || "Netflix";
 }
 
+function getEndOfTodayMs() {
+  const bdt = new Date(Date.now() + 6 * 3600 * 1000);
+  return Date.UTC(bdt.getUTCFullYear(), bdt.getUTCMonth(), bdt.getUTCDate(), 23, 59, 59, 999) - 6 * 3600 * 1000;
+}
+
+function parseFlexibleDateMs(raw) {
+  if (raw == null || raw === "") return 0;
+  if (typeof raw === "number") {
+    if (!Number.isFinite(raw) || raw <= 0) return 0;
+    return raw < 1e12 ? raw * 1000 : raw;
+  }
+  const s = String(raw).trim();
+  if (!s) return 0;
+  if (/^\d{9,16}$/.test(s)) {
+    const n = Number(s);
+    return n < 1e12 ? n * 1000 : n;
+  }
+  const lower = s.toLowerCase();
+  const now = Date.now();
+  if (/\b(?:just now|now|today)\b/.test(lower)) return now;
+  if (/\byesterday\b/.test(lower)) return now - 86400 * 1000;
+  const ago = /(\d+)\s*(sec(?:ond)?s?|min(?:ute)?s?|hrs?|hours?|days?|weeks?|months?|years?)\s*ago/i.exec(lower);
+  if (ago) {
+    const n = Number(ago[1]) || 1;
+    const u = ago[2].toLowerCase();
+    const mult = u.startsWith("sec") ? 1000
+      : u.startsWith("min") ? 60 * 1000
+      : u.startsWith("h") ? 3600 * 1000
+      : u.startsWith("d") ? 86400 * 1000
+      : u.startsWith("w") ? 7 * 86400 * 1000
+      : u.startsWith("mo") ? 30 * 86400 * 1000
+      : 365 * 86400 * 1000;
+    return Math.max(1, now - n * mult);
+  }
+  const t = Date.parse(s);
+  return Number.isFinite(t) && t > 0 ? t : 0;
+}
+
 function parseReleaseTs(item) {
-  const nowLimit = Date.now() + 36 * 3600 * 1000;
-  let best = 0;
+  const nowLimit = getEndOfTodayMs();
+  let bestUpload = 0;
   const uploadCandidates = [
     item?.uploadedAtMs,
     item?.uploadTimestamp,
+    item?.uploadTime,
     item?.updatedAt,
     item?.createdAt
   ];
   for (const raw of uploadCandidates) {
-    if (typeof raw === "number" && Number.isFinite(raw) && raw > 0 && raw <= nowLimit) {
-      best = Math.max(best, raw);
-    } else if (raw) {
-      const t = Date.parse(String(raw).trim());
-      if (Number.isFinite(t) && t > 0 && t <= nowLimit) best = Math.max(best, t);
+    const t = parseFlexibleDateMs(raw);
+    if (t > 0 && t <= nowLimit) {
+      bestUpload = Math.max(bestUpload, t);
     }
   }
 
+  let bestRelease = 0;
   const candidates = [
     item?.releaseDate,
     item?.appointmentDate,
     item?.year && /^\d{4}$/.test(String(item.year)) ? `${item.year}-01-01` : ""
   ];
   for (const raw of candidates) {
-    if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) {
-      best = Math.max(best, raw);
-      break;
-    }
-    const s = String(raw || "").trim();
-    if (!s) continue;
-    const t = Date.parse(s);
-    if (Number.isFinite(t) && t > 0) {
-      best = Math.max(best, t);
+    const t = parseFlexibleDateMs(raw);
+    if (t > 0) {
+      bestRelease = t;
       break;
     }
   }
-  return best;
+
+  if (bestUpload > 0 && bestRelease > nowLimit) {
+    return bestUpload;
+  }
+  return Math.max(bestUpload, bestRelease);
 }
 
 export function sortByReleaseNewest(items) {
-  const futureCutoff = Date.now() + 36 * 3600 * 1000;
+  const futureCutoff = getEndOfTodayMs();
   return [...(Array.isArray(items) ? items : [])].sort((a, b) => {
     const ta = parseReleaseTs(a);
     const tb = parseReleaseTs(b);
-    const aFuture = (a?.hasResource === false || a?.isUpcoming === true || ta > futureCutoff) && ta > futureCutoff;
-    const bFuture = (b?.hasResource === false || b?.isUpcoming === true || tb > futureCutoff) && tb > futureCutoff;
+    const aFuture = ta > futureCutoff;
+    const bFuture = tb > futureCutoff;
     if (aFuture !== bFuture) return aFuture ? 1 : -1;
     if (aFuture && bFuture) return ta - tb;
     if (tb !== ta) return tb - ta;
@@ -816,7 +852,13 @@ export async function getHomeFeed() {
     hollywoodRes,
     bengaliRes,
     bengaliSeriesRes,
-    recentlyUpdatedRes
+    recentlyUpdatedRes,
+    comedyLatestRes,
+    actionLatestRes,
+    horrorLatestRes,
+    romanceLatestRes,
+    fantasyLatestRes,
+    cDramaLatestRes
   ] = await Promise.allSettled([
     mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/home`, {}, 180000),
     mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/subject/trending?page=1&perPage=36`, {}, 180000),
@@ -834,11 +876,47 @@ export async function getHomeFeed() {
     filterCall({ page: 1, perPage: 30, channelId: 1, country: "United States", sort: "Latest" }),
     filterCall({ page: 1, perPage: 24, channelId: 1, country: "Bangladesh", sort: "Latest" }),
     filterCall({ page: 1, perPage: 24, channelId: 2, country: "Bangladesh", sort: "Latest" }),
-    filterCall({ page: 1, perPage: 36, channelId: 2, sort: "Latest" })
+    filterCall({ page: 1, perPage: 36, channelId: 2, sort: "Latest" }),
+    filterCall({ page: 1, perPage: 20, channelId: 1, genre: "Comedy", sort: "Latest" }),
+    filterCall({ page: 1, perPage: 20, channelId: 1, genre: "Action", sort: "Latest" }),
+    filterCall({ page: 1, perPage: 20, channelId: 1, genre: "Horror", sort: "Latest" }),
+    filterCall({ page: 1, perPage: 20, channelId: 1, genre: "Romance", sort: "Latest" }),
+    filterCall({ page: 1, perPage: 20, channelId: 2, genre: "Fantasy", sort: "Latest" }),
+    filterCall({ page: 1, perPage: 20, channelId: 2, country: "China", sort: "Latest" })
   ]);
 
   const homeData = homeRes.status === "fulfilled" ? homeRes.value?.data || {} : {};
   const opList = Array.isArray(homeData.operatingList) ? homeData.operatingList : [];
+
+  const pick = (res, fallback = []) => (res.status === "fulfilled" && Array.isArray(res.value) && res.value.length ? res.value : fallback);
+  const mergeLists = (...lists) => {
+    const out = [];
+    const seen = new Set();
+    for (const l of lists) {
+      for (const x of Array.isArray(l) ? l : []) {
+        const k = x?.subjectId || x?.path;
+        if (!k || seen.has(k)) continue;
+        seen.add(k);
+        out.push(x);
+      }
+    }
+    return sortByReleaseNewest(out);
+  };
+
+  const latestMoviesPool = pick(latestMoviesRes, lastGoodHomeFeed?.curated?.latestMovies || []);
+  const latestSeriesPool = pick(recentlyUpdatedRes, lastGoodHomeFeed?.curated?.recentlyUpdated || []);
+  const southMerged = mergeLists(pick(southIndianRes), pick(southSeriesRes));
+  const animeMerged = mergeLists(pick(animeRes), pick(animeMoviesRes));
+  const bengaliMerged = mergeLists(pick(bengaliRes), pick(bengaliSeriesRes));
+  const kDramaPool = sortByReleaseNewest(pick(kDramaRes, lastGoodHomeFeed?.curated?.kDramas || []));
+  const cDramaPool = sortByReleaseNewest(pick(cDramaLatestRes));
+  const comedyPool = sortByReleaseNewest(pick(comedyLatestRes));
+  const actionPool = sortByReleaseNewest(pick(actionLatestRes));
+  const horrorPool = sortByReleaseNewest(pick(horrorLatestRes));
+  const romancePool = sortByReleaseNewest(pick(romanceLatestRes));
+  const fantasyPool = sortByReleaseNewest(pick(fantasyLatestRes));
+  const currentYear = new Date().getUTCFullYear();
+  const minFreshTs = Date.UTC(currentYear - 1, 0, 1);
 
   const banners = [];
   const sections = [];
@@ -856,8 +934,22 @@ export async function getHomeFeed() {
       }
     } else if (op.type === "SUBJECTS_MOVIE" && Array.isArray(op.subjects) && op.subjects.length) {
       const title = String(op.title || "Featured").trim();
-      const items = sortByReleaseNewest(indexList(op.subjects).filter(x => x.hasResource !== false));
-      if (items.length) {
+      const rawItems = indexList(op.subjects).filter(x => x.hasResource !== false);
+      let enriched = rawItems;
+      if (/popular\s*series|tv\s*shows/i.test(title)) enriched = mergeLists(latestSeriesPool, rawItems);
+      else if (/popular\s*movie/i.test(title)) enriched = mergeLists(latestMoviesPool, rawItems);
+      else if (/k-drama/i.test(title)) enriched = mergeLists(kDramaPool, rawItems);
+      else if (/c-drama/i.test(title)) enriched = mergeLists(cDramaPool, rawItems);
+      else if (/anime/i.test(title)) enriched = mergeLists(animeMerged, rawItems);
+      else if (/comedy/i.test(title)) enriched = mergeLists(comedyPool, rawItems);
+      else if (/horror/i.test(title)) enriched = mergeLists(horrorPool, rawItems);
+      else if (/romance/i.test(title)) enriched = mergeLists(romancePool, rawItems);
+      else if (/action/i.test(title)) enriched = mergeLists(actionPool, rawItems);
+      else if (/fantasy/i.test(title)) enriched = mergeLists(fantasyPool, rawItems);
+
+      const items = sortByReleaseNewest(enriched);
+      const newestTs = items.length ? parseReleaseTs(items[0]) : 0;
+      if (items.length && newestTs >= minFreshTs) {
         sections.push({
           title,
           badge: "MOVIEBOX LIVE",
@@ -890,21 +982,6 @@ export async function getHomeFeed() {
     }
   }
 
-  const pick = (res, fallback = []) => (res.status === "fulfilled" && Array.isArray(res.value) && res.value.length ? res.value : fallback);
-  const mergeLists = (...lists) => {
-    const out = [];
-    const seen = new Set();
-    for (const l of lists) {
-      for (const x of Array.isArray(l) ? l : []) {
-        const k = x?.subjectId || x?.path;
-        if (!k || seen.has(k)) continue;
-        seen.add(k);
-        out.push(x);
-      }
-    }
-    return sortByReleaseNewest(out);
-  };
-
   const hindiMoviesList = pick(hindiMoviesRes);
   const hindiSeriesList = pick(hindiSeriesRes);
   const hindiCombined = mergeLists(hindiMoviesList, hindiSeriesList);
@@ -922,52 +999,52 @@ export async function getHomeFeed() {
       ? indexList(trendingRes.value?.data?.subjectList).filter(x => x.hasResource !== false)
       : [];
   const trendingTop10 = trendingRaw.length ? trendingRaw : (lastGoodHomeFeed?.trending || []);
-  const trending = sortByReleaseNewest(trendingTop10);
+  const trending = mergeLists(latestMoviesPool.slice(0, 14), latestSeriesPool.slice(0, 12), trendingTop10);
   const rawUpcoming =
     upcomingRes.status === "fulfilled" ? indexList(upcomingRes.value?.data?.items) : [];
-  const upcomingList = rawUpcoming.length ? rawUpcoming : (upcoming.length ? upcoming : (lastGoodHomeFeed?.upcoming || []));
+  const upcomingPool = rawUpcoming.length ? rawUpcoming : (upcoming.length ? upcoming : (lastGoodHomeFeed?.upcoming || []));
+  const upcomingCutoff = Date.now() - 14 * 86400 * 1000;
+  const upcomingList = sortByReleaseNewest(
+    upcomingPool.filter(x => x?.hasResource === false || parseReleaseTs(x) >= upcomingCutoff)
+  );
 
   const platforms = Array.isArray(homeData.platformList) && homeData.platformList.length
     ? homeData.platformList.map(p => ({ name: p.name }))
     : (lastGoodHomeFeed?.platforms || []);
-
-  const southMerged = mergeLists(pick(southIndianRes), pick(southSeriesRes));
-  const animeMerged = mergeLists(pick(animeRes), pick(animeMoviesRes));
-  const bengaliMerged = mergeLists(pick(bengaliRes), pick(bengaliSeriesRes));
 
   const finalSections = sections.length ? sections : (lastGoodHomeFeed?.sections || []);
   const allPool = [
     ...trending,
     ...pick(top10Res),
     ...hindiCombined,
-    ...pick(latestMoviesRes),
+    ...latestMoviesPool,
     ...pick(hollywoodRes),
     ...southMerged,
-    ...pick(kDramaRes),
+    ...kDramaPool,
     ...animeMerged,
     ...bengaliMerged,
-    ...pick(recentlyUpdatedRes),
+    ...latestSeriesPool,
     ...finalSections.flatMap(s => s.items || [])
   ];
   const uniqPool = [...new Map(allPool.filter(x => x && (x.subjectId || x.path)).map(x => [x.subjectId || x.path, x])).values()];
-  const imdbTopRated = [...uniqPool]
-    .filter(x => Number(x.rating) > 0)
+  const recentTopRatedPool = uniqPool.filter(x => Number(x.rating) > 0 && parseReleaseTs(x) >= minFreshTs);
+  const imdbTopRated = [...(recentTopRatedPool.length >= 10 ? recentTopRatedPool : uniqPool.filter(x => Number(x.rating) > 0))]
     .sort((a, b) => Number(b.rating || 0) - Number(a.rating || 0) || parseReleaseTs(b) - parseReleaseTs(a))
     .slice(0, 24);
 
   const curated = {
     trending,
-    top10: pick(top10Res, trendingTop10.slice(0, 10)).slice(0, 10),
+    top10: sortByReleaseNewest(pick(top10Res, trendingTop10.slice(0, 10)).slice(0, 10)),
     hindiMovies: sortByReleaseNewest(hindiMoviesList),
-    latestMovies: sortByReleaseNewest(pick(latestMoviesRes, lastGoodHomeFeed?.curated?.latestMovies || [])),
+    latestMovies: sortByReleaseNewest(latestMoviesPool),
     hindiSeries: sortByReleaseNewest(pick(hindiSeriesRes, lastGoodHomeFeed?.curated?.hindiSeries || [])),
-    kDramas: sortByReleaseNewest(pick(kDramaRes, lastGoodHomeFeed?.curated?.kDramas || [])),
+    kDramas: kDramaPool,
     southIndian: southMerged,
     anime: animeMerged,
     hollywood: sortByReleaseNewest(pick(hollywoodRes, lastGoodHomeFeed?.curated?.hollywood || [])),
     bengali: bengaliMerged,
-    recentlyAdded: sortByReleaseNewest(pick(latestMoviesRes, trending)).slice(0, 24),
-    recentlyUpdated: sortByReleaseNewest(pick(recentlyUpdatedRes, lastGoodHomeFeed?.curated?.recentlyUpdated || [])),
+    recentlyAdded: mergeLists(latestMoviesPool, latestSeriesPool, trending).slice(0, 30),
+    recentlyUpdated: sortByReleaseNewest(latestSeriesPool),
     imdbTopRated,
     upcoming: upcomingList
   };
@@ -976,7 +1053,7 @@ export async function getHomeFeed() {
     ok: true,
     categories: CATEGORIES,
     platforms,
-    banners: banners.length ? banners : (trending.length ? trending.slice(0, 8) : (lastGoodHomeFeed?.banners || [])),
+    banners: banners.length ? sortByReleaseNewest(banners) : (trending.length ? trending.slice(0, 8) : (lastGoodHomeFeed?.banners || [])),
     trending,
     upcoming: upcomingList,
     sections: finalSections,
@@ -1353,21 +1430,50 @@ export async function handleMovieBoxRoute(legacy, query) {
       if (lower === "/shorts" || lower === "/reels") {
         return await handleMovieBoxRoute("shorts", query);
       }
-      if (lower === "/mostwatch/7d" || lower === "/new") {
-        return await handleMovieBoxRoute("trending", query);
+      if (lower === "/new" || lower === "/popular") {
+        const [mRes, sRes, aRes] = await Promise.allSettled([
+          mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/subject/filter`, { method: "POST", body: JSON.stringify({ page, perPage: 24, channelId: 1, sort: "Latest" }) }, 120000),
+          mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/subject/filter`, { method: "POST", body: JSON.stringify({ page, perPage: 24, channelId: 2, sort: "Latest" }) }, 120000),
+          mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/subject/filter`, { method: "POST", body: JSON.stringify({ page, perPage: 12, channelId: 2, genre: "Anime", sort: "Latest" }) }, 120000)
+        ]);
+        const merged = [
+          ...(mRes.status === "fulfilled" ? indexList(mRes.value?.data?.items) : []),
+          ...(sRes.status === "fulfilled" ? indexList(sRes.value?.data?.items) : []),
+          ...(aRes.status === "fulfilled" ? indexList(aRes.value?.data?.items, { isAnime: true, _animeCatalog: true }) : [])
+        ].filter(x => x.hasResource !== false);
+        const uniq = [...new Map(merged.map(x => [x.subjectId || x.path, x])).values()];
+        const items = sortByReleaseNewest(uniq);
+        const hasMore = [mRes, sRes].some(r => r.status === "fulfilled" && r.value?.data?.pager?.hasMore);
+        return { ok: true, items, page, totalPages: hasMore ? Math.max(page + 1, 20) : page };
+      }
+      if (lower === "/mostwatch/7d") {
+        const [tRes, mRes, sRes] = await Promise.allSettled([
+          handleMovieBoxRoute("trending", query),
+          mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/subject/filter`, { method: "POST", body: JSON.stringify({ page, perPage: 18, channelId: 1, sort: "Latest" }) }, 120000),
+          mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/subject/filter`, { method: "POST", body: JSON.stringify({ page, perPage: 18, channelId: 2, sort: "Latest" }) }, 120000)
+        ]);
+        const merged = [
+          ...(mRes.status === "fulfilled" ? indexList(mRes.value?.data?.items) : []),
+          ...(sRes.status === "fulfilled" ? indexList(sRes.value?.data?.items) : []),
+          ...(tRes.status === "fulfilled" && Array.isArray(tRes.value?.items) ? tRes.value.items : [])
+        ].filter(x => x.hasResource !== false);
+        const uniq = [...new Map(merged.map(x => [x.subjectId || x.path, x])).values()];
+        return { ok: true, items: sortByReleaseNewest(uniq), page, totalPages: Math.max(page + 1, 5) };
       }
       if (lower === "/top10") {
         const home = await getHomeFeed();
-        const items = Array.isArray(home?.curated?.top10) && home.curated.top10.length
-          ? home.curated.top10
-          : (home?.trending || []).slice(0, 10);
+        const items = sortByReleaseNewest(
+          Array.isArray(home?.curated?.top10) && home.curated.top10.length
+            ? home.curated.top10
+            : (home?.trending || []).slice(0, 10)
+        );
         return { ok: true, items, page: 1, totalPages: 1 };
       }
       if (lower === "/top-rated") {
         const home = await getHomeFeed();
         const items = Array.isArray(home?.curated?.imdbTopRated) && home.curated.imdbTopRated.length
           ? home.curated.imdbTopRated
-          : [...(home?.trending || [])].sort((a, b) => Number(b.rating || 0) - Number(a.rating || 0));
+          : [...(home?.trending || [])].sort((a, b) => Number(b.rating || 0) - Number(a.rating || 0) || parseReleaseTs(b) - parseReleaseTs(a));
         return { ok: true, items, page: 1, totalPages: 1 };
       }
       if (lower.includes("adult18plus") || lower === "/midnight" || lower === "/18+" || lower === "/genre/18+") {

@@ -937,6 +937,9 @@ app.get("/api/catalog", async (req, res) => {
     const q = String(req.query.q || "");
     const page = Math.max(1, Number(req.query.page) || 1);
     const data = await getMlbdCatalog({ path: pathParam, q, page });
+    if (!q && Array.isArray(data?.items)) {
+      data.items = sortByReleaseNewest(data.items);
+    }
     res.setHeader("Cache-Control", "public, max-age=90");
     return res.json(data);
   } catch (err) {
@@ -1199,13 +1202,13 @@ app.all("/api/movie-api/*", async (req, res) => {
     if (legacy === "catalog") {
       const category = String(query.get("category") || "/");
       const page = Math.max(1, Number(query.get("page")) || 1);
-      const isMlbdOnlyCategory = /^\/(?:language\/(?:dual-audio|gujrati|kannada|marathi|malaysian|vietnamese|german|italian|portuguese|others)|genre\/(?:biographical|historical|musical|sports|superhero|survival|suspense)|category\/|collection\/|collections|popular)/i.test(category);
+      const isMlbdOnlyCategory = /^\/(?:language\/(?:dual-audio|gujrati|kannada|marathi|malaysian|vietnamese|german|italian|portuguese|others)|genre\/(?:biographical|historical|musical|sports|superhero|survival|suspense)|category\/|collection\/|collections)/i.test(category);
       if (isMlbdOnlyCategory) {
         try {
           const mlbdCat = await getMlbdCatalog({ path: category, page });
           if (Array.isArray(mlbdCat?.items) && mlbdCat.items.length > 0) {
             res.setHeader("Cache-Control", "public, max-age=60");
-            return res.json(mlbdCat);
+            return res.json({ ...mlbdCat, items: sortByReleaseNewest(mlbdCat.items) });
           }
         } catch (err) {
           console.warn(`[MLBD catalog error] ${category}:`, err?.message || err);
@@ -1214,7 +1217,7 @@ app.all("/api/movie-api/*", async (req, res) => {
           const mbFallback = await handleMovieBoxRoute("catalog", query);
           if (mbFallback?.ok && Array.isArray(mbFallback.items)) {
             res.setHeader("Cache-Control", "public, max-age=60");
-            return res.json(mbFallback);
+            return res.json({ ...mbFallback, items: sortByReleaseNewest(mbFallback.items) });
           }
         } catch {}
         res.setHeader("Cache-Control", "no-store");

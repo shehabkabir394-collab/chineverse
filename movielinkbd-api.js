@@ -238,6 +238,67 @@ function stripTags(html) {
     .trim();
 }
 
+function stripSiteBrandFromLabel(raw = "") {
+  return String(raw || "")
+    .replace(/\bmovie\s*(?:stream|link)\s*bd\b(?:\.com|\.at)?/gi, "")
+    .replace(/\s*[—–\-|:]+\s*$/g, "")
+    .replace(/^\s*[—–\-|:]+\s*/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getEndOfTodayMs() {
+  const bdt = new Date(Date.now() + 6 * 3600 * 1000);
+  return Date.UTC(bdt.getUTCFullYear(), bdt.getUTCMonth(), bdt.getUTCDate(), 23, 59, 59, 999) - 6 * 3600 * 1000;
+}
+
+function parseFlexibleDateMs(raw) {
+  if (raw == null || raw === "") return 0;
+  if (typeof raw === "number") {
+    if (!Number.isFinite(raw) || raw <= 0) return 0;
+    return raw < 1e12 ? raw * 1000 : raw;
+  }
+  const s = String(raw).trim();
+  if (!s) return 0;
+  if (/^\d{9,16}$/.test(s)) {
+    const n = Number(s);
+    return n < 1e12 ? n * 1000 : n;
+  }
+  const lower = s.toLowerCase();
+  const now = Date.now();
+  if (/\b(?:just now|now|today)\b/.test(lower)) return now;
+  if (/\byesterday\b/.test(lower)) return now - 86400 * 1000;
+  const ago = /(\d+)\s*(sec(?:ond)?s?|min(?:ute)?s?|hrs?|hours?|days?|weeks?|months?|years?)\s*ago/i.exec(lower);
+  if (ago) {
+    const n = Number(ago[1]) || 1;
+    const u = ago[2].toLowerCase();
+    const mult = u.startsWith("sec") ? 1000
+      : u.startsWith("min") ? 60 * 1000
+      : u.startsWith("h") ? 3600 * 1000
+      : u.startsWith("d") ? 86400 * 1000
+      : u.startsWith("w") ? 7 * 86400 * 1000
+      : u.startsWith("mo") ? 30 * 86400 * 1000
+      : 365 * 86400 * 1000;
+    return Math.max(1, now - n * mult);
+  }
+  const t = Date.parse(s);
+  return Number.isFinite(t) && t > 0 ? t : 0;
+}
+
+function extractPlausibleYear(title = "", explicitYear = "", href = "") {
+  const maxYr = new Date(Date.now() + 6 * 3600 * 1000).getUTCFullYear() + 1;
+  const titleYears = [...String(title || "").matchAll(/[\(\[](19\d\d|20\d\d)[\)\]]/g)]
+    .map(m => Number(m[1]))
+    .filter(y => y >= 1900 && y <= maxYr);
+  const titleYr = titleYears.length ? Math.max(...titleYears) : 0;
+  const paramYrMatch = String(explicitYear || "").match(/(19\d\d|20\d\d)/);
+  const paramYr = paramYrMatch && Number(paramYrMatch[1]) <= maxYr ? Number(paramYrMatch[1]) : 0;
+  const hrefYrMatch = String(href || "").match(/-(19\d\d|20\d\d)(?:\/|$)/);
+  const hrefYr = hrefYrMatch && Number(hrefYrMatch[1]) <= maxYr ? Number(hrefYrMatch[1]) : 0;
+  if (titleYr && (!paramYr || titleYr > paramYr)) return String(titleYr);
+  return String(paramYr || titleYr || hrefYr || "");
+}
+
 export function decDataDl(b, s, r) {
   try {
     let x = Number.parseInt(String(s || "0"), 16) >>> 0;
@@ -614,7 +675,8 @@ export function extractCardsFromHtml(html, baseOrigin = activeResolvedOrigin) {
     const views = stripTags(chunk.match(/<span class="views-badge-top"[^>]*>([\s\S]*?)<\/span>/i)?.[1] || "");
     const epBadge = stripTags(chunk.match(/<span class="badge ep-badge[^"]*"[^>]*>([\s\S]*?)<\/span>/i)?.[1] || "");
     const uploadTime = stripTags(chunk.match(/<div class="upload-time"[^>]*>([\s\S]*?)<\/div>/i)?.[1] || "");
-    const yearMatch = title.match(/\((19\d\d|20\d\d)\)/);
+    const uploadedAtMs = parseFlexibleDateMs(uploadTime);
+    const yr = extractPlausibleYear(title, "", itemPath);
     const isSeries = /^\/(?:series|drama|anime)\//i.test(itemPath) || /series|drama|episode|s\d+/i.test(`${typeText} ${epBadge}`);
     const isAnime = /^\/anime\//i.test(itemPath) || /anime/i.test(`${typeText} ${title}`);
     const ratingMatch = chunk.match(/★\s*(\d+(?:\.\d+)?)/);
@@ -633,10 +695,11 @@ export function extractCardsFromHtml(html, baseOrigin = activeResolvedOrigin) {
       isMovie: !isSeries,
       isAnime,
       typeBadge: epBadge || typeText || (isAnime ? "Anime" : isSeries ? "Series" : "Movie"),
-      year: yearMatch ? yearMatch[1] : "",
+      year: yr,
       rating: ratingMatch ? ratingMatch[1] : "",
       viewsText: views,
       uploadTime,
+      ...(uploadedAtMs > 0 ? { uploadedAtMs } : {}),
       hasResource: !/upcoming|release soon/i.test(quality + " " + title),
       isHindiDubbed: /hindi|dual/i.test(`${language} ${title}`),
       source: "movielinkbd",
@@ -669,7 +732,8 @@ export function extractCategoriesFromHtml(html) {
         ? "Genres"
         : "Collections";
 
-    const cleanLabel = (rawLabel.replace(/^[^\p{L}\p{N}]+/u, "").trim() || rawLabel).replace(/MovieLinkBD/gi, "MovieStreamBD");
+    const rawClean = rawLabel.replace(/^[^\p{L}\p{N}]+/u, "").trim() || rawLabel;
+    const cleanLabel = stripSiteBrandFromLabel(rawClean) || rawClean;
     const iconMatch = rawLabel.match(/^([^\p{L}\p{N}\s]{1,4})/u);
     found.push({
       label: cleanLabel,
@@ -717,7 +781,7 @@ function extractHomeSections(html, baseOrigin) {
     const titleRaw = secHtml.match(/<h[1-4][^>]*class="[^"]*mlbd-rail-title[^"]*"[^>]*>([\s\S]*?)<\/h[1-4]>/i)?.[1] ||
       secHtml.match(/<h[1-4][^>]*>([\s\S]*?)<\/h[1-4]>/i)?.[1] ||
       "Featured";
-    const title = stripTags(titleRaw).replace(/MovieLinkBD/gi, "MovieStreamBD");
+    const title = stripSiteBrandFromLabel(stripTags(titleRaw)) || "Featured";
     const items = extractCardsFromHtml(secHtml, baseOrigin);
     if (title && items.length) {
       sections.push({
@@ -733,7 +797,7 @@ function extractHomeSections(html, baseOrigin) {
   if (!sections.length) {
     const fallbackItems = extractCardsFromHtml(html, baseOrigin);
     if (fallbackItems.length) {
-      sections.push({ id: "mlbd-latest", title: "🔥 MovieStreamBD Latest", categoryPath: "/new", items: fallbackItems, source: "movielinkbd" });
+      sections.push({ id: "mlbd-latest", title: "🔥 Latest", categoryPath: "/new", items: fallbackItems, source: "movielinkbd" });
     }
   }
 
@@ -1006,15 +1070,10 @@ async function fetchMlbdComPage(pagePath = "/") {
   return setCached(cacheKey, html, 180000);
 }
 
-function buildMlbdComItem({ title, rawPoster = "", rating = "", year = "", typeText = "", href = "", languageHint = "" }) {
+function buildMlbdComItem({ title, rawPoster = "", rating = "", year = "", typeText = "", href = "", languageHint = "", uploadedAtMs = 0, uploadTime = "" }) {
   const cleanTitle = stripTags(title).replace(/<small>[\s\S]*?<\/small>/gi, "").trim();
   if (!cleanTitle) return null;
-  const yr = String(
-    year ||
-    cleanTitle.match(/[\(\[](19\d\d|20\d\d)[\)\]]/)?.[1] ||
-    String(href || "").match(/-(19\d\d|20\d\d)(?:\/|$)/)?.[1] ||
-    ""
-  );
+  const yr = extractPlausibleYear(cleanTitle, year, href);
   const isSeries = /^\/(?:series|drama|anime)\//i.test(href) ||
     /series|drama|season|s\d{1,2}|ep\s*\d+/i.test(`${typeText} ${cleanTitle}`);
   const isAnime = /^\/anime\//i.test(href) || /anime/i.test(`${typeText} ${cleanTitle}`);
@@ -1051,6 +1110,8 @@ function buildMlbdComItem({ title, rawPoster = "", rating = "", year = "", typeT
     typeBadge: isAnime ? "Anime" : isSeries ? "Series" : "Movie",
     year: yr,
     rating: String(rating || regHit?.rating || ""),
+    ...(uploadTime ? { uploadTime } : {}),
+    ...(uploadedAtMs > 0 ? { uploadedAtMs } : {}),
     hasResource: !/upcoming|release soon/i.test(cleanTitle),
     isHindiDubbed: isHindi,
     source: "movielinkbd",
@@ -1064,6 +1125,17 @@ function extractMlbdComCards(html, pagePath = "/") {
   const items = [];
   const seen = new Set();
   const s = String(html || "");
+  const now = Date.now();
+  const currentYear = new Date(now + 6 * 3600 * 1000).getUTCFullYear();
+  const isLatestHomePage = pagePath === "/";
+  const assignUploadTime = (built) => {
+    if (!built) return;
+    const yrNum = Number(built.year || 0);
+    if (isLatestHomePage && (!yrNum || yrNum >= currentYear - 1)) {
+      built.uploadedAtMs = now - items.length * 60_000;
+      if (!built.uploadTime) built.uploadTime = "Today";
+    }
+  };
   const langHint = pagePath.includes("hindi-dubbed")
     ? "Hindi Dubbed"
     : pagePath.includes("hindi")
@@ -1092,6 +1164,7 @@ function extractMlbdComCards(html, pagePath = "/") {
     const built = buildMlbdComItem({ title: rawTitle, rawPoster, rating, typeText, href, languageHint: langHint });
     if (built && !seen.has(built.title.toLowerCase())) {
       seen.add(built.title.toLowerCase());
+      assignUploadTime(built);
       items.push(built);
     }
   }
@@ -1107,6 +1180,7 @@ function extractMlbdComCards(html, pagePath = "/") {
     const built = buildMlbdComItem({ title: rawTitle, rawPoster, rating, typeText, languageHint: langHint });
     if (built && !seen.has(built.title.toLowerCase())) {
       seen.add(built.title.toLowerCase());
+      assignUploadTime(built);
       items.push(built);
     }
   }
@@ -1131,7 +1205,10 @@ function extractMlbdComCards(html, pagePath = "/") {
             typeText: it["@type"] === "TVSeries" ? "Series" : it["@type"] === "Movie" ? "Movie" : "",
             languageHint: langHint
           });
-          if (built) items.push(built);
+          if (built) {
+            assignUploadTime(built);
+            items.push(built);
+          }
         }
       }
     } catch {}
@@ -1146,7 +1223,10 @@ function extractMlbdComCards(html, pagePath = "/") {
     if (!rawTitle || seen.has(rawTitle.toLowerCase())) continue;
     seen.add(rawTitle.toLowerCase());
     const built = buildMlbdComItem({ title: rawTitle, year: yr, languageHint: langHint });
-    if (built) items.push(built);
+    if (built) {
+      assignUploadTime(built);
+      items.push(built);
+    }
   }
 
   return items;
@@ -1539,24 +1619,55 @@ function mapCategoryToMlbdComUrls(rawPath = "/") {
 
 function sortMlbdNewestFirst(items = []) {
   const arr = Array.isArray(items) ? items : [];
-  const now = Date.now();
-  const futureCutoff = now + 36 * 3600 * 1000;
+  const futureCutoff = getEndOfTodayMs();
   return arr
     .map((item, idx) => {
-      const yr = Number(item?.year || String(item?.title || "").match(/[\(\[](19\d\d|20\d\d)[\)\]]/)?.[1] || 0);
-      const relRaw = item?.releaseDate || item?.uploadedAtMs || item?.uploadTime || "";
-      const relParsed = typeof relRaw === "number" ? relRaw : Date.parse(String(relRaw || ""));
-      const ts = Number.isFinite(relParsed) && relParsed > 0 ? relParsed : (yr >= 1900 ? Date.UTC(yr, 0, 1) : 0);
-      const isFutureUnreleased = (item?.hasResource === false || item?.isUpcoming === true) && ts > futureCutoff;
+      const yr = Number(extractPlausibleYear(item?.title || "", item?.year || "", item?.path || "")) || 0;
+      let bestUpload = 0;
+      for (const raw of [item?.uploadedAtMs, item?.uploadTimestamp, item?.uploadTime, item?.updatedAt, item?.createdAt]) {
+        const t = parseFlexibleDateMs(raw);
+        if (t > 0 && t <= futureCutoff) bestUpload = Math.max(bestUpload, t);
+      }
+      let bestRelease = 0;
+      for (const raw of [item?.releaseDate, item?.appointmentDate, yr >= 1900 ? `${yr}-01-01` : ""]) {
+        const t = parseFlexibleDateMs(raw);
+        if (t > 0) {
+          bestRelease = t;
+          break;
+        }
+      }
+      const ts = bestUpload > 0 && bestRelease > futureCutoff
+        ? bestUpload
+        : Math.max(bestUpload, bestRelease);
+      const isFutureUnreleased = (item?.hasResource === false || item?.isUpcoming === true || ts > futureCutoff) && ts > futureCutoff;
       return { item, idx, yr, ts, isFutureUnreleased };
     })
     .sort((a, b) => {
       if (a.isFutureUnreleased !== b.isFutureUnreleased) return a.isFutureUnreleased ? 1 : -1;
+      if (a.isFutureUnreleased && b.isFutureUnreleased) return a.ts - b.ts;
       if (b.ts !== a.ts) return b.ts - a.ts;
       if (b.yr !== a.yr) return b.yr - a.yr;
       return a.idx - b.idx;
     })
     .map(x => x.item);
+}
+
+function matchesMlbdCategoryItem(item, categoryPath = "/") {
+  const p = String(categoryPath || "/").toLowerCase().replace(/\/+$/, "") || "/";
+  const title = String(item?.title || "");
+  const hay = `${title} ${item?.language || ""} ${item?.typeBadge || ""} ${item?.genre || ""}`.toLowerCase();
+  if (p === "/" || p === "/new" || p === "/popular" || p.startsWith("/mostwatch") || p === "/top10") return true;
+  if (p === "/type/movies") return !item?.isSeries && !item?.isAnime;
+  if (p === "/type/series" || p === "/drama" || p === "/ongoing") return Boolean(item?.isSeries);
+  if (p === "/language/hindi-dubbed" || p === "/language/hindi") return Boolean(item?.isHindiDubbed || /hindi|dual\s*audio/i.test(hay));
+  if (p === "/language/korean" || p.includes("korean-drama")) return /korean|k-?drama/i.test(hay);
+  if (p === "/language/bangla" || p === "/language/bangla-dubbed" || p === "/language/bengali") return /bangla|bengali/i.test(hay);
+  if (p === "/southindian" || p.includes("south-indian")) return /south\s*indian|tamil|telugu|malayalam|kannada/i.test(hay);
+  if (p === "/anime" || p === "/genre/animation") return Boolean(item?.isAnime || /anime|animation/i.test(hay));
+  if (p === "/genre/action") return /action/i.test(hay);
+  if (p === "/genre/thriller" || p === "/genre/horror") return /thriller|horror|mystery|crime/i.test(hay);
+  if (p === "/language/turkish") return /turkish/i.test(hay);
+  return false;
 }
 
 async function getMlbdComCatalog({ path = "/", q = "", page = 1 } = {}) {
@@ -1583,7 +1694,9 @@ async function getMlbdComCatalog({ path = "/", q = "", page = 1 } = {}) {
     scored.sort((a, b) => b.sc - a.sc);
     all = scored.map(x => x.it);
   } else {
-    const targetPages = mapCategoryToMlbdComUrls(path);
+    const baseTargets = mapCategoryToMlbdComUrls(path);
+    const shouldIncludeLatestHome = !baseTargets.includes("/") && /^\/(?:type\/(?:movies|series)|language\/(?:hindi-dubbed|hindi|korean|bangla|bangla-dubbed|bengali|turkish)|southindian|anime|genre\/(?:action|thriller|horror|animation)|drama|ongoing|bollywood)/i.test(String(path || ""));
+    const targetPages = shouldIncludeLatestHome ? ["/", ...baseTargets] : baseTargets;
     const settled = await Promise.allSettled(
       targetPages.map(async tp => ({ tp, html: await fetchMlbdComPage(tp) }))
     );
@@ -1591,7 +1704,9 @@ async function getMlbdComCatalog({ path = "/", q = "", page = 1 } = {}) {
     for (const r of settled) {
       if (r.status !== "fulfilled") continue;
       const cards = extractMlbdComCards(r.value.html, r.value.tp);
+      const fromLatestOnly = r.value.tp === "/" && shouldIncludeLatestHome;
       for (const c of cards) {
+        if (fromLatestOnly && !matchesMlbdCategoryItem(c, path)) continue;
         const k = c.title.toLowerCase();
         if (seen.has(k)) continue;
         seen.add(k);
@@ -1613,7 +1728,7 @@ async function getMlbdComCatalog({ path = "/", q = "", page = 1 } = {}) {
     activeMirror: "https://movielinkbd.com",
     path,
     upstreamPath: cleanQ ? "/search" : mapCategoryToMlbdComUrls(path)[0] || "/",
-    heading: cleanQ ? `Search: ${cleanQ}` : "MovieStreamBD Library",
+    heading: cleanQ ? `Search: ${cleanQ}` : "All Movies & Series",
     items: slice,
     page: pageNum,
     maxPage,
@@ -1624,18 +1739,18 @@ async function getMlbdComCatalog({ path = "/", q = "", page = 1 } = {}) {
 
 async function getMlbdComHomeFeed() {
   const specs = [
-    { id: "mlbd-latest", title: "🆕 MovieStreamBD Latest Releases", path: "/", categoryPath: "/new" },
-    { id: "mlbd-movies", title: "🎬 MovieStreamBD Latest Movies", path: "/movies", categoryPath: "/type/movies" },
-    { id: "mlbd-series", title: "📺 MovieStreamBD Web Series", path: "/web-series", categoryPath: "/type/series" },
-    { id: "mlbd-hindi", title: "🇮🇳 MovieStreamBD Hindi & Dubbed", path: "/hindi-movies", categoryPath: "/language/hindi" },
-    { id: "mlbd-south", title: "💫 MovieStreamBD South Indian", path: "/south-indian-movies", categoryPath: "/southIndian" },
-    { id: "mlbd-kdrama", title: "🇰🇷 MovieStreamBD Korean Drama", path: "/korean-drama", categoryPath: "/language/korean" },
-    { id: "mlbd-anime", title: "🍥 MovieStreamBD Anime & Animation", path: "/animation-movies", categoryPath: "/anime" },
-    { id: "mlbd-action", title: "💥 MovieStreamBD Action Hits", path: "/action-movies", categoryPath: "/genre/action" },
-    { id: "mlbd-bangla", title: "🇧🇩 MovieStreamBD Bangla & Dubbed", path: "/browse/bangla", categoryPath: "/language/bangla" },
-    { id: "mlbd-hindi-dubbed", title: "🎙️ MovieStreamBD Hindi Dubbed Archive", path: "/browse/hindi-dubbed", categoryPath: "/language/hindi-dubbed" },
-    { id: "mlbd-turkish", title: "🇹🇷 MovieStreamBD Turkish Drama", path: "/browse/turkish", categoryPath: "/language/turkish" },
-    { id: "mlbd-thriller", title: "🔪 MovieStreamBD Thriller & Horror", path: "/browse/genre-thriller", categoryPath: "/genre/thriller" }
+    { id: "mlbd-latest", title: "🆕 Latest Releases", path: "/", categoryPath: "/new" },
+    { id: "mlbd-movies", title: "🎬 Latest Movies", path: "/movies", categoryPath: "/type/movies" },
+    { id: "mlbd-series", title: "📺 Web Series", path: "/web-series", categoryPath: "/type/series" },
+    { id: "mlbd-hindi", title: "🇮🇳 Hindi & Dubbed", path: "/hindi-movies", categoryPath: "/language/hindi" },
+    { id: "mlbd-south", title: "💫 South Indian", path: "/south-indian-movies", categoryPath: "/southIndian" },
+    { id: "mlbd-kdrama", title: "🇰🇷 Korean Drama", path: "/korean-drama", categoryPath: "/language/korean" },
+    { id: "mlbd-anime", title: "🍥 Anime & Animation", path: "/animation-movies", categoryPath: "/anime" },
+    { id: "mlbd-action", title: "💥 Action Hits", path: "/action-movies", categoryPath: "/genre/action" },
+    { id: "mlbd-bangla", title: "🇧🇩 Bangla & Dubbed", path: "/browse/bangla", categoryPath: "/language/bangla" },
+    { id: "mlbd-hindi-dubbed", title: "🎙️ Hindi Dubbed Archive", path: "/browse/hindi-dubbed", categoryPath: "/language/hindi-dubbed" },
+    { id: "mlbd-turkish", title: "🇹🇷 Turkish Drama", path: "/browse/turkish", categoryPath: "/language/turkish" },
+    { id: "mlbd-thriller", title: "🔪 Thriller & Horror", path: "/browse/genre-thriller", categoryPath: "/genre/thriller" }
   ];
 
   // Fetch postered pages first so posterRegistry is warm for /browse/* sections
@@ -1643,12 +1758,29 @@ async function getMlbdComHomeFeed() {
     specs.map(async s => ({ spec: s, html: await fetchMlbdComPage(s.path) }))
   );
 
-  const parsedSections = [];
+  const rawBySpecId = new Map();
   for (const r of htmlResults) {
     if (r.status !== "fulfilled") continue;
-    const cards = sortMlbdNewestFirst(extractMlbdComCards(r.value.html, r.value.spec.path)).slice(0, 24);
+    rawBySpecId.set(r.value.spec.id, extractMlbdComCards(r.value.html, r.value.spec.path));
+  }
+  const latestHomeCards = rawBySpecId.get("mlbd-latest") || [];
+  const allMlbdCardsPool = [...latestHomeCards, ...(rawBySpecId.get("mlbd-kdrama") || []), ...(rawBySpecId.get("mlbd-bangla") || []), ...(rawBySpecId.get("mlbd-turkish") || []), ...(rawBySpecId.get("mlbd-thriller") || [])];
+
+  const parsedSections = [];
+  for (const spec of specs) {
+    const baseCards = rawBySpecId.get(spec.id) || [];
+    const extraLatest = spec.id === "mlbd-latest"
+      ? []
+      : (spec.id === "mlbd-series" ? allMlbdCardsPool : latestHomeCards).filter(c => matchesMlbdCategoryItem(c, spec.categoryPath));
+    const mergedMap = new Map();
+    for (const c of [...extraLatest, ...baseCards]) {
+      if (!c?.title) continue;
+      const k = c.title.toLowerCase();
+      if (!mergedMap.has(k)) mergedMap.set(k, c);
+    }
+    const cards = sortMlbdNewestFirst([...mergedMap.values()]).slice(0, 24);
     if (cards.length) {
-      parsedSections.push({ ...r.value.spec, items: cards });
+      parsedSections.push({ ...spec, items: cards });
     }
   }
 
@@ -1671,7 +1803,7 @@ async function getMlbdComHomeFeed() {
   }));
 
   const allItems = sections.flatMap(s => s.items);
-  const deduped = [...new Map(allItems.map(it => [it.title.toLowerCase(), it])).values()];
+  const deduped = sortMlbdNewestFirst([...new Map(allItems.map(it => [it.title.toLowerCase(), it])).values()]);
   const banners = deduped.filter(it => it.poster).slice(0, 8);
   const trending = deduped.slice(0, 20);
 
@@ -1812,7 +1944,7 @@ export async function getMlbdCatalog({ path = "/", q = "", page = 1 } = {}) {
 
   try {
     const pageData = await mlbdFetchPage(upstreamPath, { ttlMs: 90000 });
-    const items = extractCardsFromHtml(pageData.html, pageData.origin);
+    const items = sortMlbdNewestFirst(extractCardsFromHtml(pageData.html, pageData.origin));
     const pagination = extractPagination(pageData.html, pageNum);
     const titleMatch = pageData.html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
 
@@ -1824,7 +1956,7 @@ export async function getMlbdCatalog({ path = "/", q = "", page = 1 } = {}) {
         activeMirror: pageData.origin,
         path: basePath,
         upstreamPath,
-        heading: titleMatch ? stripTags(titleMatch[1]) : "",
+        heading: titleMatch ? stripSiteBrandFromLabel(stripTags(titleMatch[1])) : "",
         items,
         ...pagination
       },
