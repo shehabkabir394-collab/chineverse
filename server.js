@@ -141,18 +141,23 @@ app.get("/api/moviebox-image/:file", async (req, res) => {
   }
   const referer = /aisports/i.test(targetUrl)
     ? "https://aisports.mobi/"
-    : /movielink/i.test(targetUrl)
-      ? getActiveMlbdReferer()
-      : MOVIEBOX_REFERER;
+    : /movielinkbd\.com/i.test(targetUrl)
+      ? "https://movielinkbd.com/"
+      : /movielink/i.test(targetUrl)
+        ? getActiveMlbdReferer()
+        : MOVIEBOX_REFERER;
   try {
+    const imgHeaders = {
+      "User-Agent": MOVIEBOX_UA,
+      Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8"
+    };
+    if (!/(?:image\.tmdb\.org|media-amazon\.com|ytimg\.com|mzstatic\.com|tvmaze\.com|wikimedia\.org|wikipedia\.org)/i.test(targetUrl)) {
+      imgHeaders.Referer = referer;
+    }
     const upstream = await fetchMediaWithRetry(
       targetUrl,
       "GET",
-      {
-        "User-Agent": MOVIEBOX_UA,
-        Referer: referer,
-        Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8"
-      },
+      imgHeaders,
       null,
       1
     );
@@ -323,7 +328,7 @@ app.get("/api/sports-hls/:file", async (req, res) => {
   }
 });
 
-const MAX_STREAM_CHUNK = 16 * 1024 * 1024; // 16 MiB keeps full MP4 moov atoms intact while staying under Cloud Run's 32 MiB response cap
+const MAX_STREAM_CHUNK = 8 * 1024 * 1024; // 8 MiB keeps moov atoms fast while staying safely under Cloud Run's response & timeout limits
 
 function buildBoundedRangeHeader(rawRange) {
   if (!rawRange) {
@@ -489,8 +494,12 @@ async function proxyMediaStream(req, res, targetUrl, extraHeaders = {}, forceDow
     ...extraHeaders
   });
   const clientRange = req.get("range");
-  if (req.method === "GET" && !forceDownload) {
-    headers.set("range", buildBoundedRangeHeader(clientRange));
+  if (req.method === "GET") {
+    if (clientRange) {
+      headers.set("range", buildBoundedRangeHeader(clientRange));
+    } else if (!forceDownload) {
+      headers.set("range", buildBoundedRangeHeader(null));
+    }
   } else if (clientRange) {
     headers.set("range", clientRange);
   }
@@ -520,6 +529,48 @@ async function proxyMediaStream(req, res, targetUrl, extraHeaders = {}, forceDow
       return;
     }
     throw err;
+  }
+
+  // Some CDNs block HEAD or omit Content-Length on HEAD; probe with GET Range: bytes=0-0
+  if (
+    req.method === "HEAD" &&
+    (!upstream.ok || !Number(upstream.headers.get("content-length") || 0))
+  ) {
+    try {
+      await upstream.body?.cancel();
+    } catch {}
+    const probeHeaders = new Headers(headers);
+    probeHeaders.delete("if-range");
+    probeHeaders.set("range", "bytes=0-0");
+    try {
+      const probed = await fetchUpstreamMedia(
+        targetUrl,
+        "GET",
+        probeHeaders,
+        abortController.signal,
+        2,
+        20000
+      );
+      const crInfo = parseContentRangeInfo(probed.upstream.headers.get("content-range"));
+      const probeCt = probed.upstream.headers.get("content-type") || "video/mp4";
+      try {
+        await probed.upstream.body?.cancel();
+      } catch {}
+      if (probed.upstream.ok || probed.upstream.status === 206) {
+        const totalBytes = crInfo?.total || Number(probed.upstream.headers.get("content-length") || 0);
+        res.setHeader("content-type", probeCt.includes("octet-stream") ? "video/mp4" : probeCt);
+        if (totalBytes > 0) res.setHeader("content-length", String(totalBytes));
+        res.setHeader("accept-ranges", "bytes");
+        res.setHeader("access-control-allow-origin", "*");
+        res.setHeader("access-control-expose-headers", "Content-Length, Content-Range, Accept-Ranges, Content-Disposition");
+        if (forceDownload) {
+          res.setHeader("content-disposition", buildDownloadDisposition(customFilename));
+          res.setHeader("cache-control", "private, no-store");
+        }
+        res.setHeader("x-content-type-options", "nosniff");
+        return res.status(200).end();
+      }
+    } catch {}
   }
 
   if (!upstream.ok && upstream.status !== 206) {
@@ -841,7 +892,9 @@ app.get("/api/details", async (req, res) => {
       }));
       return res.json(mbPayload);
     }
-    const data = await getMlbdDetails(pathParam);
+    const data = await getMlbdDetails(pathParam, String(req.query.title || ""), {
+      dubLock: req.query.dubLock === "1"
+    });
     res.setHeader("Cache-Control", "public, max-age=120");
     return res.json(data);
   } catch (err) {
@@ -966,7 +1019,9 @@ app.all("/api/movie-api/*", async (req, res) => {
   try {
     // Route MovieLinkBD item paths directly (/movie/*, /series/*, /anime/*, /mlbd/*)
     if (legacy === "details" && isMlbdPath(reqPath)) {
-      const payload = await getMlbdDetails(reqPath);
+      const payload = await getMlbdDetails(reqPath, String(query.get("title") || ""), {
+        dubLock: query.get("dubLock") === "1"
+      });
       res.setHeader("Cache-Control", "public, max-age=120");
       return res.status(200).json(payload);
     }
@@ -975,7 +1030,9 @@ app.all("/api/movie-api/*", async (req, res) => {
       const payload = await getMlbdStream({
         path: reqPath,
         se: query.get("se") || 0,
-        ep: query.get("ep") || 1
+        ep: query.get("ep") || 1,
+        title: String(query.get("title") || ""),
+        dubLock: query.get("dubLock") === "1"
       });
       recordStreamEvent({
         title: query.get("title") || reqPath,
@@ -1009,6 +1066,11 @@ app.all("/api/movie-api/*", async (req, res) => {
         payload.categories = [
           ...(payload.categories || []),
           ...(mlbd.categories || []).filter(c => c?.path && !existingCats.has(c.path))
+        ];
+        const existingBanners = new Set((payload.banners || []).map(b => b?.path || b?.title));
+        payload.banners = [
+          ...(payload.banners || []),
+          ...(mlbd.banners || []).filter(b => (b?.path || b?.title) && !existingBanners.has(b.path || b.title)).slice(0, 6)
         ];
         payload.sections = [...(payload.sections || []), ...(mlbd.sections || [])];
         payload.activeMlbdMirror = mlbd.activeMirror;

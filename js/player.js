@@ -74,6 +74,7 @@
     video.controls = false;
     video.playsInline = true;
     video.muted = false;
+    video.defaultMuted = false;
 
     let currentMeta = historyMeta ? { ...historyMeta } : { path: "", title, poster: "", isSeries: false, se: 0, ep: 0 };
 
@@ -124,8 +125,11 @@
 
     const initial = best();
     const saved = Number(localStorage.getItem(storageKey) || 0);
-    const savedVolume = Number(localStorage.getItem("cv-player-volume") || 1);
-    video.volume = Math.max(0, Math.min(1, savedVolume));
+    const savedRawVol = Number(localStorage.getItem("cv-player-volume"));
+    const savedVolume = Number.isFinite(savedRawVol) && savedRawVol > 0 ? Math.min(1, savedRawVol) : 1;
+    video.volume = savedVolume;
+    video.muted = false;
+    video.defaultMuted = false;
 
     let soundBoostPct = Math.max(100, Math.min(400, Number(localStorage.getItem(BOOST_KEY) || 100)));
     let brightnessPct = Math.max(30, Math.min(180, Number(localStorage.getItem(BRIGHT_KEY) || 100)));
@@ -148,6 +152,8 @@
     let activeSource = null;
     let failedSources = new Set();
     let retriedUrls = new Set();
+    let userSelectedAudio = false;
+    let userMutedByToggle = false;
 
     // Cinema Ambient Mode backdrop behind .cv-player-stage
     const stageEl = wrap.closest(".cv-player-stage") || wrap.parentElement;
@@ -672,18 +678,57 @@
       return window.__odHlsPromise;
     }
 
+    const isHindiTrack = track => {
+      const lang = String(track?.lang || track?.language || "").trim();
+      const name = String(track?.name || track?.label || "").trim();
+      return /^(?:hi|hin)$/i.test(lang) || /hindi|हिन्दी|हिंदी/i.test(`${name} ${lang}`);
+    };
+
+    function autoSelectHindiAudio() {
+      if (userSelectedAudio) return;
+      if (activeHls && Array.isArray(activeHls.audioTracks) && activeHls.audioTracks.length > 0) {
+        const idx = activeHls.audioTracks.findIndex(isHindiTrack);
+        if (idx >= 0 && activeHls.audioTrack !== idx) {
+          activeHls.audioTrack = idx;
+        }
+      }
+      if (video.audioTracks && video.audioTracks.length > 1) {
+        let hindiIdx = -1;
+        for (let i = 0; i < video.audioTracks.length; i++) {
+          if (isHindiTrack(video.audioTracks[i])) {
+            hindiIdx = i;
+            break;
+          }
+        }
+        if (hindiIdx >= 0) {
+          for (let i = 0; i < video.audioTracks.length; i++) {
+            video.audioTracks[i].enabled = i === hindiIdx;
+          }
+        }
+      }
+    }
+
     async function safePlayWithFallback() {
+      if (!userMutedByToggle) {
+        video.muted = false;
+        if (video.volume === 0) {
+          video.volume = 1;
+          volume.value = "1";
+        }
+      }
       try {
         await video.play();
         unmuteBtn.hidden = true;
+        syncSound();
       } catch (err) {
-        if (err && err.name === "NotAllowedError" && !video.muted) {
-          try {
-            video.muted = true;
-            await video.play();
-            syncSound();
-            unmuteBtn.hidden = false;
-          } catch {}
+        if (err && err.name === "NotAllowedError") {
+          // Never mute by default; show prominent Play button so a tap starts unmuted audio immediately
+          video.muted = false;
+          syncSound();
+          centerPlay.innerHTML = "<span>▶</span>";
+          centerPlay.setAttribute("aria-label", "Play video with sound");
+          centerPlay.classList.add("visible");
+          wrap.classList.add("cv-ui-visible");
         }
       }
     }
@@ -727,6 +772,14 @@
       }
       video.pause();
       activeSource = src;
+      userSelectedAudio = false;
+      if (!userMutedByToggle) {
+        video.muted = false;
+        if (video.volume === 0) {
+          video.volume = 1;
+          volume.value = "1";
+        }
+      }
       quality.value = preferredQuality === "auto" ? "auto" : src.quality || "auto";
       emitState();
 
@@ -740,6 +793,7 @@
         if (t > 0 && Number.isFinite(video.duration)) {
           video.currentTime = Math.min(t, Math.max(0, video.duration - 2));
         }
+        autoSelectHindiAudio();
         if (activeSubtitleIdx >= 0) {
           applyTrackSelection(activeSubtitleIdx);
         }
@@ -761,7 +815,10 @@
               });
               activeHls.on(Hls.Events.MANIFEST_PARSED, ready);
               activeHls.on(Hls.Events.AUDIO_TRACKS_UPDATED, () => {
-                if (token === sourceToken) emitState();
+                if (token === sourceToken) {
+                  autoSelectHindiAudio();
+                  emitState();
+                }
               });
               activeHls.on(Hls.Events.AUDIO_TRACK_SWITCHED, () => {
                 if (token === sourceToken) emitState();
@@ -985,6 +1042,7 @@
     volume.addEventListener("input", e => {
       video.volume = Number(e.target.value);
       video.muted = false;
+      userMutedByToggle = false;
       localStorage.setItem("cv-player-volume", String(video.volume));
       syncSound();
       revealControls();
@@ -993,12 +1051,14 @@
     mute.addEventListener("click", () => {
       if (video.muted || video.volume === 0) {
         video.muted = false;
+        userMutedByToggle = false;
         if (video.volume === 0) {
           video.volume = Math.max(0.5, Number(localStorage.getItem("cv-player-volume") || 1));
           volume.value = String(video.volume);
         }
       } else {
         video.muted = true;
+        userMutedByToggle = true;
       }
       syncSound();
       revealControls();
@@ -1263,10 +1323,20 @@
     }
 
     function setAudioTrack(idx) {
-      if (!activeHls || !Array.isArray(activeHls.audioTracks)) return;
       const target = Number(idx);
-      if (Number.isInteger(target) && target >= 0 && target < activeHls.audioTracks.length) {
-        activeHls.audioTrack = target;
+      if (activeHls && Array.isArray(activeHls.audioTracks)) {
+        if (Number.isInteger(target) && target >= 0 && target < activeHls.audioTracks.length) {
+          userSelectedAudio = true;
+          activeHls.audioTrack = target;
+          emitState();
+        }
+        return;
+      }
+      if (video.audioTracks && video.audioTracks.length > 0 && Number.isInteger(target) && target >= 0 && target < video.audioTracks.length) {
+        userSelectedAudio = true;
+        for (let i = 0; i < video.audioTracks.length; i++) {
+          video.audioTracks[i].enabled = i === target;
+        }
         emitState();
       }
     }
@@ -1304,13 +1374,25 @@
     }
 
     function getState() {
-      const hlsAudioTracks = activeHls && Array.isArray(activeHls.audioTracks)
-        ? activeHls.audioTracks.map((t, i) => ({
+      let audioTracks = [];
+      let activeAudioIdx = 0;
+      if (activeHls && Array.isArray(activeHls.audioTracks)) {
+        audioTracks = activeHls.audioTracks.map((t, i) => ({
+          index: i,
+          label: t.name || t.lang || `Audio ${i + 1}`,
+          lang: t.lang || ""
+        }));
+        activeAudioIdx = Number(activeHls.audioTrack ?? 0);
+      } else if (video.audioTracks && video.audioTracks.length > 0) {
+        audioTracks = Array.from(video.audioTracks).map((t, i) => {
+          if (t.enabled) activeAudioIdx = i;
+          return {
             index: i,
-            label: t.name || t.lang || `Audio ${i + 1}`,
-            lang: t.lang || ""
-          }))
-        : [];
+            label: t.label || t.language || `Audio ${i + 1}`,
+            lang: t.language || ""
+          };
+        });
+      }
       return {
         qualities: ordered.map(x => x.quality),
         preferredQuality,
@@ -1321,8 +1403,8 @@
         ambientLevel,
         subtitles: subtitleItems,
         activeSubtitleIdx,
-        audioTracks: hlsAudioTracks,
-        activeAudioIdx: activeHls ? Number(activeHls.audioTrack ?? 0) : 0,
+        audioTracks,
+        activeAudioIdx,
         speed: Number(video.playbackRate || 1)
       };
     }

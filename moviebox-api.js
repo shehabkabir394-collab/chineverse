@@ -660,7 +660,7 @@ async function getHindiDubbedPool() {
 
 function categoryToFilterBody(category, page = 1) {
   const c = String(category || "").toLowerCase();
-  const body = { page, perPage: 24, channelId: 1, sort: "Latest" };
+  const body = { page, perPage: 30, channelId: 1, sort: "Latest" };
   if (c.includes("series") || c === "/drama" || c.includes("drama") || c === "cv:drama" || c.includes("recently-updated")) {
     body.channelId = 2;
     body.sort = "Latest";
@@ -781,25 +781,31 @@ export async function getHomeFeed() {
     hindiSeriesRes,
     kDramaRes,
     southIndianRes,
+    southSeriesRes,
     animeRes,
+    animeMoviesRes,
     hollywoodRes,
     bengaliRes,
+    bengaliSeriesRes,
     recentlyUpdatedRes
   ] = await Promise.allSettled([
-    mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/home?host=movie-box.co`, {}, 180000),
-    mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/subject/trending?page=1&perPage=28`, {}, 180000),
-    mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/upcoming-subject-list?page=1&perPage=18`, {}, 300000),
-    filterCall({ page: 1, perPage: 18, channelId: 1, classify: "Hindi dub", sort: "Latest" }, { _hindiCatalog: true }),
-    mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/ranking-list/content?id=872031290915189720&page=1&perPage=12`, {}, 180000)
+    mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/home`, {}, 180000),
+    mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/subject/trending?page=1&perPage=36`, {}, 180000),
+    mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/upcoming-subject-list?page=1&perPage=24`, {}, 300000),
+    filterCall({ page: 1, perPage: 36, channelId: 1, classify: "Hindi dub", sort: "Latest" }, { _hindiCatalog: true }),
+    mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/ranking-list/content?id=872031290915189720&page=1&perPage=15`, {}, 180000)
       .then(j => indexList(j?.data?.subjectList).filter(x => x.hasResource !== false)),
-    filterCall({ page: 1, perPage: 18, channelId: 1, sort: "Latest" }),
-    filterCall({ page: 1, perPage: 18, channelId: 2, classify: "Hindi dub", sort: "Latest" }, { _hindiCatalog: true }),
-    filterCall({ page: 1, perPage: 18, channelId: 2, country: "Korea", sort: "Latest" }),
-    filterCall({ page: 1, perPage: 18, channelId: 1, country: "India", sort: "Latest" }),
-    filterCall({ page: 1, perPage: 18, channelId: 2, genre: "Anime", sort: "Latest" }, { isAnime: true, _animeCatalog: true }),
-    filterCall({ page: 1, perPage: 18, channelId: 1, country: "United States", sort: "Latest" }),
-    filterCall({ page: 1, perPage: 18, channelId: 1, country: "Bangladesh", sort: "Latest" }),
-    filterCall({ page: 1, perPage: 18, channelId: 2, sort: "Latest" })
+    filterCall({ page: 1, perPage: 36, channelId: 1, sort: "Latest" }),
+    filterCall({ page: 1, perPage: 36, channelId: 2, classify: "Hindi dub", sort: "Latest" }, { _hindiCatalog: true }),
+    filterCall({ page: 1, perPage: 30, channelId: 2, country: "Korea", sort: "Latest" }),
+    filterCall({ page: 1, perPage: 30, channelId: 1, country: "India", sort: "Latest" }),
+    filterCall({ page: 1, perPage: 24, channelId: 2, country: "India", sort: "Latest" }),
+    filterCall({ page: 1, perPage: 30, channelId: 2, genre: "Anime", sort: "Latest" }, { isAnime: true, _animeCatalog: true }),
+    filterCall({ page: 1, perPage: 20, channelId: 1, genre: "Anime", sort: "Latest" }, { isAnime: true, _animeCatalog: true }),
+    filterCall({ page: 1, perPage: 30, channelId: 1, country: "United States", sort: "Latest" }),
+    filterCall({ page: 1, perPage: 24, channelId: 1, country: "Bangladesh", sort: "Latest" }),
+    filterCall({ page: 1, perPage: 24, channelId: 2, country: "Bangladesh", sort: "Latest" }),
+    filterCall({ page: 1, perPage: 36, channelId: 2, sort: "Latest" })
   ]);
 
   const homeData = homeRes.status === "fulfilled" ? homeRes.value?.data || {} : {};
@@ -821,7 +827,6 @@ export async function getHomeFeed() {
       }
     } else if (op.type === "SUBJECTS_MOVIE" && Array.isArray(op.subjects) && op.subjects.length) {
       const title = String(op.title || "Featured").trim();
-      if (/nollywood|black shows/i.test(title)) continue;
       const items = sortByReleaseNewest(indexList(op.subjects).filter(x => x.hasResource !== false));
       if (items.length) {
         sections.push({
@@ -833,9 +838,21 @@ export async function getHomeFeed() {
               ? "/language/chinese"
               : /anime/i.test(title)
                 ? "/anime"
-                : /series/i.test(title)
+                : /series|shows/i.test(title)
                   ? "/type/series"
-                  : "/type/movies",
+                  : /short/i.test(title)
+                    ? "/shorts"
+                    : /horror/i.test(title)
+                      ? "/genre/horror"
+                      : /comedy/i.test(title)
+                        ? "/genre/comedy"
+                        : /romance/i.test(title)
+                          ? "/genre/romance"
+                          : /action/i.test(title)
+                            ? "/genre/action"
+                            : /fantasy/i.test(title)
+                              ? "/genre/fantasy"
+                              : "/type/movies",
           items
         });
       }
@@ -845,14 +862,29 @@ export async function getHomeFeed() {
   }
 
   const pick = (res, fallback = []) => (res.status === "fulfilled" && Array.isArray(res.value) && res.value.length ? res.value : fallback);
+  const mergeLists = (...lists) => {
+    const out = [];
+    const seen = new Set();
+    for (const l of lists) {
+      for (const x of Array.isArray(l) ? l : []) {
+        const k = x?.subjectId || x?.path;
+        if (!k || seen.has(k)) continue;
+        seen.add(k);
+        out.push(x);
+      }
+    }
+    return sortByReleaseNewest(out);
+  };
 
-  const hindiItems = sortByReleaseNewest(pick(hindiMoviesRes));
-  if (hindiItems.length) {
+  const hindiMoviesList = pick(hindiMoviesRes);
+  const hindiSeriesList = pick(hindiSeriesRes);
+  const hindiCombined = mergeLists(hindiMoviesList, hindiSeriesList);
+  if (hindiCombined.length) {
     sections.unshift({
       title: "Hindi Dubbed — Movies & Series",
       badge: "HINDI AUDIO",
       categoryPath: "/language/hindi-dubbed",
-      items: hindiItems
+      items: hindiCombined
     });
   }
 
@@ -870,35 +902,42 @@ export async function getHomeFeed() {
     ? homeData.platformList.map(p => ({ name: p.name }))
     : (lastGoodHomeFeed?.platforms || []);
 
+  const southMerged = mergeLists(pick(southIndianRes), pick(southSeriesRes));
+  const animeMerged = mergeLists(pick(animeRes), pick(animeMoviesRes));
+  const bengaliMerged = mergeLists(pick(bengaliRes), pick(bengaliSeriesRes));
+
   const finalSections = sections.length ? sections : (lastGoodHomeFeed?.sections || []);
   const allPool = [
     ...trending,
     ...pick(top10Res),
-    ...hindiItems,
+    ...hindiCombined,
     ...pick(latestMoviesRes),
     ...pick(hollywoodRes),
-    ...pick(southIndianRes),
+    ...southMerged,
     ...pick(kDramaRes),
+    ...animeMerged,
+    ...bengaliMerged,
+    ...pick(recentlyUpdatedRes),
     ...finalSections.flatMap(s => s.items || [])
   ];
   const uniqPool = [...new Map(allPool.filter(x => x && (x.subjectId || x.path)).map(x => [x.subjectId || x.path, x])).values()];
   const imdbTopRated = [...uniqPool]
     .filter(x => Number(x.rating) > 0)
     .sort((a, b) => Number(b.rating || 0) - Number(a.rating || 0) || parseReleaseTs(b) - parseReleaseTs(a))
-    .slice(0, 18);
+    .slice(0, 24);
 
   const curated = {
     trending,
     top10: pick(top10Res, trendingTop10.slice(0, 10)).slice(0, 10),
-    hindiMovies: hindiItems,
+    hindiMovies: sortByReleaseNewest(hindiMoviesList),
     latestMovies: sortByReleaseNewest(pick(latestMoviesRes, lastGoodHomeFeed?.curated?.latestMovies || [])),
     hindiSeries: sortByReleaseNewest(pick(hindiSeriesRes, lastGoodHomeFeed?.curated?.hindiSeries || [])),
     kDramas: sortByReleaseNewest(pick(kDramaRes, lastGoodHomeFeed?.curated?.kDramas || [])),
-    southIndian: sortByReleaseNewest(pick(southIndianRes, lastGoodHomeFeed?.curated?.southIndian || [])),
-    anime: sortByReleaseNewest(pick(animeRes, lastGoodHomeFeed?.curated?.anime || [])),
+    southIndian: southMerged,
+    anime: animeMerged,
     hollywood: sortByReleaseNewest(pick(hollywoodRes, lastGoodHomeFeed?.curated?.hollywood || [])),
-    bengali: sortByReleaseNewest(pick(bengaliRes, lastGoodHomeFeed?.curated?.bengali || [])),
-    recentlyAdded: sortByReleaseNewest(pick(latestMoviesRes, trending)).slice(0, 16),
+    bengali: bengaliMerged,
+    recentlyAdded: sortByReleaseNewest(pick(latestMoviesRes, trending)).slice(0, 24),
     recentlyUpdated: sortByReleaseNewest(pick(recentlyUpdatedRes, lastGoodHomeFeed?.curated?.recentlyUpdated || [])),
     imdbTopRated,
     upcoming: upcomingList
@@ -908,7 +947,7 @@ export async function getHomeFeed() {
     ok: true,
     categories: CATEGORIES,
     platforms,
-    banners: banners.length ? banners : (trending.length ? trending.slice(0, 6) : (lastGoodHomeFeed?.banners || [])),
+    banners: banners.length ? banners : (trending.length ? trending.slice(0, 8) : (lastGoodHomeFeed?.banners || [])),
     trending,
     upcoming: upcomingList,
     sections: finalSections,
@@ -1200,12 +1239,36 @@ export async function handleMovieBoxRoute(legacy, query) {
         const items = sortByReleaseNewest(uniq);
         return { ok: true, items, page, totalPages: items.length >= 12 ? page + 1 : page };
       }
+      if (lower === "" || lower === "/" || lower === "/all") {
+        const [mRes, sRes, aRes, shRes] = await Promise.allSettled([
+          mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/subject/filter`, { method: "POST", body: JSON.stringify({ page, perPage: 20, channelId: 1, sort: "Latest" }) }, 120000),
+          mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/subject/filter`, { method: "POST", body: JSON.stringify({ page, perPage: 20, channelId: 2, sort: "Latest" }) }, 120000),
+          mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/subject/filter`, { method: "POST", body: JSON.stringify({ page, perPage: 12, channelId: 2, genre: "Anime", sort: "Latest" }) }, 120000),
+          mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/subject/filter`, { method: "POST", body: JSON.stringify({ page, perPage: 12, channelId: 7, sort: "Latest" }) }, 120000)
+        ]);
+        const merged = [
+          ...(mRes.status === "fulfilled" ? indexList(mRes.value?.data?.items) : []),
+          ...(sRes.status === "fulfilled" ? indexList(sRes.value?.data?.items) : []),
+          ...(aRes.status === "fulfilled" ? indexList(aRes.value?.data?.items, { isAnime: true, _animeCatalog: true }) : []),
+          ...(shRes.status === "fulfilled" ? indexList(shRes.value?.data?.items) : [])
+        ].filter(x => x.hasResource !== false);
+        const uniq = [...new Map(merged.map(x => [x.subjectId || x.path, x])).values()];
+        const items = sortByReleaseNewest(uniq);
+        const hasMore = [mRes, sRes].some(r => r.status === "fulfilled" && r.value?.data?.pager?.hasMore);
+        return { ok: true, items, page, totalPages: hasMore ? Math.max(page + 1, 20) : page };
+      }
       if (lower.includes("southindian") || lower.includes("south-indian")) {
-        const j = await mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/subject/filter`, {
-          method: "POST",
-          body: JSON.stringify({ page, perPage: 24, channelId: 1, country: "India", sort: "Latest" })
-        }, 120000);
-        return { ok: true, items: sortByReleaseNewest(indexList(j?.data?.items)), page, totalPages: j?.data?.pager?.hasMore ? page + 1 : page };
+        const [mRes, sRes] = await Promise.allSettled([
+          mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/subject/filter`, { method: "POST", body: JSON.stringify({ page, perPage: 24, channelId: 1, country: "India", sort: "Latest" }) }, 120000),
+          mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/subject/filter`, { method: "POST", body: JSON.stringify({ page, perPage: 18, channelId: 2, country: "India", sort: "Latest" }) }, 120000)
+        ]);
+        const merged = [
+          ...(mRes.status === "fulfilled" ? indexList(mRes.value?.data?.items) : []),
+          ...(sRes.status === "fulfilled" ? indexList(sRes.value?.data?.items) : [])
+        ].filter(x => x.hasResource !== false);
+        const uniq = [...new Map(merged.map(x => [x.subjectId || x.path, x])).values()];
+        const hasMore = [mRes, sRes].some(r => r.status === "fulfilled" && r.value?.data?.pager?.hasMore);
+        return { ok: true, items: sortByReleaseNewest(uniq), page, totalPages: hasMore ? page + 1 : page };
       }
 
       const body = categoryToFilterBody(cat, page);
@@ -1220,12 +1283,25 @@ export async function handleMovieBoxRoute(legacy, query) {
         ...(body.classify === "Hindi dub" ? { _hindiCatalog: true } : {}),
         ...(lower.includes("anime") ? { isAnime: true, _animeCatalog: true } : {})
       };
-      const j = await mbFetch(
-        `${MOVIEBOX_API}/wefeed-h5api-bff/subject/filter`,
-        { method: "POST", body: JSON.stringify(body) },
-        120000
-      );
-      let items = indexList(j?.data?.items, extra).filter(x => x.hasResource !== false);
+      const isBothChannels =
+        (lower === "/language/hindi-dubbed" || lower === "/language/english" || lower === "/language/hindi" || lower === "/bollywood" || lower.startsWith("/genre/")) &&
+        !query.get("channelId");
+
+      const [j, jAlt] = await Promise.all([
+        mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/subject/filter`, { method: "POST", body: JSON.stringify(body) }, 120000),
+        isBothChannels
+          ? mbFetch(
+              `${MOVIEBOX_API}/wefeed-h5api-bff/subject/filter`,
+              { method: "POST", body: JSON.stringify({ ...body, channelId: body.channelId === 2 ? 1 : 2, perPage: 18 }) },
+              120000
+            ).catch(() => null)
+          : Promise.resolve(null)
+      ]);
+      let items = [
+        ...indexList(j?.data?.items, extra),
+        ...(jAlt ? indexList(jAlt?.data?.items, extra) : [])
+      ].filter(x => x.hasResource !== false);
+      items = [...new Map(items.map(x => [x.subjectId || x.path, x])).values()];
 
       // Regional Indian language matching (Tamil, Telugu, Malayalam, Punjabi)
       const regionalMatch = /\/language\/(tamil|telugu|malayalam|punjabi)/i.exec(lower);
@@ -1247,7 +1323,7 @@ export async function handleMovieBoxRoute(legacy, query) {
       if (lower.includes("anime") && page === 1) {
         const movieAnime = await mbFetch(
           `${MOVIEBOX_API}/wefeed-h5api-bff/subject/filter`,
-          { method: "POST", body: JSON.stringify({ page: 1, perPage: 12, channelId: 1, genre: "Anime", sort: "Latest" }) },
+          { method: "POST", body: JSON.stringify({ page: 1, perPage: 18, channelId: 1, genre: "Anime", sort: "Latest" }) },
           120000
         ).catch(() => null);
         const extraAnime = indexList(movieAnime?.data?.items, extra).filter(x => x.hasResource !== false);
@@ -1256,7 +1332,7 @@ export async function handleMovieBoxRoute(legacy, query) {
         const otherChannel = body.channelId === 2 ? 1 : 2;
         const bdExtra = await mbFetch(
           `${MOVIEBOX_API}/wefeed-h5api-bff/subject/filter`,
-          { method: "POST", body: JSON.stringify({ page: 1, perPage: 18, channelId: otherChannel, country: "Bangladesh", sort: "Latest" }) },
+          { method: "POST", body: JSON.stringify({ page: 1, perPage: 24, channelId: otherChannel, country: "Bangladesh", sort: "Latest" }) },
           120000
         ).catch(() => null);
         const extraBd = indexList(bdExtra?.data?.items, extra).filter(x => x.hasResource !== false);
@@ -1277,14 +1353,6 @@ export async function handleMovieBoxRoute(legacy, query) {
         ).catch(() => null);
         const extraIn = indexList(inMore?.data?.items, extra).filter(x => x.hasResource !== false);
         items = [...new Map([...items, ...extraIn].map(x => [x.subjectId || x.path, x])).values()];
-      } else if (/\/genre\/(?:adult|erotic|hot)/i.test(lower)) {
-        const ch2 = await mbFetch(
-          `${MOVIEBOX_API}/wefeed-h5api-bff/subject/filter`,
-          { method: "POST", body: JSON.stringify({ ...body, channelId: 2 }) },
-          120000
-        ).catch(() => null);
-        const extraAdult = indexList(ch2?.data?.items, extra).filter(x => x.hasResource !== false);
-        items = [...new Map([...items, ...extraAdult].map(x => [x.subjectId || x.path, x])).values()];
       }
 
       // Fallback if Bangla Dubbed / Genre / Bangladesh returns empty on primary channel
@@ -1292,23 +1360,16 @@ export async function handleMovieBoxRoute(legacy, query) {
         const bdSearch = await handleMovieBoxRoute("search", new URLSearchParams({ q: "Bangla", page: String(page) })).catch(() => null);
         if (Array.isArray(bdSearch?.items) && bdSearch.items.length) items = bdSearch.items;
       } else if (!items.length && body.genre) {
-        const altCh = body.channelId === 2 ? 1 : 2;
-        const altRes = await mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/subject/filter`, {
-          method: "POST",
-          body: JSON.stringify({ ...body, channelId: altCh })
-        }, 120000).catch(() => null);
-        items = indexList(altRes?.data?.items, extra).filter(x => x.hasResource !== false);
-        if (!items.length) {
-          const gSearch = await handleMovieBoxRoute("search", new URLSearchParams({ q: body.genre, page: String(page) })).catch(() => null);
-          if (Array.isArray(gSearch?.items) && gSearch.items.length) items = gSearch.items;
-        }
+        const gSearch = await handleMovieBoxRoute("search", new URLSearchParams({ q: body.genre, page: String(page) })).catch(() => null);
+        if (Array.isArray(gSearch?.items) && gSearch.items.length) items = gSearch.items;
       } else if (!items.length && body.country === "Bangladesh") {
         const home = await getHomeFeed();
         items = [...home.trending, ...home.sections.flatMap(s => s.items)].filter(i => /bengali|bangla/i.test(i.language + " " + i.title)).slice(0, 24);
       }
       items = sortByReleaseNewest(items);
       const totalCount = Number(j?.data?.pager?.totalCount || 0);
-      const totalPages = totalCount > 0 ? Math.max(1, Math.ceil(totalCount / 24)) : (j?.data?.pager?.hasMore ? page + 1 : page);
+      const hasMore = Boolean(j?.data?.pager?.hasMore || jAlt?.data?.pager?.hasMore);
+      const totalPages = totalCount > 0 ? Math.max(1, Math.ceil(totalCount / 30)) : (hasMore ? page + 1 : page);
       return { ok: true, items, page, totalPages, pager: j?.data?.pager || {} };
     }
 
@@ -1361,6 +1422,15 @@ export async function handleMovieBoxRoute(legacy, query) {
     case "details": {
       const pathStr = String(query.get("path") || "");
       const title = String(query.get("title") || "");
+      const dubLock =
+        query.get("dubLock") === "1" ||
+        query.get("manualDub") === "1" ||
+        query.get("preferHindi") === "0";
+      const isHindiAudioDub = d =>
+        Number(d?.type ?? 0) === 0 &&
+        (/^(?:hi|hin)$/i.test(String(d?.lanCode || "").trim()) ||
+          /hindi|हिन्दी|हिंदी/i.test(String(d?.lanName || d?.language || "")));
+
       const { subjectId, detailPath } = await resolveSubjectIdentity({
         pathStr,
         subjectId: query.get("subjectId") || "",
@@ -1374,11 +1444,51 @@ export async function handleMovieBoxRoute(legacy, query) {
       if (detailPath) qs.set("detailPath", detailPath);
       if (subjectId) qs.set("subjectId", subjectId);
 
-      const j = await mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/detail?${qs.toString()}`, {}, 300000);
+      let j = await mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/detail?${qs.toString()}`, {}, 300000);
       if (j?.code !== 0 || !j?.data?.subject) {
         return { ok: false, error: j?.message || "Title details unavailable." };
       }
+
+      // Default audio track: switch to Hindi audio dub automatically when available (unless user locked dub)
+      const initialDubs = Array.isArray(j.data.dubs)
+        ? j.data.dubs
+        : Array.isArray(j.data.subject?.dubs)
+          ? j.data.subject.dubs
+          : [];
+      const curSid = String(j.data.subject.subjectId || subjectId || "");
+      const curDubEntry = initialDubs.find(d => String(d?.subjectId || "") === curSid);
+      const hindiDubEntry = initialDubs.find(d => d?.subjectId && isHindiAudioDub(d));
+      if (
+        !dubLock &&
+        hindiDubEntry &&
+        String(hindiDubEntry.subjectId) !== curSid &&
+        !(curDubEntry && isHindiAudioDub(curDubEntry))
+      ) {
+        try {
+          const hQs = new URLSearchParams({ subjectId: String(hindiDubEntry.subjectId) });
+          if (hindiDubEntry.detailPath) hQs.set("detailPath", String(hindiDubEntry.detailPath));
+          const hj = await mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/detail?${hQs.toString()}`, {}, 300000);
+          if (hj?.code === 0 && hj?.data?.subject) {
+            j = hj;
+          }
+        } catch {}
+      }
+
       const subj = normalizeSubject(j.data.subject);
+      const rawDubs = Array.isArray(j.data.dubs)
+        ? j.data.dubs
+        : Array.isArray(j.data.subject?.dubs)
+          ? j.data.subject.dubs
+          : initialDubs;
+      const activeDub = rawDubs.find(d => String(d?.subjectId || "") === String(subj.subjectId || ""));
+      if (activeDub && isHindiAudioDub(activeDub)) {
+        subj.isHindiDubbed = true;
+        subj._hindiCatalog = true;
+        subj.language = "Hindi Dubbed";
+      } else if (activeDub && (activeDub.lanName || activeDub.language) && !activeDub.original) {
+        subj.language = activeDub.lanName || activeDub.language;
+      }
+
       const seasons = Array.isArray(j.data.resource?.seasons) ? j.data.resource.seasons : [];
       const episodes = [];
       const isMovie = subj.subjectType === 1 || (!seasons.length || (seasons.length === 1 && Number(seasons[0].se) === 0));
@@ -1424,11 +1534,6 @@ export async function handleMovieBoxRoute(legacy, query) {
         detailPath: st.detailPath || ""
       }));
 
-      const rawDubs = Array.isArray(j.data.dubs)
-        ? j.data.dubs
-        : Array.isArray(j.data.subject?.dubs)
-          ? j.data.subject.dubs
-          : [];
       const dubs = rawDubs.map(d => ({
         subjectId: String(d.subjectId || ""),
         detailPath: String(d.detailPath || ""),
@@ -1455,6 +1560,15 @@ export async function handleMovieBoxRoute(legacy, query) {
     }
 
     case "stream": {
+      const dubLock =
+        query.get("dubLock") === "1" ||
+        query.get("manualDub") === "1" ||
+        query.get("preferHindi") === "0";
+      const isHindiAudioDub = d =>
+        Number(d?.type ?? 0) === 0 &&
+        (/^(?:hi|hin)$/i.test(String(d?.lanCode || "").trim()) ||
+          /hindi|हिन्दी|हिंदी/i.test(String(d?.lanName || d?.language || "")));
+
       let { subjectId, detailPath } = await resolveSubjectIdentity({
         pathStr: query.get("path") || "",
         subjectId: query.get("subjectId") || "",
@@ -1466,26 +1580,41 @@ export async function handleMovieBoxRoute(legacy, query) {
       }
 
       let detJson = null;
-      const loadDetail = async () => {
-        if (detJson) return detJson;
+      const loadDetail = async (sid = subjectId) => {
+        if (detJson && sid === subjectId) return detJson;
         try {
-          detJson = await mbFetch(
-            `${MOVIEBOX_API}/wefeed-h5api-bff/detail?subjectId=${encodeURIComponent(subjectId)}`,
+          const res = await mbFetch(
+            `${MOVIEBOX_API}/wefeed-h5api-bff/detail?subjectId=${encodeURIComponent(sid)}`,
             {},
             300000
           );
-          if (detJson?.data?.subject?.detailPath && (!detailPath || detailPath === subjectId)) {
-            detailPath = String(detJson.data.subject.detailPath).trim();
+          if (sid === subjectId) detJson = res;
+          if (res?.data?.subject?.detailPath && (!detailPath || detailPath === sid)) {
+            detailPath = String(res.data.subject.detailPath).trim();
           }
-          if (detJson?.data?.subject) {
-            normalizeSubject(detJson.data.subject);
+          if (res?.data?.subject) {
+            normalizeSubject(res.data.subject);
           }
+          return res;
         } catch {}
         return detJson;
       };
 
-      if (!detailPath || detailPath === subjectId) {
+      if (!detailPath || detailPath === subjectId || !dubLock) {
         await loadDetail();
+      }
+      if (!dubLock && detJson) {
+        const dList = Array.isArray(detJson?.data?.dubs)
+          ? detJson.data.dubs
+          : Array.isArray(detJson?.data?.subject?.dubs)
+            ? detJson.data.subject.dubs
+            : [];
+        const curEntry = dList.find(d => String(d?.subjectId || "") === String(subjectId));
+        const hiEntry = dList.find(d => d?.subjectId && isHindiAudioDub(d));
+        if (hiEntry && String(hiEntry.subjectId) !== String(subjectId) && !(curEntry && isHindiAudioDub(curEntry))) {
+          subjectId = String(hiEntry.subjectId);
+          detailPath = String(hiEntry.detailPath || subjectId);
+        }
       }
       const se = Math.max(0, Number(query.get("se") ?? 0));
       let ep = Math.max(0, Number(query.get("ep") ?? 0));
@@ -1601,7 +1730,7 @@ export async function handleMovieBoxRoute(legacy, query) {
         }
       }
 
-      // If primary subject returned no stream, try alternate dubs (Original / English / Hindi)
+      // If primary subject returned no stream, try alternate dubs (Hindi first, then Original / English)
       if (!rawStreams.length && lastUpstreamCode !== 429) {
         const detail = await loadDetail();
         const cachedItem = subjectIndex.get(subjectId);
@@ -1616,10 +1745,16 @@ export async function handleMovieBoxRoute(legacy, query) {
           .filter(d => d?.subjectId && String(d.subjectId) !== subjectId)
           .sort((a, b) => {
             const score = x =>
-              (x.original || /original/i.test(x.lanName || "") ? 0 : /english|hindi/i.test(x.lanName || "") ? 1 : 2);
+              isHindiAudioDub(x)
+                ? 0
+                : x.original || /original/i.test(x.lanName || "")
+                  ? 1
+                  : /english/i.test(x.lanName || "")
+                    ? 2
+                    : 3;
             return score(a) - score(b);
           })
-          .slice(0, 3);
+          .slice(0, 4);
 
         for (const altDub of altDubs) {
           const altSid = String(altDub.subjectId);
@@ -1675,6 +1810,11 @@ export async function handleMovieBoxRoute(legacy, query) {
         } catch {}
       }
 
+      const resolvedMeta = subjectIndex.get(streamSubjectId);
+      const resolvedAudioLang = resolvedMeta?.isHindiDubbed
+        ? "Hindi"
+        : String(resolvedMeta?.language || "").split("·")[0].trim();
+
       const sources = rawStreams
         .filter(s => {
           const u = String(s?.url || "").trim();
@@ -1695,7 +1835,7 @@ export async function handleMovieBoxRoute(legacy, query) {
             format: isHls ? "HLS" : (s.format || "MP4"),
             type: isHls ? "application/vnd.apple.mpegurl" : "video/mp4",
             provider: "MovieBox Direct",
-            audioLanguage: ""
+            audioLanguage: resolvedAudioLang
           };
         })
         .sort((a, b) => {

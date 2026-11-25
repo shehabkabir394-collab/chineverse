@@ -11,10 +11,7 @@
   };
   const posterOf = item => imageValue(item?.poster || item?.posterUrl || item?.poster_url || item?.previewImage || item?.preview_image || item?.bannerImage || item?.banner_image || item?.cover || item?.coverUrl || item?.coverImage || item?.image || item?.imageUrl || item?.image_url || item?.thumbnail || item?.thumbnailUrl || item?.thumbnail_url || item?.pic || item?.img);
   const safeImg = u => (/^(?:https?:\/\/|\/\/|\/api\/)/i.test(String(u || "")) ? String(u) : "");
-  const isNigerian = item =>
-    /nigeria|nigerian|nollywood|naija/i.test(
-      [item?.country, item?.title, item?.language, item?.description].filter(Boolean).join(" ")
-    );
+  const isNigerian = () => false;
 
   const heroEl = $("#cvHeroSpotlight");
   const catSection = $("#cvCategorySection");
@@ -936,10 +933,44 @@
       }
     ];
 
-    const html = orderedShelves
+    const normShelfTitle = t => String(t || "").replace(/[^\p{L}\p{N}\s]+/gu, " ").replace(/\s+/g, " ").trim().toLowerCase();
+    const usedShelfTitles = new Set();
+    const usedCategoryPaths = new Set();
+    for (const s of orderedShelves) {
+      if (s.items.length > 0) {
+        usedShelfTitles.add(normShelfTitle(s.title));
+        if (s.moreHref) {
+          const catMatch = s.moreHref.match(/category=([^&]+)/);
+          if (catMatch) usedCategoryPaths.add(decodeURIComponent(catMatch[1]).toLowerCase());
+        }
+      }
+    }
+
+    const extraLiveSections = (Array.isArray(homeData.sections) ? homeData.sections : [])
+      .map(sec => {
+        const cleanTitle = String(sec?.title || "").trim();
+        const items = dedupeList(sec?.items || []);
+        if (!cleanTitle || !items.length) return null;
+        const nTitle = normShelfTitle(cleanTitle);
+        const catPath = String(sec?.categoryPath || "").trim();
+        if (usedShelfTitles.has(nTitle)) return null;
+        if (catPath && usedCategoryPaths.has(catPath.toLowerCase())) return null;
+        usedShelfTitles.add(nTitle);
+        if (catPath) usedCategoryPaths.add(catPath.toLowerCase());
+        return {
+          title: cleanTitle,
+          items: sortNewestFirst(items),
+          moreHref: catPath ? `catalog.html?category=${encodeURIComponent(catPath)}` : "catalog.html"
+        };
+      })
+      .filter(Boolean);
+
+    const allShelves = [...orderedShelves, ...extraLiveSections];
+
+    const html = allShelves
       .filter(s => s.items.length > 0)
       .map(s => {
-        const visible = s.items.slice(0, s.top10 ? 10 : 14);
+        const visible = s.items.slice(0, s.top10 ? 10 : 24);
         const rowClass = s.top10 ? "cv-shelf-row cv-shelf-top10" : "cv-shelf-row";
         const cardsHtml = s.top10
           ? visible.map((item, idx) => cardTop10Markup(item, idx + 1)).join("")
@@ -965,25 +996,30 @@
     statusEl.hidden = true;
   }
 
-  async function renderFilteredTab(tabKey, label) {
+  async function renderFilteredTab(tabKey, label, appendPage = 1, existingItems = []) {
     isHomeView = false;
     clearInterval(spotlightTimer);
     heroEl.hidden = true;
     catSection.hidden = true;
     if (platformEl) platformEl.hidden = true;
     if (liveSportsEl) liveSportsEl.hidden = true;
-    statusEl.hidden = false;
-    statusEl.textContent = `Loading ${label}…`;
-    sectionsRoot.innerHTML = "";
+    if (appendPage === 1) {
+      statusEl.hidden = false;
+      statusEl.textContent = `Loading ${label}…`;
+      sectionsRoot.innerHTML = "";
+    }
 
     try {
       const endpoint =
         tabKey === "trending"
-          ? "/api/movie-api/trending?page=1&perPage=24"
-          : `/api/movie-api/catalog?category=${encodeURIComponent(tabKey)}&page=1`;
+          ? `/api/movie-api/trending?page=${appendPage}&perPage=30`
+          : `/api/movie-api/catalog?category=${encodeURIComponent(tabKey)}&page=${appendPage}`;
       const r = await fetch(endpoint);
       const d = await r.json();
-      const items = sortNewestFirst((Array.isArray(d?.items) ? d.items : []).filter(x => x && !isNigerian(x)));
+      const incoming = (Array.isArray(d?.items) ? d.items : []).filter(x => x && !isNigerian(x));
+      const merged = dedupeList([...existingItems, ...incoming]);
+      const items = tabKey === "trending" ? merged : sortNewestFirst(merged);
+      const hasMore = Boolean(d?.hasMore || (d?.maxPage && appendPage < Number(d.maxPage)) || incoming.length >= 18);
       statusEl.hidden = true;
       sectionsRoot.innerHTML = `
         <section class="cv-section">
@@ -995,8 +1031,17 @@
             <a class="cv-more-link" href="${tabKey === "trending" ? "catalog.html?category=%2Fmostwatch%2F7d" : `catalog.html?category=${encodeURIComponent(tabKey)}`}">View A–Z ›</a>
           </div>
           ${items.length ? `<div class="cv-poster-grid">${items.map(cardMarkup).join("")}</div>` : `<div class="cv-status-banner">No titles found in ${esc(label)}.</div>`}
+          ${hasMore ? `<div style="display:flex;justify-content:center;padding:20px 0 6px"><button type="button" class="cv-btn-glass" id="cvTabLoadMore">Load More Titles</button></div>` : ""}
         </section>
       `;
+      const loadMoreBtn = $("#cvTabLoadMore");
+      if (loadMoreBtn) {
+        loadMoreBtn.onclick = () => {
+          loadMoreBtn.disabled = true;
+          loadMoreBtn.textContent = "Loading…";
+          renderFilteredTab(tabKey, label, appendPage + 1, items);
+        };
+      }
     } catch {
       statusEl.textContent = `Could not load ${label}. Please try again.`;
     }

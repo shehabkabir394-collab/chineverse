@@ -20,6 +20,7 @@
 
   const params = new URLSearchParams(location.search);
   let path = params.get("path") || "";
+  const offlineId = params.get("offline") || "";
   let requestedTitle = params.get("title") || "";
   const root = $("#movieWatchRoot");
   const statusEl = $("#movieWatchStatus");
@@ -33,6 +34,185 @@
   let selectedSeasonNum = 0;
   let showAllEpisodes = false;
   let streamReqId = 0;
+  let manualDubSelected = false;
+  let currentPlayableSources = [];
+  let currentSubtitles = [];
+
+  function currentOfflineKey() {
+    if (!window.CineVerseOffline || !path) return "";
+    const ep = episodes[selectedEpIdx];
+    const se = Number(ep?.seasonNumber ?? ep?.se ?? 0) || 0;
+    const epNum = ep?.ep != null ? Number(ep.ep) : Number(ep?.episodeNumber ?? ep?.number ?? 1);
+    return window.CineVerseOffline.buildId(path, se, epNum);
+  }
+
+  function decorateOfflineUrl(rawUrl) {
+    try {
+      const u = new URL(String(rawUrl || ""), location.origin);
+      if (u.origin === location.origin && (u.pathname === "/api/cinepulse-media" || u.pathname === "/api/mlbd-stream.mp4")) {
+        u.searchParams.set("download", "1");
+        return u.pathname + u.search;
+      }
+      return u.href;
+    } catch {
+      return String(rawUrl || "");
+    }
+  }
+
+  function pickOfflineMp4Source() {
+    const mp4s = currentPlayableSources.filter(s => {
+      const u = String(s?.url || "");
+      const m = String(s?.mime || "") + " " + String(s?.format || "");
+      return u && !/\.m3u8(?:$|[?#])/i.test(u) && !/hls|m3u8|dash/i.test(m) && !/\/api\/mlbd-hls\.m3u8/i.test(u);
+    });
+    if (!mp4s.length) return null;
+    const activeQ = String(playerApi?.getState?.()?.activeQuality || "");
+    const nonTrailers = mp4s.filter(s => !s.isTrailer);
+    const pool = nonTrailers.length ? nonTrailers : mp4s;
+    return pool.find(s => activeQ && s.quality === activeQ) || pool[0];
+  }
+
+  async function refreshOfflineBar() {
+    const btn = $("#cvUtilOfflineSave");
+    const bar = $("#cvOfflineBar");
+    const barText = $("#cvOfflineBarText");
+    const barFill = $("#cvOfflineBarFill");
+    const pauseBtn = $("#cvOfflinePauseBtn");
+    const playLink = $("#cvOfflinePlayLink");
+    const rmBtn = $("#cvOfflineRemoveBtn");
+    if (!btn || !window.CineVerseOffline || offlineId) return;
+
+    const id = currentOfflineKey();
+    if (!id) return;
+    const rec = await window.CineVerseOffline.getDownload(id);
+    const span = btn.querySelector("span");
+
+    if (!rec) {
+      btn.classList.remove("active");
+      if (span) span.textContent = "Save Offline";
+      if (bar) {
+        bar.hidden = true;
+        bar.style.display = "none";
+      }
+      return;
+    }
+
+    const total = Number(rec.totalBytes || 0);
+    const done = Number(rec.downloadedBytes || 0);
+    const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+    const fmt = window.CineVerseOffline.formatBytes;
+
+    if (rec.status === "complete") {
+      btn.classList.add("active");
+      if (span) span.textContent = "Saved Offline ✓";
+      if (bar) {
+        bar.hidden = false;
+        bar.style.display = "flex";
+      }
+      if (barText) barText.textContent = `Offline Ready · ${rec.quality || "HD"} · ${fmt(done || total)}`;
+      if (barFill) barFill.style.width = "100%";
+      if (pauseBtn) pauseBtn.hidden = true;
+      if (playLink) {
+        playLink.hidden = false;
+        playLink.href = `watch.html?offline=${encodeURIComponent(rec.id)}`;
+      }
+      if (rmBtn) rmBtn.hidden = false;
+    } else if (rec.status === "downloading" || window.CineVerseOffline.isActive(id)) {
+      btn.classList.add("active");
+      if (span) span.textContent = total > 0 ? `Saving ${pct}%` : "Saving…";
+      if (bar) {
+        bar.hidden = false;
+        bar.style.display = "flex";
+      }
+      if (barText) barText.textContent = `Downloading offline: ${fmt(done)} / ${total > 0 ? fmt(total) : "?"} (${pct}%)`;
+      if (barFill) barFill.style.width = `${pct}%`;
+      if (pauseBtn) {
+        pauseBtn.hidden = false;
+        pauseBtn.textContent = "Pause";
+      }
+      if (playLink) playLink.hidden = true;
+      if (rmBtn) rmBtn.hidden = false;
+    } else {
+      btn.classList.remove("active");
+      if (span) span.textContent = `Resume Offline (${pct}%)`;
+      if (bar) {
+        bar.hidden = false;
+        bar.style.display = "flex";
+      }
+      if (barText) barText.textContent = rec.status === "error"
+        ? `Paused (${fmt(done)} saved) · ${rec.error || "Tap Resume"}`
+        : `Paused offline download (${fmt(done)} / ${total > 0 ? fmt(total) : "?"})`;
+      if (barFill) barFill.style.width = `${pct}%`;
+      if (pauseBtn) {
+        pauseBtn.hidden = false;
+        pauseBtn.textContent = "Resume";
+      }
+      if (playLink) playLink.hidden = true;
+      if (rmBtn) rmBtn.hidden = false;
+    }
+  }
+
+  async function triggerWatchOfflineAction() {
+    if (!window.CineVerseOffline) {
+      showToast("Offline storage module unavailable");
+      return;
+    }
+    const id = currentOfflineKey();
+    if (!id) return;
+    const existing = await window.CineVerseOffline.getDownload(id);
+    if (existing?.status === "complete") {
+      const bar = $("#cvOfflineBar");
+      if (bar) bar.hidden = false;
+      showToast("Already saved offline! Tap Play Offline or visit My List.");
+      return;
+    }
+    if (existing && window.CineVerseOffline.isActive(id)) {
+      window.CineVerseOffline.pauseDownload(id);
+      showToast("Offline download paused");
+      return;
+    }
+    if (existing && existing.sourceUrl) {
+      showToast("Resuming offline download…");
+      window.CineVerseOffline.resumeDownload(id).catch(err => {
+        if (err?.name !== "AbortError") showToast(err?.message || "Offline download paused");
+      });
+      refreshOfflineBar();
+      return;
+    }
+
+    const mp4 = pickOfflineMp4Source();
+    if (!mp4) {
+      showToast("Direct MP4 offline source unavailable for this stream yet");
+      return;
+    }
+    const ep = episodes[selectedEpIdx];
+    const se = Number(ep?.seasonNumber ?? ep?.se ?? 0) || 0;
+    const epNum = ep?.ep != null ? Number(ep.ep) : Number(ep?.episodeNumber ?? ep?.number ?? 1);
+    const isSeries = episodes.length > 1 || se > 0;
+    const episodeLabel = isSeries ? ep?.label || `S${String(Math.max(1, se)).padStart(2, "0")} E${String(epNum).padStart(2, "0")}` : "";
+
+    showToast("Saving video for offline playback…");
+    window.CineVerseOffline
+      .startDownload({
+        id,
+        path,
+        title: watchDetail?.title || requestedTitle || "MovieStream BD",
+        episodeLabel,
+        se,
+        ep: epNum,
+        quality: mp4.quality || "HD",
+        url: decorateOfflineUrl(mp4.url),
+        posterUrl: safeImg(watchDetail?.poster || ""),
+        subtitles: currentSubtitles
+      })
+      .then(() => {
+        showToast("Saved offline! Watch anytime in Downloads.");
+      })
+      .catch(err => {
+        if (err?.name !== "AbortError") showToast(err?.message || "Offline download failed");
+      });
+    refreshOfflineBar();
+  }
 
   function showToast(msg) {
     document.querySelector(".cv-toast")?.remove();
@@ -486,11 +666,18 @@
     selectedEpIdx = idx;
     const reqId = ++streamReqId;
     const video = $("#movieWatchVideo");
+    if (video && (opts.fromUserClick || opts.dubLock)) {
+      video.muted = false;
+      video.defaultMuted = false;
+    }
     const streamMsg = $("#cvStreamStatusText");
     if (streamMsg) streamMsg.textContent = "Loading video stream…";
 
     root.querySelectorAll("[data-watch-ep]").forEach(b => b.classList.toggle("active", Number(b.dataset.watchEp) === idx));
     updateDownloadLink();
+    currentPlayableSources = [];
+    currentSubtitles = [];
+    refreshOfflineBar();
 
     const se = Number(ep.seasonNumber ?? ep.se ?? 0) || 0;
     const epNum = ep.ep != null ? Number(ep.ep) : Number(ep.episodeNumber ?? ep.number ?? 1);
@@ -502,7 +689,8 @@
         detailPath: String(watchDetail?.detailPath || ""),
         title: String(watchDetail?.title || ""),
         se: String(se),
-        ep: String(epNum)
+        ep: String(epNum),
+        ...(manualDubSelected || opts.dubLock ? { dubLock: "1" } : {})
       });
       const { res: r, data: payload } = await safeFetchJson(`/api/movie-api/stream?${qs.toString()}`, { cache: "no-store" });
       if (reqId !== streamReqId) return;
@@ -641,6 +829,9 @@
       }
 
       root.querySelector(".cv-stage-fallback")?.remove();
+      currentPlayableSources = sources;
+      currentSubtitles = subtitles;
+      refreshOfflineBar();
       if (streamMsg) {
         const uniqueQ = [...new Set(sources.map(s => s.quality))];
         streamMsg.textContent = streamRoot?.isTrailer
@@ -717,7 +908,12 @@
 
   async function switchDubInPlace(targetPath, selectedLabel) {
     if (!targetPath || targetPath === path) return;
+    manualDubSelected = true;
     const video = $("#movieWatchVideo");
+    if (video) {
+      video.muted = false;
+      video.defaultMuted = false;
+    }
     const currentEp = episodes[selectedEpIdx];
     const targetSe = Number(currentEp?.seasonNumber ?? currentEp?.se ?? 0) || 0;
     const targetEpNum = Number(currentEp?.episodeNumber ?? currentEp?.number ?? 1) || 1;
@@ -733,7 +929,7 @@
 
     try {
       const { res: r, data } = await safeFetchJson(
-        `/api/movie-api/details?path=${encodeURIComponent(targetPath)}&title=${encodeURIComponent(watchDetail?.title || requestedTitle)}`,
+        `/api/movie-api/details?path=${encodeURIComponent(targetPath)}&title=${encodeURIComponent(watchDetail?.title || requestedTitle)}&dubLock=1`,
         { cache: "no-store" }
       );
       if (!r.ok || !data?.detail) throw new Error(data?.error || "Dub version unavailable");
@@ -783,7 +979,7 @@
 
       renderEpisodeButtons(seasonGroups);
       syncWatchlistButtons();
-      await playEpisode(matchIdx, { seekTo: resumeTime, autoplay: true });
+      await playEpisode(matchIdx, { seekTo: resumeTime, autoplay: true, dubLock: true });
       showToast(`Audio switched: ${selectedLabel || d.language || "Updated"}`);
     } catch (err) {
       showToast(err?.message || "Could not switch dub version");
@@ -866,7 +1062,143 @@
     }
   }
 
+  async function loadOfflinePlayback() {
+    if (!window.CineVerseOffline) {
+      statusEl.textContent = "Offline storage is unavailable in this browser.";
+      return;
+    }
+    try {
+      const media = await window.CineVerseOffline.getPlayableMedia(offlineId);
+      const meta = media.meta || {};
+      path = meta.path || path;
+      watchDetail = {
+        title: meta.title || "Offline Video",
+        poster: media.posterUrl || "",
+        isMovie: !meta.episodeLabel,
+        path: meta.path || "",
+        language: "Offline"
+      };
+      document.title = `${watchDetail.title} (Offline) — MovieStream BD`;
+      const sizeText = window.CineVerseOffline.formatBytes(meta.downloadedBytes || meta.totalBytes || 0);
+      const onlineHref = meta.path
+        ? `watch.html?path=${encodeURIComponent(meta.path)}&title=${encodeURIComponent(meta.title || "")}`
+        : "";
+
+      statusEl.hidden = true;
+      root.innerHTML = `
+        <div class="cv-watch-grid">
+          <div class="cv-watch-primary-col">
+            <div class="cv-player-stage ms-watch-player">
+              <video id="movieWatchVideo" class="movie-player" controls playsinline preload="metadata" ${media.posterUrl ? `poster="${esc(media.posterUrl)}"` : ""}></video>
+            </div>
+            <div class="cv-watch-info-pad">
+              <div class="cv-watch-title-row">
+                <h1 class="cv-watch-title">${esc(meta.title || "Offline Video")}</h1>
+                <span class="cv-util-pill active" style="border-color:rgba(74,222,128,.45);color:#86efac">📥 Offline Mode</span>
+              </div>
+              <div class="cv-watch-meta-line">
+                <span>${esc(meta.episodeLabel || "Feature Film")}</span>
+                <span aria-hidden="true">|</span>
+                <span>${esc(meta.quality || "HD")}</span>
+                <span aria-hidden="true">|</span>
+                <span>${esc(sizeText)}</span>
+              </div>
+              <div class="cv-utility-strip" aria-label="Offline player controls">
+                <button type="button" id="cvUtilBoost" class="cv-util-pill"><span aria-hidden="true">🔊</span> Sound Boost: 100%</button>
+                <button type="button" id="cvUtilAmbient" class="cv-util-pill active" aria-pressed="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="6" width="16" height="12" rx="2.5"/><path d="M8 2v2M16 2v2M8 20v2M16 20v2M1 12h1.5M21.5 12H23"/></svg><span>Ambient: ON</span></button>
+                <button type="button" id="cvUtilSub" class="cv-util-pill">Subtitles (CC)</button>
+                <button type="button" id="cvUtilQual" class="cv-util-pill">${esc(meta.quality || "Offline")}</button>
+                <button type="button" id="cvOfflineExportBtn" class="cv-util-pill">⬇ Save MP4 to Device</button>
+                <button type="button" id="cvOfflineDeleteBtn" class="cv-util-pill" style="border-color:rgba(248,113,113,.45);color:#fca5a5">🗑 Delete Offline</button>
+                <a class="cv-util-pill" href="saved.html?tab=offline">← Offline Library</a>
+                ${onlineHref ? `<a class="cv-util-pill" href="${esc(onlineHref)}">Online Page</a>` : ""}
+              </div>
+              <div id="cvStreamStatusText" style="margin-top:8px;font-size:12px;color:#86efac" aria-live="polite">Playing from in-app offline storage · Works without internet</div>
+            </div>
+          </div>
+          <aside class="cv-resources-panel">
+            <div class="cv-resources-head">
+              <h2>Offline Playback</h2>
+              <span>Saved on this device</span>
+            </div>
+            <p style="margin:8px 0 14px;font-size:13px;color:#cbd5e1;line-height:1.55">এই ভিডিওটি অ্যাপের নিজস্ব অফলাইন স্টোরেজে সংরক্ষিত আছে। ইন্টারনেট না থাকলেও স্বাচ্ছন্দ্যে দেখতে পারবেন।</p>
+            <a class="cv-util-pill" href="saved.html?tab=offline" style="display:inline-flex">Manage Offline Downloads →</a>
+          </aside>
+        </div>
+      `;
+
+      const video = $("#movieWatchVideo");
+      if (video && window.CineVersePlayer) {
+        video.hidden = false;
+        video.muted = false;
+        video.defaultMuted = false;
+        playerApi = window.CineVersePlayer.mount({
+          video,
+          sources: [{ url: media.videoUrl, quality: meta.quality || "HD", mime: meta.mimeType || "video/mp4" }],
+          subtitles: media.subtitles || [],
+          storageKey: `cv-off-${meta.id || offlineId}`,
+          title: meta.title || "Offline Video",
+          backUrl: "saved.html?tab=offline",
+          onOpenSettings: openSettingsModal,
+          onStateChange: syncPlayerUiState
+        });
+        syncPlayerUiState();
+      }
+
+      $("#cvWatchTopSettings")?.addEventListener("click", openSettingsModal);
+      $("#cvUtilBoost")?.addEventListener("click", openSettingsModal);
+      $("#cvUtilSub")?.addEventListener("click", openSettingsModal);
+      $("#cvUtilQual")?.addEventListener("click", openSettingsModal);
+      $("#cvUtilAmbient")?.addEventListener("click", () => {
+        if (!playerApi?.toggleAmbientMode) return;
+        const next = playerApi.toggleAmbientMode();
+        syncPlayerUiState();
+        showToast(next ? "Ambient Mode ON" : "Ambient Mode OFF");
+      });
+      $("#cvWatchTopPip")?.addEventListener("click", async () => {
+        const v = $("#movieWatchVideo");
+        if (!v) return;
+        try {
+          if (document.pictureInPictureElement) await document.exitPictureInPicture();
+          else await v.requestPictureInPicture();
+        } catch {
+          showToast("Picture-in-Picture is unavailable until video starts");
+        }
+      });
+      $("#cvOfflineExportBtn")?.addEventListener("click", async () => {
+        try {
+          showToast("Preparing MP4 file…");
+          const fname = await window.CineVerseOffline.exportToDevice(offlineId);
+          showToast(`Saved: ${fname}`);
+        } catch (e) {
+          showToast(e?.message || "Export failed");
+        }
+      });
+      $("#cvOfflineDeleteBtn")?.addEventListener("click", async () => {
+        await window.CineVerseOffline.deleteDownload(offlineId);
+        media.revoke();
+        location.href = "saved.html?tab=offline";
+      });
+
+      window.addEventListener("pagehide", () => media.revoke(), { once: true });
+    } catch (err) {
+      statusEl.hidden = false;
+      statusEl.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center;padding:8px 0">
+        <span>${esc(err?.message || "Could not load offline video.")}</span>
+        <div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:center">
+          <a class="cv-util-pill" href="saved.html?tab=offline">← Back to Offline Downloads</a>
+          <a class="cv-util-pill" href="./">Home</a>
+        </div>
+      </div>`;
+    }
+  }
+
   async function load() {
+    if (offlineId) {
+      await loadOfflinePlayback();
+      return;
+    }
+
     if (!/^\/(?:mb|mlbd|movie|series|drama|anime)\/[a-zA-Z0-9_./-]{1,300}$/i.test(path)) {
       statusEl.textContent = "Invalid title URL. Returning to home or select another title.";
       return;
@@ -880,6 +1212,11 @@
       if (!r.ok || !data?.detail) throw new Error(data?.error || "Title details unavailable.");
 
       const d = data.detail;
+      if (d.path && d.path !== path) {
+        path = d.path;
+        const nextUrl = `watch.html?path=${encodeURIComponent(path)}&title=${encodeURIComponent(d.title || requestedTitle || "")}${params.get("episode") ? `&episode=${encodeURIComponent(params.get("episode"))}` : ""}`;
+        try { history.replaceState(null, "", nextUrl); } catch {}
+      }
       d.poster = posterOf(d);
       watchDetail = d;
       episodes = Array.isArray(d.episodes) && d.episodes.length ? d.episodes : [{ label: d.title || "Play", number: 1, seasonNumber: 0, episodeNumber: 1, se: 0, ep: 0 }];
@@ -964,19 +1301,34 @@
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
                   <span>Share</span>
                 </button>
+                <button type="button" id="cvUtilOfflineSave" class="cv-util-pill">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><rect x="4" y="18" width="16" height="3" rx="1"/></svg>
+                  <span>Save Offline</span>
+                </button>
                 <a id="movieWatchDownload" class="cv-util-pill" href="download.html?path=${encodeURIComponent(path)}&title=${encodeURIComponent(d.title || "")}&episode=0">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                   <span>Download</span>
                 </a>
               </div>
               <div id="cvStreamStatusText" style="margin-top:8px;font-size:12px;color:#98a2b3" aria-live="polite">Preparing stream…</div>
+              <div id="cvOfflineBar" hidden style="margin-top:8px;padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.05);display:none;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:12px">
+                <div style="flex:1;min-width:160px">
+                  <div id="cvOfflineBarText" style="color:#e2e8f0;margin-bottom:5px">Preparing offline download…</div>
+                  <div style="height:6px;border-radius:999px;background:rgba(255,255,255,.12);overflow:hidden"><i id="cvOfflineBarFill" style="display:block;width:0%;height:100%;background:linear-gradient(90deg,#fb7185,#ef4444);transition:width .2s"></i></div>
+                </div>
+                <div style="display:flex;gap:8px;align-items:center">
+                  <button type="button" id="cvOfflinePauseBtn" class="cv-util-pill" style="padding:6px 12px">Pause</button>
+                  <a id="cvOfflinePlayLink" class="cv-util-pill" href="saved.html?tab=offline" hidden style="padding:6px 12px;border-color:rgba(74,222,128,.45);color:#86efac">▶ Play Offline</a>
+                  <button type="button" id="cvOfflineRemoveBtn" class="cv-util-pill" style="padding:6px 12px" hidden>Delete</button>
+                </div>
+              </div>
             </div>
           </div>
 
           <aside class="cv-resources-panel">
             <div class="cv-resources-head">
               <h2>Resources</h2>
-              <span>${d.source === "movielinkbd" ? "Verified · MovieLinkBD Mirror" : "Verified · MovieBox Direct"}</span>
+              <span>${d.source === "movielinkbd" ? "Verified · MovieStreamBD Mirror" : "Verified · MovieBox Direct"}</span>
             </div>
             <div class="cv-resources-selects">
               ${dubSelectHtml}
@@ -1047,6 +1399,18 @@
       });
       $("#cvUtilSub")?.addEventListener("click", openSettingsModal);
       $("#cvUtilQual")?.addEventListener("click", openSettingsModal);
+      $("#cvUtilOfflineSave")?.addEventListener("click", triggerWatchOfflineAction);
+      $("#cvOfflinePauseBtn")?.addEventListener("click", triggerWatchOfflineAction);
+      $("#cvOfflineRemoveBtn")?.addEventListener("click", async () => {
+        const id = currentOfflineKey();
+        if (!id || !window.CineVerseOffline) return;
+        await window.CineVerseOffline.deleteDownload(id);
+        refreshOfflineBar();
+        showToast("Removed from offline storage");
+      });
+      window.addEventListener("cv:offline-change", ev => {
+        if (!ev?.detail?.id || ev.detail.id === currentOfflineKey()) refreshOfflineBar();
+      });
 
       $("#cvWatchTopPip")?.addEventListener("click", async () => {
         const v = $("#movieWatchVideo");
@@ -1071,7 +1435,7 @@
         selectedSeasonNum = Number(e.target.value);
         const firstInSeason = seasonGroups.get(selectedSeasonNum)?.[0];
         renderEpisodeButtons(seasonGroups);
-        if (firstInSeason) playEpisode(firstInSeason.idx);
+        if (firstInSeason) playEpisode(firstInSeason.idx, { fromUserClick: true });
       });
 
       root.addEventListener("click", async e => {
@@ -1082,7 +1446,7 @@
         }
         const epBtn = e.target.closest("[data-watch-ep]");
         if (epBtn) {
-          playEpisode(Number(epBtn.dataset.watchEp));
+          playEpisode(Number(epBtn.dataset.watchEp), { fromUserClick: true });
           return;
         }
         const tabBtn = e.target.closest("[data-watch-tab]");

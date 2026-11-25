@@ -21,18 +21,23 @@ export async function onRequest({ request, env }) {
 
   const referer = /aisports/i.test(targetUrl)
     ? "https://aisports.mobi/"
-    : /movielink/i.test(targetUrl)
-      ? getActiveMlbdReferer()
-      : MOVIEBOX_REFERER;
+    : /movielinkbd\.com/i.test(targetUrl)
+      ? "https://movielinkbd.com/"
+      : /movielink/i.test(targetUrl)
+        ? getActiveMlbdReferer()
+        : MOVIEBOX_REFERER;
 
   try {
+    const imgHeaders = {
+      "User-Agent": MOVIEBOX_UA,
+      Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8"
+    };
+    if (!/(?:image\.tmdb\.org|media-amazon\.com|ytimg\.com|mzstatic\.com|tvmaze\.com|wikimedia\.org|wikipedia\.org)/i.test(targetUrl)) {
+      imgHeaders.Referer = referer;
+    }
     const upstream = await fetch(targetUrl, {
       method: request.method,
-      headers: {
-        "User-Agent": MOVIEBOX_UA,
-        Referer: referer,
-        Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8"
-      },
+      headers: imgHeaders,
       redirect: "follow",
       signal: AbortSignal.timeout(25000)
     });

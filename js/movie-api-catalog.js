@@ -17,10 +17,7 @@
  const allCatsPanel=$("#catalogAllCatsPanel"),allCatsToggle=$("#catalogAllCatsToggle");
  const pageSize=24;
  let data=null,all=[],apiCatalogMode=false,apiMeta=null,allApiCategories=[];
- const isNigerian=item=>{
-  const fields=[item?.country,item?.originCountry,item?.productionCountry,item?.originalCountry,item?.nationality,item?.region,item?.title,item?.language,item?.originalLanguage,item?.productionCountries,item?.countries,item?.description,...(Array.isArray(item?._sections)?item._sections:[])];
-  return fields.some(v=>Array.isArray(v)?v.some(x=>/nigeria|nigerian|nollywood|naija/i.test(String(x?.name||x?.code||x||""))):/nigeria|nigerian|nollywood|naija/i.test(String(v||"")));
- };
+ const isNigerian=()=>false;
  const dateValue=value=>{
   if(value==null||value==="")return 0;
   const raw=typeof value==="object"?(value.timestamp||value.date||value.value||""):value;
@@ -113,7 +110,7 @@
   return [...map.values()].filter(item=>!isNigerian(item)).sort(categoryPriority);
  }
  const customLabels={
-  "/":"MovieLinkBD Home Feed",
+  "/":"MovieStreamBD Home Feed",
   "cv:movie":"Movie",
   "cv:anime":"Anime",
   "cv:drama":"Drama",
@@ -223,7 +220,7 @@
   const lang=norm($("#catalogLanguageFilter")?.value||"");
   const kind=norm($("#catalogTypeFilter")?.value||"");
   const genre=norm($("#catalogGenreFilter")?.value||"");
-  if(lang&&norm(item.language)!==lang)return false;
+  if(lang&&!norm([item.language,item.audioLanguage,item.title,...(item._sections||[])].join(" ")).includes(lang))return false;
   if(kind&&!norm([item.type,item.typeBadge,item.mediaType].join(" ")).includes(kind))return false;
   if(genre&&!norm([item.genre,item.genres,item.category,item.categoryName].join(" ")).includes(genre))return false;
   const q=norm(search?.value||"");
@@ -373,9 +370,9 @@
      "cv:hollywood":"/language/english"
     };
     const category=(data.categories||[]).find(x=>[x.path,x.slug,x.label,x.name,x.title].some(v=>norm(v)===norm(selected)));
-    const apiPath=customPaths[selected]||text(category?.path)||(selected.startsWith("/")?selected:(!selected?"/type/movies":""));
+    const apiPath=customPaths[selected]||text(category?.path)||(selected.startsWith("/")?selected:(!selected?"/all":""));
     if(apiPath&&(apiPath!=="/"||selected==="/")){
-     status.textContent="Loading "+(category?.label||customLabels[selected]||"Category")+" · Page "+page+"…";
+     status.textContent="Loading "+(category?.label||customLabels[selected]||"All Content")+" · Page "+page+"…";
      const {res:cr,data:pagePayload}=await fetchJsonSafe("/api/movie-api/catalog?category="+encodeURIComponent(apiPath)+"&page="+Math.max(1,Math.min(100,page)),{headers:{Accept:"application/json"},cache:"default"});
      if(!cr.ok||pagePayload.ok!==true)throw new Error(pagePayload.error||"Movie Catalog API unavailable");
      const unique=new Map();
