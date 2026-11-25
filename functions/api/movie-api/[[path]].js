@@ -4,6 +4,7 @@ import {
   MOVIEBOX_UA,
   configureMediaSecret,
   handleMovieBoxRoute,
+  sortByReleaseNewest,
   verifyMediaToken
 } from "../../../moviebox-api.js";
 import {
@@ -327,7 +328,7 @@ export async function onRequest({ request, env, params }) {
       return json({
         ...mbPayload,
         ok: true,
-        items: merged,
+        items: sortByReleaseNewest(merged),
         maxPage: Math.max(
           Number(mbPayload?.maxPage || 1),
           Number(mlbdRes.status === "fulfilled" ? mlbdRes.value?.maxPage || 1 : 1)

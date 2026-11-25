@@ -2,9 +2,25 @@
   "use strict";
   const $ = s => document.querySelector(s);
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-  const safeImg = u => (/^(?:https?:\/\/|\/api\/)/i.test(String(u || "")) ? String(u) : "");
+  const safeImg = u => (/^(?:https?:\/\/|\/api\/|favicon\.svg)/i.test(String(u || "")) ? String(u) : "");
   const RECENT_KEY = "cv_recent_searches_v1";
+  const FAMILY_SAFE_KEY = "cv_family_safe_v1";
   const MAX_HISTORY = 15;
+
+  function isFamilySafe() {
+    try {
+      return localStorage.getItem(FAMILY_SAFE_KEY) === "1";
+    } catch {
+      return false;
+    }
+  }
+
+  function isAdultItem(item) {
+    if (!item || typeof item !== "object") return false;
+    if (item.isAdult === true) return true;
+    const hay = `${item.title || ""} ${item.genre || ""} ${item.category || ""} ${item.platform || ""}`;
+    return /\b(?:adult|erotic|18\+|xxx|porn|softcore|vivamax)\b/i.test(hay) || /^(?:hot|midnight)$/i.test(String(item.genre || "").trim());
+  }
 
   function normalizeEntry(raw) {
     if (typeof raw === "string") {
@@ -53,7 +69,7 @@
 
   function saveRecent(term, type = activeType) {
     const clean = String(term || "").trim();
-    if (clean.length < 2) return;
+    if (clean.length < 1) return;
     const prev = loadHistory().filter(x => x.q.toLowerCase() !== clean.toLowerCase());
     const next = [{ q: clean, type: String(type || "0"), ts: Date.now() }, ...prev].slice(0, MAX_HISTORY);
     persistHistory(next);
@@ -73,18 +89,13 @@
     window.dispatchEvent(new CustomEvent("cv:search-history-change"));
   }
 
-  function formatAgo(ts) {
-    if (!ts) return "";
-    const diff = Math.max(0, Date.now() - ts);
-    const mins = Math.floor(diff / 60000);
-    if (mins < 1) return "Just now";
-    if (mins < 60) return `${mins}m ago`;
-    const hrs = Math.floor(mins / 60);
-    if (hrs < 24) return `${hrs}h ago`;
-    const days = Math.floor(hrs / 24);
-    if (days === 1) return "Yesterday";
-    if (days < 7) return `${days}d ago`;
-    return new Date(ts).toLocaleDateString();
+  function showToast(msg) {
+    document.querySelector(".cv-toast")?.remove();
+    const t = document.createElement("div");
+    t.className = "cv-toast";
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(() => t.remove(), 2400);
   }
 
   function createOverlay() {
@@ -97,24 +108,29 @@
     overlay.hidden = true;
     overlay.setAttribute("role", "dialog");
     overlay.setAttribute("aria-modal", "true");
-    overlay.setAttribute("aria-label", "Search movies, series, short dramas and anime");
+    overlay.setAttribute("aria-label", "Search movies, series, drama and anime");
 
     overlay.innerHTML = `
       <div class="cv-search-overlay-head">
-        <button type="button" id="cvSearchBack" class="cv-icon-btn" aria-label="Close search">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+        <button type="button" id="cvSearchBack" class="cv-search-back-btn" aria-label="Close search">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
         </button>
         <form id="cvSearchOverlayForm" class="cv-search-overlay-input-box" role="search">
-          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="color:#98a2b3;flex-shrink:0"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-          <input id="cvSearchOverlayInput" type="search" placeholder="Search movies, K-Drama, anime or type…" autocomplete="off" aria-label="Search titles">
-          <button type="button" id="cvSearchOverlayClear" class="cv-clear-btn" hidden aria-label="Clear input">×</button>
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="color:#8b95a7;flex-shrink:0"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <input id="cvSearchOverlayInput" type="search" placeholder="Search movies, series, south movie, anime…" autocomplete="off" aria-label="Search titles">
+          <button type="button" id="cvSearchOverlayClear" class="cv-search-input-clear" hidden aria-label="Clear input">×</button>
+          <button type="submit" class="cv-search-inline-submit">Search</button>
         </form>
+        <button type="button" id="cvSearchMicBtn" class="cv-search-mic-btn" aria-label="Voice search" title="Voice search">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v5a3 3 0 0 0 3 3zm5-3a1 1 0 1 0-2 0 3 3 0 1 1-6 0 1 1 0 1 0-2 0 5 5 0 0 0 4 4.9V19H9a1 1 0 1 0 0 2h6a1 1 0 1 0 0-2h-2v-3.1A5 5 0 0 0 17 11z"/></svg>
+        </button>
       </div>
-      <div class="cv-search-overlay-tabs" role="tablist" aria-label="Filter search by format">
-        <button type="button" class="cv-nav-tab active" data-search-type="0" role="tab" aria-selected="true">All</button>
-        <button type="button" class="cv-nav-tab" data-search-type="1,2" role="tab" aria-selected="false">Movie/Series</button>
-        <button type="button" class="cv-nav-tab" data-search-type="7" role="tab" aria-selected="false">ShortTV</button>
-        <button type="button" class="cv-nav-tab" data-search-type="6" role="tab" aria-selected="false">Anime</button>
+      <div id="cvSearchResultsTabs" class="cv-search-overlay-tabs" role="tablist" aria-label="Filter search results" hidden>
+        <button type="button" class="cv-search-tab active" data-search-type="0" role="tab" aria-selected="true">All</button>
+        <button type="button" class="cv-search-tab" data-search-type="1" role="tab" aria-selected="false">Movie</button>
+        <button type="button" class="cv-search-tab" data-search-type="2" role="tab" aria-selected="false">Series</button>
+        <button type="button" class="cv-search-tab" data-search-type="6" role="tab" aria-selected="false">Anime</button>
+        <button type="button" class="cv-search-tab" data-search-type="2,7" role="tab" aria-selected="false">Drama</button>
       </div>
       <div id="cvSearchOverlayBody" class="cv-search-overlay-body"></div>
     `;
@@ -123,109 +139,169 @@
   }
 
   let activeType = "0";
+  let activeRankTab = "movie";
   let hotCache = null;
   let hotSubjectsCache = [];
+  let rankingsCache = { movie: [], series: [], anime: [], drama: [] };
   let searchTimer = 0;
   let reqSeq = 0;
   let activeSearchCtrl = null;
+  let hotLoadedSafeState = null;
 
-  async function fetchHot() {
-    if (hotCache) return hotCache;
+  async function fetchHot(force = false) {
+    const safe = isFamilySafe();
+    if (!force && hotCache && hotLoadedSafeState === safe) return hotCache;
     try {
-      const r = await fetch("/api/movie-api/hot-search");
+      const r = await fetch(`/api/movie-api/hot-search${safe ? "?safe=1" : ""}`);
       const d = await r.json();
+      hotLoadedSafeState = safe;
       hotCache = Array.isArray(d?.items) ? d.items.filter(x => typeof x === "string" || x?.title).slice(0, 14) : [];
-      hotSubjectsCache = Array.isArray(d?.subjects) ? d.subjects.slice(0, 10) : [];
+      hotSubjectsCache = Array.isArray(d?.subjects) ? d.subjects.filter(x => !safe || !isAdultItem(x)).slice(0, 12) : [];
+      const rk = d?.rankings || {};
+      const cleanList = list => (Array.isArray(list) ? list : []).filter(x => !safe || !isAdultItem(x)).slice(0, 12);
+      rankingsCache = {
+        movie: cleanList(rk.movie?.length ? rk.movie : hotSubjectsCache),
+        series: cleanList(rk.series),
+        anime: cleanList(rk.anime),
+        drama: cleanList(rk.drama)
+      };
     } catch {
-      hotCache = ["Hindi Dubbed Movies", "Hindi Dubbed Series", "South Indian Hindi Dubbed", "K-Drama Hindi", "Anime Hindi Dub", "Bollywood Hindi"];
+      hotCache = ["South Indian Hindi", "Bangla Movies", "K-Drama", "Hindi Dubbed", "Anime Hindi Dub", "Web Series"];
       hotSubjectsCache = [];
+      rankingsCache = { movie: [], series: [], anime: [], drama: [] };
     }
     return hotCache;
   }
 
+  function renderRankingCards() {
+    const list = rankingsCache[activeRankTab] || [];
+    if (!list.length) {
+      return `<div class="cv-status-banner" style="margin-top:10px">Loading top ${esc(activeRankTab)} charts…</div>`;
+    }
+    const tvSvg = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="2" y="7" width="20" height="14" rx="2"/><polyline points="17 2 12 7 7 2"/></svg>`;
+    const chunks = [];
+    for (let i = 0; i < list.length; i += 3) {
+      chunks.push(list.slice(i, i + 3));
+    }
+
+    return `
+      <div class="cv-rank-scroller" id="cvRankScroller">
+        ${chunks
+          .map((group, groupIdx) => `
+            <div class="cv-rank-card">
+              ${group
+                .map((item, idxInGroup) => {
+                  const rank = groupIdx * 3 + idxInGroup + 1;
+                  const rankClass = rank === 1 ? "r1" : rank === 2 ? "r2" : rank === 3 ? "r3" : "rn";
+                  const img = safeImg(item.poster || item.previewImage || item.cover);
+                  const path = item.path || "";
+                  const href = path
+                    ? `watch.html?path=${encodeURIComponent(path)}&title=${encodeURIComponent(item.title || "")}`
+                    : `catalog.html?q=${encodeURIComponent(item.title || "")}`;
+                  const langLabel = String(item.language || "").split("·")[0].trim() || item.typeBadge || "HD";
+                  const ratingHtml = item.rating && Number(item.rating) > 0
+                    ? `<span class="cv-rank-star">★ ${esc(item.rating)}</span>`
+                    : "";
+                  const metaParts = [
+                    item.year,
+                    item.country,
+                    item.genre ? String(item.genre).split(",")[0].trim() : ""
+                  ].filter(Boolean).slice(0, 3).map(esc);
+                  const metaTail = [ratingHtml, ...metaParts].filter(Boolean).join(`<span class="cv-rank-sep">|</span>`);
+                  return `
+                    <a class="cv-rank-row" href="${esc(href)}">
+                      <div class="cv-rank-thumb-wrap">
+                        ${img
+                          ? `<img loading="lazy" referrerpolicy="no-referrer" src="${esc(img)}" alt="${esc(item.title || "")}" onerror="this.style.visibility='hidden'">`
+                          : `<div class="cv-rank-thumb-fallback">▶</div>`}
+                        <span class="cv-rank-badge ${rankClass}">${rank}</span>
+                        <span class="cv-rank-thumb-lang">${esc(langLabel)}</span>
+                      </div>
+                      <div class="cv-rank-copy">
+                        <b>${esc(item.title || "Untitled")}</b>
+                        <div class="cv-rank-meta">
+                          <span class="cv-rank-tv">${tvSvg}</span>
+                          ${metaTail || `<span>${esc(item.typeBadge || "Movie")}</span>`}
+                        </div>
+                      </div>
+                    </a>
+                  `;
+                })
+                .join("")}
+            </div>
+          `)
+          .join("")}
+      </div>
+    `;
+  }
+
   function renderIdleState(body) {
+    const resultsTabs = $("#cvSearchResultsTabs");
+    if (resultsTabs) resultsTabs.hidden = true;
+
     const history = loadHistory();
     const hot = hotCache || [];
-    const clockSvg = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`;
+    const trashSvg = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>`;
+    const flameSvg = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12.5 2C12.5 2 18 6.4 18 12.2a6 6 0 1 1-12 0c0-2.6 1.2-5.1 2.7-6.8 0 0 .2 2.4 1.8 2.9-.2-2.7 1-5 2-6.3z" fill="#f97316"/><path d="M12 10.5c1.8 1.5 2.5 3.1 2.5 4.7a2.5 2.5 0 1 1-5 0c0-1.1.5-2.1 1.3-2.9 0 0 .2 1 1 1.2-.1-1 .1-2 .2-3z" fill="#fde047"/></svg>`;
+    const chartSvg = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="11" width="4.5" height="9" rx="1" fill="#ec4899"/><rect x="9.75" y="5" width="4.5" height="15" rx="1" fill="#f43f5e"/><rect x="16.5" y="14" width="4.5" height="6" rx="1" fill="#ec4899"/></svg>`;
 
-    const suggestedCardsHtml = hotSubjectsCache.length
-      ? `
-        <div class="cv-recent-head" style="margin-top:20px">
-          <h3>Suggested Hindi Dubbed Movies &amp; Dramas</h3>
-          <a class="cv-more-link" href="catalog.html?category=%2Flanguage%2Fhindi-dubbed">View All ›</a>
-        </div>
-        <div class="cv-search-result-list">
-          ${hotSubjectsCache.slice(0, 8).map(item => {
-            const img = safeImg(item.poster || item.previewImage || item.cover);
-            const path = item.path || "";
-            const href = path ? `watch.html?path=${encodeURIComponent(path)}&title=${encodeURIComponent(item.title || "")}` : `catalog.html?q=${encodeURIComponent(item.title || "")}`;
-            const rating = item.rating ? `<span class="cv-star">★ ${esc(item.rating)}</span>` : "";
-            const meta = [item.year, "Hindi Dubbed", item.genre].filter(Boolean).slice(0, 3).map(esc);
-            const metaHtml = [rating, ...meta].filter(Boolean).join('<span aria-hidden="true">·</span>');
-            return `
-              <a class="cv-search-result-row" href="${esc(href)}">
-                ${img
-                  ? `<img class="cv-search-result-thumb" loading="lazy" referrerpolicy="no-referrer" src="${esc(img)}" alt="${esc(item.title || "Poster")}" onerror="this.style.visibility='hidden'">`
-                  : `<div class="cv-search-result-thumb"></div>`}
-                <div class="cv-search-result-copy">
-                  <b>${esc(item.title || "Untitled")}</b>
-                  <div class="cv-search-result-meta">
-                    <span>${esc(item.typeBadge || "Movie")}</span>
-                    ${metaHtml ? `<span aria-hidden="true">·</span>${metaHtml}` : ""}
-                  </div>
-                </div>
-                <span class="cv-search-play-circle" aria-hidden="true">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-                </span>
-              </a>
-            `;
-          }).join("")}
-        </div>
-      `
-      : "";
+    const rankTabs = [
+      { key: "movie", label: "Movie" },
+      { key: "series", label: "Series" },
+      { key: "anime", label: "Anime" },
+      { key: "drama", label: "Drama" }
+    ];
 
     body.innerHTML = `
       ${history.length ? `
         <div class="cv-recent-head">
-          <h3>Search History (${history.length})</h3>
-          <button type="button" id="cvRecentClearBtn" class="cv-clear-btn">Clear All</button>
+          <h3>Recent</h3>
+          <button type="button" id="cvRecentClearBtn" class="cv-search-clear-action">
+            ${trashSvg}
+            <span>Clear</span>
+          </button>
         </div>
-        <div class="cv-history-search-list">
-          ${history.map(item => {
-            const ago = formatAgo(item.ts);
-            return `
-              <div class="cv-history-search-row">
-                <button type="button" class="cv-history-search-pick" data-pick-query="${esc(item.q)}">
-                  <span class="cv-history-search-icon" aria-hidden="true">${clockSvg}</span>
-                  <span class="cv-history-search-text">${esc(item.q)}</span>
-                  ${ago ? `<span class="cv-history-search-time">${esc(ago)}</span>` : ""}
-                </button>
-                <button type="button" class="cv-history-search-remove" data-remove-history="${esc(item.q)}" aria-label="Remove ${esc(item.q)} from search history" title="Remove">×</button>
-              </div>
-            `;
-          }).join("")}
+        <div class="cv-chip-wrap">
+          ${history
+            .map(item => `<button type="button" class="cv-search-chip" data-pick-query="${esc(item.q)}">${esc(item.q)}</button>`)
+            .join("")}
         </div>
-      ` : `
-        <div class="cv-status-banner" style="margin-bottom:18px">
-          Your recent searches will appear here automatically.
-        </div>
-      `}
-      <div class="cv-recent-head">
-        <h3>Hindi Dubbed Suggestions</h3>
+      ` : ""}
+
+      <div class="cv-recent-head cv-hot-head">
+        <span class="cv-hot-title-group">
+          ${flameSvg}
+          <h3>Everyone is searching</h3>
+        </span>
       </div>
       <div class="cv-chip-wrap">
-        ${(hot.length ? hot : ["Hindi Dubbed Movies", "Hindi Dubbed Series", "South Indian Hindi Dubbed", "K-Drama Hindi", "Anime Hindi Dub"])
+        ${(hot.length ? hot : ["South Indian Hindi", "Bangla Movies", "K-Drama", "Hindi Dubbed", "Anime Hindi Dub"])
           .map(x => {
             const q = typeof x === "string" ? x : String(x.title || x.word || "");
             return q ? `<button type="button" class="cv-search-chip" data-pick-query="${esc(q)}">${esc(q)}</button>` : "";
           })
           .join("")}
       </div>
-      ${suggestedCardsHtml}
+
+      <div class="cv-rank-header">
+        <span class="cv-rank-chart-icon">${chartSvg}</span>
+        <div class="cv-rank-tabs" role="tablist" aria-label="Trending rankings">
+          ${rankTabs
+            .map(t => `<button type="button" class="cv-rank-tab ${activeRankTab === t.key ? "active" : ""}" data-rank-tab="${t.key}" role="tab" aria-selected="${activeRankTab === t.key ? "true" : "false"}">${t.label}</button>`)
+            .join("")}
+        </div>
+      </div>
+      <div id="cvRankPanel">${renderRankingCards()}</div>
     `;
   }
 
   function renderResults(body, items, query) {
+    const resultsTabs = $("#cvSearchResultsTabs");
+    if (resultsTabs) resultsTabs.hidden = false;
+
+    const safe = isFamilySafe();
+    const visibleItems = (Array.isArray(items) ? items : []).filter(it => !safe || !isAdultItem(it));
+
     const historyMatches = loadHistory()
       .filter(h => h.q.toLowerCase().includes(query.toLowerCase()) && h.q.toLowerCase() !== query.toLowerCase())
       .slice(0, 4);
@@ -236,11 +312,11 @@
         </div>`
       : "";
 
-    if (!items.length) {
+    if (!visibleItems.length) {
       body.innerHTML = `
         ${historyStrip}
         <div class="cv-status-banner">
-          No results found for “${esc(query)}” in this filter. Try switching to <b>All</b> or searching another keyword.
+          ${safe ? `No Family-Safe results found for “${esc(query)}”.` : `No results found for “${esc(query)}” in this tab. Try switching to <b>All</b> or searching another keyword.`}
         </div>
       `;
       return;
@@ -249,18 +325,23 @@
     body.innerHTML = `
       ${historyStrip}
       <div class="cv-recent-head">
-        <h3>Results (${items.length})</h3>
+        <h3>Search Results (${visibleItems.length})</h3>
         <a class="cv-more-link" data-save-search href="catalog.html?q=${encodeURIComponent(query)}">Full catalog ›</a>
       </div>
       <div class="cv-search-result-list">
-        ${items
-          .slice(0, 30)
+        ${visibleItems
+          .slice(0, 50)
           .map(item => {
             const img = safeImg(item.poster || item.previewImage || item.cover);
             const path = item.path || "";
-            const href = path ? `watch.html?path=${encodeURIComponent(path)}&title=${encodeURIComponent(item.title || "")}` : `catalog.html?q=${encodeURIComponent(item.title || query)}`;
+            const href = path
+              ? `watch.html?path=${encodeURIComponent(path)}&title=${encodeURIComponent(item.title || "")}`
+              : `catalog.html?q=${encodeURIComponent(item.title || query)}`;
             const rating = item.rating ? `<span class="cv-star">★ ${esc(item.rating)}</span>` : "";
-            const meta = [item.year, item.country, item.genre].filter(Boolean).slice(0, 3).map(esc);
+            const meta = [item.year, item.language ? String(item.language).split("·")[0].trim() : "", item.country, item.genre]
+              .filter(Boolean)
+              .slice(0, 3)
+              .map(esc);
             const metaHtml = [rating, ...meta].filter(Boolean).join('<span aria-hidden="true">·</span>');
             return `
               <a class="cv-search-result-row" href="${esc(href)}">
@@ -305,7 +386,7 @@
 
   async function runSearch(query, body) {
     const q = String(query || "").trim();
-    if (q.length < 2) {
+    if (!q) {
       if (activeSearchCtrl) {
         try { activeSearchCtrl.abort(); } catch {}
         activeSearchCtrl = null;
@@ -320,18 +401,18 @@
     }
     const ctrl = typeof AbortController === "function" ? new AbortController() : null;
     activeSearchCtrl = ctrl;
+
+    const resultsTabs = $("#cvSearchResultsTabs");
+    if (resultsTabs) resultsTabs.hidden = false;
     body.innerHTML = `<div class="cv-status-banner">Searching “${esc(q)}”…</div>`;
 
-    const candidates = activeType === "0"
-      ? [
-          `/api/suggest?q=${encodeURIComponent(q)}`,
-          `/api/movie-api/search?q=${encodeURIComponent(q)}&subjectType=0`,
-          `/api/catalog?path=%2Fsearch&q=${encodeURIComponent(q)}`
-        ]
-      : [
-          `/api/movie-api/search?q=${encodeURIComponent(q)}&subjectType=${encodeURIComponent(activeType)}`,
-          `/api/suggest?q=${encodeURIComponent(q)}`
-        ];
+    const safeQs = isFamilySafe() ? "&safe=1" : "";
+    const typeQs = `&subjectType=${encodeURIComponent(activeType)}`;
+    const candidates = [
+      `/api/movie-api/search?q=${encodeURIComponent(q)}${typeQs}${safeQs}`,
+      `/api/suggest?q=${encodeURIComponent(q)}${typeQs}${safeQs}`,
+      `/api/catalog?path=%2Fsearch&q=${encodeURIComponent(q)}`
+    ];
 
     try {
       let data = null;
@@ -373,7 +454,7 @@
 
     fetchHot().then(() => {
       if (!overlay.hidden) {
-        if (input.value.trim().length >= 2) runSearch(input.value, body);
+        if (input.value.trim().length >= 1) runSearch(input.value, body);
         else renderIdleState(body);
       }
     });
@@ -384,6 +465,36 @@
     if (!overlay) return;
     overlay.hidden = true;
     document.body.style.overflow = "";
+  }
+
+  function startVoiceSearch(input, clearBtn, body) {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) {
+      showToast("Voice search is not supported in this browser");
+      input?.focus();
+      return;
+    }
+    try {
+      const rec = new SR();
+      rec.lang = "en-US";
+      rec.interimResults = false;
+      rec.maxAlternatives = 1;
+      showToast("Listening… Speak movie or drama title");
+      rec.onresult = ev => {
+        const transcript = String(ev?.results?.[0]?.[0]?.transcript || "").trim();
+        if (!transcript) return;
+        input.value = transcript;
+        clearBtn.hidden = false;
+        saveRecent(transcript, activeType);
+        runSearch(transcript, body);
+      };
+      rec.onerror = () => {
+        showToast("Could not hear voice input. Try typing.");
+      };
+      rec.start();
+    } catch {
+      showToast("Microphone access unavailable");
+    }
   }
 
   function bindTriggers() {
@@ -412,6 +523,10 @@
 
     $("#cvSearchBack")?.addEventListener("click", closeSearchOverlay);
 
+    $("#cvSearchMicBtn")?.addEventListener("click", () => {
+      startVoiceSearch(input, clearBtn, body);
+    });
+
     clearBtn?.addEventListener("click", () => {
       input.value = "";
       clearBtn.hidden = true;
@@ -431,7 +546,7 @@
       clearBtn.hidden = !input.value;
       clearTimeout(searchTimer);
       const q = input.value.trim();
-      if (q.length < 2) {
+      if (!q) {
         renderIdleState(body);
         return;
       }
@@ -441,13 +556,19 @@
     });
 
     overlay.addEventListener("click", e => {
-      const removeBtn = e.target.closest("[data-remove-history]");
-      if (removeBtn) {
-        e.stopPropagation();
-        removeRecent(removeBtn.dataset.removeHistory || "");
-        renderIdleState(body);
+      const rankTab = e.target.closest("[data-rank-tab]");
+      if (rankTab) {
+        activeRankTab = rankTab.dataset.rankTab || "movie";
+        overlay.querySelectorAll("[data-rank-tab]").forEach(t => {
+          const active = t === rankTab;
+          t.classList.toggle("active", active);
+          t.setAttribute("aria-selected", String(active));
+        });
+        const panel = $("#cvRankPanel");
+        if (panel) panel.innerHTML = renderRankingCards();
         return;
       }
+
       const tab = e.target.closest("[data-search-type]");
       if (tab) {
         activeType = tab.dataset.searchType || "0";
@@ -459,6 +580,7 @@
         runSearch(input.value, body);
         return;
       }
+
       const pick = e.target.closest("[data-pick-query]");
       if (pick) {
         const q = pick.dataset.pickQuery || "";
@@ -468,13 +590,25 @@
         runSearch(q, body);
         return;
       }
+
       if (e.target.closest("#cvRecentClearBtn")) {
         clearRecent();
         renderIdleState(body);
         return;
       }
+
       if (e.target.closest(".cv-search-result-row") || e.target.closest("[data-save-search]")) {
         if (input.value.trim()) saveRecent(input.value.trim(), activeType);
+      }
+    });
+
+    window.addEventListener("cv:family-safe-change", () => {
+      hotCache = null;
+      if (!overlay.hidden) {
+        fetchHot(true).then(() => {
+          if (input.value.trim()) runSearch(input.value, body);
+          else renderIdleState(body);
+        });
       }
     });
 
@@ -489,7 +623,8 @@
     getHistory: loadHistory,
     saveHistory: saveRecent,
     removeHistory: removeRecent,
-    clearHistory: clearRecent
+    clearHistory: clearRecent,
+    isFamilySafe
   };
   bindTriggers();
 })();

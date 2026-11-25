@@ -13,7 +13,7 @@ export async function onRequest({ request, env }) {
   const token = String(url.searchParams.get("t") || "").trim();
   const targetUrl = resolveSafeMlbdToken(token);
   if (!targetUrl) {
-    return new Response("Invalid or expired MovieLinkBD media token", {
+    return new Response("Invalid or expired MovieStreamBD media token", {
       status: 400,
       headers: { "content-type": "text/plain; charset=utf-8" }
     });
@@ -71,6 +71,6 @@ export async function onRequest({ request, env }) {
       headers
     });
   } catch (err) {
-    return new Response(err?.message || "MovieLinkBD stream proxy failed", { status: 502 });
+    return new Response(err?.message || "MovieStreamBD stream proxy failed", { status: 502 });
   }
 }

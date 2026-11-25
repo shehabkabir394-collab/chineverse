@@ -1,10 +1,11 @@
 import { MOVIEBOX_UA, handleMovieBoxRoute, signMediaToken, verifyMediaToken } from "./moviebox-api.js";
 
 export const MLBD_MIRRORS = [
-  { id: "primary", name: "Primary", baseUrl: "https://fvuyyu.movielinkbd.at", priority: 1 },
-  { id: "mirror2", name: "Mirror 2", baseUrl: "https://h5esed.movielinkbd.at", priority: 2 },
-  { id: "mirror3", name: "Mirror 3", baseUrl: "https://movielinkbd.com", priority: 3 },
-  { id: "backup", name: "Backup", baseUrl: "https://cmyyhb.movielinkbd.at", priority: 4 }
+  { id: "primary", name: "Primary", baseUrl: "https://ep2zyu.movielinkbd.at", priority: 1 },
+  { id: "mirror2", name: "Mirror 2", baseUrl: "https://fvuyyu.movielinkbd.at", priority: 2 },
+  { id: "mirror3", name: "Mirror 3", baseUrl: "https://h5esed.movielinkbd.at", priority: 3 },
+  { id: "mirror4", name: "Mirror 4", baseUrl: "https://movielinkbd.com", priority: 4 },
+  { id: "backup", name: "Backup", baseUrl: "https://cmyyhb.movielinkbd.at", priority: 5 }
 ];
 
 const DEFAULT_FALLBACK_CATEGORIES = [
@@ -41,7 +42,7 @@ const mlbdInFlight = new Map();
 const mlbdItemRegistry = new Map();
 const posterRegistry = new Map();
 const posterInFlight = new Map();
-let activeResolvedOrigin = "https://fvuyyu.movielinkbd.at";
+let activeResolvedOrigin = "https://ep2zyu.movielinkbd.at";
 let mirrorsBlockedUntil = 0;
 
 function normalizePosterKey(title = "") {
@@ -403,7 +404,7 @@ export async function mlbdFetchPage(upstreamPath = "/", options = {}) {
   }
 
   if (!options.bypassCache && Date.now() < mirrorsBlockedUntil) {
-    throw new Error("MovieLinkBD mirrors temporarily blocked");
+    throw new Error("MovieStreamBD mirrors temporarily blocked");
   }
 
   if (mlbdInFlight.has(cacheKey)) {
@@ -494,7 +495,7 @@ export async function mlbdFetchPage(upstreamPath = "/", options = {}) {
       }
     }
     mirrorsBlockedUntil = Date.now() + 120000;
-    throw lastErr || new Error("All MovieLinkBD mirrors are currently unreachable");
+    throw lastErr || new Error("All MovieStreamBD mirrors are currently unreachable");
   })();
 
   mlbdInFlight.set(cacheKey, job);
@@ -1008,7 +1009,12 @@ async function fetchMlbdComPage(pagePath = "/") {
 function buildMlbdComItem({ title, rawPoster = "", rating = "", year = "", typeText = "", href = "", languageHint = "" }) {
   const cleanTitle = stripTags(title).replace(/<small>[\s\S]*?<\/small>/gi, "").trim();
   if (!cleanTitle) return null;
-  const yr = String(year || cleanTitle.match(/\((19\d\d|20\d\d)\)/)?.[1] || "");
+  const yr = String(
+    year ||
+    cleanTitle.match(/[\(\[](19\d\d|20\d\d)[\)\]]/)?.[1] ||
+    String(href || "").match(/-(19\d\d|20\d\d)(?:\/|$)/)?.[1] ||
+    ""
+  );
   const isSeries = /^\/(?:series|drama|anime)\//i.test(href) ||
     /series|drama|season|s\d{1,2}|ep\s*\d+/i.test(`${typeText} ${cleanTitle}`);
   const isAnime = /^\/anime\//i.test(href) || /anime/i.test(`${typeText} ${cleanTitle}`);
@@ -1286,34 +1292,38 @@ async function lookupPosterFromYouTube(searchTitle, languageHint = "") {
 
 async function resolvePosterForSingleQuery(searchTitle, item) {
   const year = String(item?.year || "");
-  // 1. MovieBox title-verified match (also attaches playback subjectId!)
-  try {
-    const res = await handleMovieBoxRoute("search", new URLSearchParams({ q: searchTitle, page: "1" }));
-    const candidates = Array.isArray(res?.items) ? res.items : [];
-    const matched = candidates
-      .map(c => ({ c, score: titleSimilarityScore(searchTitle, c?.title || "") + (year && c?.year === year ? 0.2 : 0) }))
-      .filter(x => x.c?.poster && x.score >= 0.55)
-      .sort((a, b) => b.score - a.score)[0]?.c;
-    if (matched?.poster) {
-      return {
-        poster: matched.poster,
-        rating: matched.rating || "",
-        mbSubjectId: matched.subjectId || "",
-        mbDetailPath: matched.detailPath || ""
-      };
-    }
-  } catch {}
+  // 1. Run MovieBox search + IMDb Suggest + TVMaze + iTunes concurrently
+  const mbSearchTask = (async () => {
+    try {
+      const res = await handleMovieBoxRoute("search", new URLSearchParams({ q: searchTitle, page: "1" }));
+      const candidates = Array.isArray(res?.items) ? res.items : [];
+      const matched = candidates
+        .map(c => ({ c, score: titleSimilarityScore(searchTitle, c?.title || "") + (year && c?.year === year ? 0.2 : 0) }))
+        .filter(x => x.c?.poster && x.score >= 0.55)
+        .sort((a, b) => b.score - a.score)[0]?.c;
+      if (matched?.poster) {
+        return {
+          poster: matched.poster,
+          rating: matched.rating || "",
+          mbSubjectId: matched.subjectId || "",
+          mbDetailPath: matched.detailPath || ""
+        };
+      }
+    } catch {}
+    return null;
+  })();
 
-  // 2. IMDb Suggest + TVMaze + iTunes in parallel
-  const [imdbHit, tvHit, itunesHit] = await Promise.all([
+  const [mbHit, imdbHit, tvHit, itunesHit] = await Promise.all([
+    mbSearchTask,
     lookupPosterFromImdb(searchTitle, year),
     item?.isSeries ? lookupPosterFromTvMaze(searchTitle) : Promise.resolve(null),
     lookupPosterFromItunes(searchTitle)
   ]);
-  const metaHit = imdbHit || tvHit || itunesHit;
-  if (metaHit?.poster) return metaHit;
 
-  // 3. Wikipedia & YouTube in parallel for regional Bangla/South-Indian titles
+  const primaryHit = mbHit || imdbHit || tvHit || itunesHit;
+  if (primaryHit?.poster) return primaryHit;
+
+  // 2. Wikipedia & YouTube in parallel for regional Bangla/South-Indian/Turkish titles
   const [wikiHit, ytHit] = await Promise.all([
     lookupPosterFromWiki(searchTitle),
     lookupPosterFromYouTube(searchTitle, item?.language || "")
@@ -1332,13 +1342,34 @@ async function resolvePosterForItem(item) {
 
   const job = (async () => {
     try {
+      const queries = [];
+      const addQ = (q) => {
+        const clean = String(q || "").trim();
+        if (clean.length >= 2 && !queries.includes(clean)) queries.push(clean);
+      };
+
+      const rawTitle = String(item?.title || "");
+      const yrSplit = rawTitle.match(/^(.+?)\s*\((?:19|20)\d{2}[^)]*\)\s+(.+)$/);
+      if (yrSplit) {
+        const left = cleanMlbdSearchTitle(yrSplit[1]);
+        const right = cleanMlbdSearchTitle(yrSplit[2]);
+        if (left && right && right.length >= 3) {
+          addQ(left);
+          addQ(right);
+        }
+      }
+
       const altParts = searchTitle
         .split(/\s*[\/|]\s*/)
         .map(s => s.trim())
         .filter(s => s.length >= 2);
-      const queries = altParts.length > 1 ? altParts.slice(0, 2) : [searchTitle];
+      for (const p of altParts.slice(0, 2)) addQ(p);
+      addQ(searchTitle);
 
-      for (const q of queries) {
+      const strippedSaga = searchTitle.replace(/\b(?:Complete\s+)?Saga\b/gi, "").replace(/\s+/g, " ").trim();
+      if (strippedSaga && strippedSaga !== searchTitle) addQ(strippedSaga);
+
+      for (const q of queries.slice(0, 3)) {
         const hit = await resolvePosterForSingleQuery(q, item);
         if (hit?.poster) {
           return setCached(cacheKey, hit, 21600000);
@@ -1356,7 +1387,7 @@ async function resolvePosterForItem(item) {
   return await job;
 }
 
-async function enrichMlbdItemsWithPosters(items = [], maxToEnrich = 24, concurrency = 4) {
+async function enrichMlbdItemsWithPosters(items = [], maxToEnrich = 24, concurrency = 6) {
   const list = Array.isArray(items) ? items : [];
   // Pass 1: instant in-memory poster registry match
   for (const item of list) {
@@ -1371,11 +1402,11 @@ async function enrichMlbdItemsWithPosters(items = [], maxToEnrich = 24, concurre
     }
   }
 
-  // Pass 2: bounded async enrichment so shared cPanel/Cloudflare workers stay under socket & subrequest limits
+  // Pass 2: bounded async enrichment across visible cards
   const needPoster = list.filter(it => it && !it.poster && (it.searchTitle || it.title)).slice(0, maxToEnrich);
   if (!needPoster.length) return list;
 
-  const step = Math.max(1, Math.min(6, Number(concurrency) || 4));
+  const step = Math.max(1, Math.min(10, Number(concurrency) || 6));
   for (let i = 0; i < needPoster.length; i += step) {
     const batch = needPoster.slice(i, i + step);
     await Promise.allSettled(
@@ -1394,78 +1425,186 @@ async function enrichMlbdItemsWithPosters(items = [], maxToEnrich = 24, concurre
   return list;
 }
 
+const DEFAULT_MLBD_COM_CONTENT_PATHS = [
+  "/", "/movies", "/web-series", "/hindi-movies", "/south-indian-movies",
+  "/action-movies", "/korean-drama", "/animation-movies",
+  "/browse/bangla", "/browse/bangla-dubbed", "/browse/hindi-dubbed", "/browse/dual-audio",
+  "/browse/hindi", "/browse/english", "/browse/korean", "/browse/chinese",
+  "/browse/japanese", "/browse/tamil", "/browse/telugu", "/browse/malayalam",
+  "/browse/punjabi", "/browse/turkish", "/browse/spanish", "/browse/french",
+  "/browse/indonesian", "/browse/kannada", "/browse/marathi", "/browse/others",
+  "/browse/genre-action", "/browse/genre-adventure", "/browse/genre-animation",
+  "/browse/genre-comedy", "/browse/genre-crime", "/browse/genre-drama",
+  "/browse/genre-family", "/browse/genre-fantasy", "/browse/genre-historical",
+  "/browse/genre-horror", "/browse/genre-mystery", "/browse/genre-romance",
+  "/browse/genre-sci-fi", "/browse/genre-thriller"
+];
+
+async function getMlbdComSitemapPaths() {
+  const cached = getCached("mlbdcom:sitemap");
+  if (cached) return cached;
+  try {
+    const res = await fetch("https://movielinkbd.com/sitemap.xml", {
+      headers: { "User-Agent": MOVIEBOX_UA, Accept: "application/xml,text/xml,*/*" },
+      signal: AbortSignal.timeout(8000)
+    });
+    if (res.ok) {
+      const xml = await res.text();
+      const paths = [...new Set(
+        [...xml.matchAll(/<loc>https:\/\/movielinkbd\.com(\/[^<]*)<\/loc>/gi)]
+          .map(m => (m[1] || "/").trim())
+          .filter(p => /^\/(?:$|movies|web-series|hindi-movies|south-indian-movies|action-movies|korean-drama|animation-movies|browse(?:\/|$))/i.test(p))
+      )];
+      if (paths.length >= 10) {
+        return setCached("mlbdcom:sitemap", paths, 3600000);
+      }
+    }
+  } catch {}
+  return setCached("mlbdcom:sitemap", DEFAULT_MLBD_COM_CONTENT_PATHS, 600000);
+}
+
+let mlbdComFullIndexPromise = null;
+async function getMlbdComFullIndex() {
+  const cached = getCached("mlbdcom:full-index");
+  if (cached) return cached;
+  if (mlbdComFullIndexPromise) return await mlbdComFullIndexPromise;
+
+  mlbdComFullIndexPromise = (async () => {
+    const paths = await getMlbdComSitemapPaths();
+    const all = [];
+    const seen = new Set();
+    const batchSize = 8;
+    for (let i = 0; i < paths.length; i += batchSize) {
+      const batch = paths.slice(i, i + batchSize);
+      const settled = await Promise.allSettled(
+        batch.map(async tp => ({ tp, html: await fetchMlbdComPage(tp) }))
+      );
+      for (const r of settled) {
+        if (r.status !== "fulfilled") continue;
+        const cards = extractMlbdComCards(r.value.html, r.value.tp);
+        for (const c of cards) {
+          const k = c.title.toLowerCase();
+          if (seen.has(k)) continue;
+          seen.add(k);
+          all.push(c);
+        }
+      }
+    }
+    return setCached("mlbdcom:full-index", all, 600000);
+  })().finally(() => {
+    mlbdComFullIndexPromise = null;
+  });
+
+  return await mlbdComFullIndexPromise;
+}
+
 function mapCategoryToMlbdComUrls(rawPath = "/") {
   const p = String(rawPath || "/").toLowerCase().replace(/\/+$/, "") || "/";
   if (p === "/" || p === "/new" || p === "/popular" || p.startsWith("/mostwatch") || p === "/top10" || p === "/recently-updated") {
     return ["/", "/movies", "/web-series"];
   }
-  if (p === "/all") {
-    return ["/", "/movies", "/web-series", "/hindi-movies", "/south-indian-movies", "/korean-drama", "/animation-movies", "/browse/bangla"];
+  if (p === "/all" || p === "/collections") {
+    return ["/", "/movies", "/web-series", "/hindi-movies", "/south-indian-movies", "/korean-drama", "/animation-movies", "/action-movies", "/browse/bangla", "/browse/hindi-dubbed", "/browse/english", "/browse/dual-audio"];
   }
   if (p === "/type/movies") return ["/movies"];
-  if (p === "/type/series") return ["/web-series"];
-  if (p === "/southindian") return ["/south-indian-movies"];
-  if (p === "/anime") return ["/animation-movies"];
+  if (p === "/type/series" || p === "/drama" || p === "/ongoing") return ["/web-series", "/korean-drama", "/browse/genre-drama"];
+  if (p === "/southindian" || p.includes("south-indian")) return ["/south-indian-movies", "/browse/tamil", "/browse/telugu", "/browse/malayalam"];
+  if (p === "/anime") return ["/animation-movies", "/browse/genre-animation", "/browse/japanese"];
   if (p === "/bollywood" || p === "/indian-series" || p === "/language/hindi") {
     return ["/hindi-movies", "/browse/hindi"];
   }
   if (p === "/language/hindi-dubbed" || p === "/language/hindi-dubbed-series") {
     return ["/browse/hindi-dubbed", "/hindi-movies"];
   }
-  if (p === "/language/korean") return ["/korean-drama", "/browse/korean"];
-  if (p === "/language/bengali" || p === "/language/bangla" || p === "/bengali-series") return ["/browse/bangla"];
-  if (p === "/language/bangla-dubbed") return ["/browse/bangla-dubbed"];
+  if (p === "/language/korean" || p.includes("korean-drama")) return ["/korean-drama", "/browse/korean"];
+  if (p === "/language/bengali" || p === "/language/bangla" || p === "/bengali-series" || p.includes("bangla-web-series")) return ["/browse/bangla", "/browse/bangla-dubbed"];
+  if (p === "/language/bangla-dubbed" || p.includes("bangla-dubbed")) return ["/browse/bangla-dubbed", "/browse/bangla"];
   if (p === "/language/japanese-drama" || p === "/language/japanese") return ["/browse/japanese", "/animation-movies"];
+  if (p === "/language/english") return ["/browse/english", "/movies"];
   if (p === "/language/urdu") return ["/browse/hindi", "/browse/others"];
+  if (p === "/genre/horror" || p.includes("horror")) return ["/browse/genre-horror"];
+  if (p === "/genre/thriller" || p.includes("thriller")) return ["/browse/genre-thriller"];
   if (p.startsWith("/language/")) {
     const slug = p.slice("/language/".length);
     return [`/browse/${slug}`];
   }
   if (p === "/genre/action") return ["/action-movies", "/browse/genre-action"];
-  if (p === "/genre/animation") return ["/animation-movies", "/browse/genre-animation"];
+  if (p === "/genre/animation" || p.includes("animation")) return ["/animation-movies", "/browse/genre-animation"];
   if (p.startsWith("/genre/")) {
-    const slug = p.slice("/genre/".length);
+    const slug = p.slice("/genre/".length).replace(/^sci-fi$/, "sci-fi");
     return [`/browse/genre-${slug}`];
   }
   return ["/", "/movies", "/web-series"];
 }
 
+function sortMlbdNewestFirst(items = []) {
+  const arr = Array.isArray(items) ? items : [];
+  const now = Date.now();
+  const futureCutoff = now + 36 * 3600 * 1000;
+  return arr
+    .map((item, idx) => {
+      const yr = Number(item?.year || String(item?.title || "").match(/[\(\[](19\d\d|20\d\d)[\)\]]/)?.[1] || 0);
+      const relRaw = item?.releaseDate || item?.uploadedAtMs || item?.uploadTime || "";
+      const relParsed = typeof relRaw === "number" ? relRaw : Date.parse(String(relRaw || ""));
+      const ts = Number.isFinite(relParsed) && relParsed > 0 ? relParsed : (yr >= 1900 ? Date.UTC(yr, 0, 1) : 0);
+      const isFutureUnreleased = (item?.hasResource === false || item?.isUpcoming === true) && ts > futureCutoff;
+      return { item, idx, yr, ts, isFutureUnreleased };
+    })
+    .sort((a, b) => {
+      if (a.isFutureUnreleased !== b.isFutureUnreleased) return a.isFutureUnreleased ? 1 : -1;
+      if (b.ts !== a.ts) return b.ts - a.ts;
+      if (b.yr !== a.yr) return b.yr - a.yr;
+      return a.idx - b.idx;
+    })
+    .map(x => x.item);
+}
+
 async function getMlbdComCatalog({ path = "/", q = "", page = 1 } = {}) {
   const pageNum = Math.max(1, Number(page) || 1);
   const cleanQ = String(q || "").trim();
-  const targetPages = cleanQ
-    ? ["/", "/movies", "/web-series", "/hindi-movies", "/south-indian-movies", "/korean-drama", "/animation-movies", "/action-movies", "/browse/bangla", "/browse/hindi-dubbed", "/browse/dual-audio"]
-    : mapCategoryToMlbdComUrls(path);
-
-  const settled = await Promise.allSettled(
-    targetPages.map(async tp => ({ tp, html: await fetchMlbdComPage(tp) }))
-  );
-
   let all = [];
-  const seen = new Set();
-  for (const r of settled) {
-    if (r.status !== "fulfilled") continue;
-    const cards = extractMlbdComCards(r.value.html, r.value.tp);
-    for (const c of cards) {
-      const k = c.title.toLowerCase();
-      if (seen.has(k)) continue;
-      seen.add(k);
-      all.push(c);
-    }
-  }
 
   if (cleanQ) {
-    const tokens = cleanQ.toLowerCase().split(/\s+/).filter(Boolean);
-    all = all.filter(it => {
-      const hay = `${it.title} ${it.searchTitle || ""} ${it.language || ""}`.toLowerCase();
-      return tokens.every(t => hay.includes(t));
-    });
+    const fullIndex = await getMlbdComFullIndex();
+    const lowerQ = cleanQ.toLowerCase();
+    const tokens = lowerQ.split(/\s+/).filter(Boolean);
+    const scored = [];
+    for (const it of fullIndex) {
+      const titleLower = it.title.toLowerCase();
+      const hay = `${titleLower} ${it.searchTitle || ""} ${it.language || ""} ${it.typeBadge || ""}`.toLowerCase();
+      let sc = 0;
+      if (titleLower === lowerQ) sc = 100;
+      else if (titleLower.startsWith(lowerQ)) sc = 85;
+      else if (titleLower.includes(lowerQ)) sc = 70;
+      else if (tokens.every(t => hay.includes(t))) sc = 55;
+      else if (tokens.some(t => t.length >= 3 && hay.includes(t))) sc = 30;
+      if (sc > 0) scored.push({ it, sc });
+    }
+    scored.sort((a, b) => b.sc - a.sc);
+    all = scored.map(x => x.it);
+  } else {
+    const targetPages = mapCategoryToMlbdComUrls(path);
+    const settled = await Promise.allSettled(
+      targetPages.map(async tp => ({ tp, html: await fetchMlbdComPage(tp) }))
+    );
+    const seen = new Set();
+    for (const r of settled) {
+      if (r.status !== "fulfilled") continue;
+      const cards = extractMlbdComCards(r.value.html, r.value.tp);
+      for (const c of cards) {
+        const k = c.title.toLowerCase();
+        if (seen.has(k)) continue;
+        seen.add(k);
+        all.push(c);
+      }
+    }
+    all = sortMlbdNewestFirst(all);
   }
 
   const perPage = 24;
   const startIdx = (pageNum - 1) * perPage;
   const slice = all.slice(startIdx, startIdx + perPage);
-  await enrichMlbdItemsWithPosters(slice, 12, 4);
+  await enrichMlbdItemsWithPosters(slice, 24, 8);
   const maxPage = Math.max(1, Math.ceil(all.length / perPage));
 
   return {
@@ -1473,7 +1612,7 @@ async function getMlbdComCatalog({ path = "/", q = "", page = 1 } = {}) {
     source: "movielinkbd",
     activeMirror: "https://movielinkbd.com",
     path,
-    upstreamPath: targetPages[0] || "/",
+    upstreamPath: cleanQ ? "/search" : mapCategoryToMlbdComUrls(path)[0] || "/",
     heading: cleanQ ? `Search: ${cleanQ}` : "MovieStreamBD Library",
     items: slice,
     page: pageNum,
@@ -1494,7 +1633,9 @@ async function getMlbdComHomeFeed() {
     { id: "mlbd-anime", title: "🍥 MovieStreamBD Anime & Animation", path: "/animation-movies", categoryPath: "/anime" },
     { id: "mlbd-action", title: "💥 MovieStreamBD Action Hits", path: "/action-movies", categoryPath: "/genre/action" },
     { id: "mlbd-bangla", title: "🇧🇩 MovieStreamBD Bangla & Dubbed", path: "/browse/bangla", categoryPath: "/language/bangla" },
-    { id: "mlbd-hindi-dubbed", title: "🎙️ MovieStreamBD Hindi Dubbed Archive", path: "/browse/hindi-dubbed", categoryPath: "/language/hindi-dubbed" }
+    { id: "mlbd-hindi-dubbed", title: "🎙️ MovieStreamBD Hindi Dubbed Archive", path: "/browse/hindi-dubbed", categoryPath: "/language/hindi-dubbed" },
+    { id: "mlbd-turkish", title: "🇹🇷 MovieStreamBD Turkish Drama", path: "/browse/turkish", categoryPath: "/language/turkish" },
+    { id: "mlbd-thriller", title: "🔪 MovieStreamBD Thriller & Horror", path: "/browse/genre-thriller", categoryPath: "/genre/thriller" }
   ];
 
   // Fetch postered pages first so posterRegistry is warm for /browse/* sections
@@ -1505,14 +1646,21 @@ async function getMlbdComHomeFeed() {
   const parsedSections = [];
   for (const r of htmlResults) {
     if (r.status !== "fulfilled") continue;
-    const cards = extractMlbdComCards(r.value.html, r.value.spec.path).slice(0, 24);
+    const cards = sortMlbdNewestFirst(extractMlbdComCards(r.value.html, r.value.spec.path)).slice(0, 24);
     if (cards.length) {
       parsedSections.push({ ...r.value.spec, items: cards });
     }
   }
 
-  // Enrich missing posters with a single bounded pool across sections (avoids socket/subrequest exhaustion)
-  await enrichMlbdItemsWithPosters(parsedSections.flatMap(sec => sec.items), 16, 4);
+  // Interleave items round-robin across all sections so every category (Turkish Drama, Thriller, Archive, Bangla) gets posters
+  const roundRobinItems = [];
+  const maxLen = Math.max(0, ...parsedSections.map(s => s.items.length));
+  for (let idx = 0; idx < maxLen; idx++) {
+    for (const sec of parsedSections) {
+      if (sec.items[idx]) roundRobinItems.push(sec.items[idx]);
+    }
+  }
+  await enrichMlbdItemsWithPosters(roundRobinItems, 120, 8);
 
   const sections = parsedSections.map(s => ({
     id: s.id,
@@ -1703,6 +1851,87 @@ export async function getMlbdSuggest(rawQuery) {
   };
 }
 
+async function lookupExternalTitleMetadata(searchTitle, year = "") {
+  const q = String(searchTitle || "").trim();
+  if (!q) return {};
+  const firstMatch = q.toLowerCase().match(/[a-z0-9]/);
+  const imdbTask = firstMatch
+    ? fetch(`https://v3.sg.media-imdb.com/suggestion/${encodeURIComponent(firstMatch[0])}/${encodeURIComponent(q.toLowerCase())}.json`, {
+        headers: { "User-Agent": MOVIEBOX_UA },
+        signal: AbortSignal.timeout(4500)
+      })
+        .then(r => (r.ok ? r.json() : null))
+        .then(data => {
+          const list = Array.isArray(data?.d) ? data.d : [];
+          const best = list
+            .map(entry => {
+              const sim = titleSimilarityScore(q, entry?.l || "");
+              const yrMatch = year && entry?.y && String(entry.y) === String(year);
+              return { entry, sim, score: sim * 10 + (yrMatch ? 4 : 0) };
+            })
+            .filter(x => x.sim >= 0.45)
+            .sort((a, b) => b.score - a.score)[0]?.entry;
+          if (!best) return null;
+          const img = best.i?.imageUrl
+            ? mlbdProxyImageUrl(String(best.i.imageUrl).replace(/\._V1_[^.]*\.jpg$/i, "._V1_QL80_UX420_.jpg"))
+            : "";
+          const stars = String(best.s || "")
+            .split(",")
+            .map(s => s.trim())
+            .filter(Boolean)
+            .slice(0, 6)
+            .map((name, idx) => ({ staffId: `imdb-${idx}`, name, role: "Cast" }));
+          return {
+            title: best.l || "",
+            year: best.y ? String(best.y) : "",
+            poster: img,
+            staff: stars,
+            qid: best.qid || ""
+          };
+        })
+        .catch(() => null)
+    : Promise.resolve(null);
+
+  const wikiTask = fetch(
+    `https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(`${q} ${year || ""} film`.trim())}&gsrlimit=3&prop=extracts|pageimages&exintro=1&explaintext=1&pithumbsize=420&format=json`,
+    { headers: { "User-Agent": "MovieStreamBD/1.0" }, signal: AbortSignal.timeout(3500) }
+  )
+    .then(r => (r.ok ? r.json() : null))
+    .then(data => {
+      const pages = Object.values(data?.query?.pages || {});
+      const best = pages.find(p => titleSimilarityScore(q, p?.title || "") >= 0.45) || pages[0];
+      if (!best) return null;
+      return {
+        description: String(best.extract || "").trim().slice(0, 600),
+        poster: best.thumbnail?.source ? mlbdProxyImageUrl(best.thumbnail.source) : ""
+      };
+    })
+    .catch(() => null);
+
+  const ytTask = fetch(
+    `https://www.youtube.com/results?search_query=${encodeURIComponent(`${q} ${year || ""} official trailer`.trim())}`,
+    { headers: { "User-Agent": MOVIEBOX_UA, "Accept-Language": "en-US,en;q=0.9" }, signal: AbortSignal.timeout(3800) }
+  )
+    .then(r => (r.ok ? r.text() : ""))
+    .then(html => {
+      const m = [...html.matchAll(/"videoRenderer":\{"videoId":"([a-zA-Z0-9_-]{11})"[\s\S]{0,600}?"text":"([^"]+)"/g)]
+        .slice(0, 6)
+        .find(x => titleSimilarityScore(q, x[2]) >= 0.4);
+      const vid = m?.[1] || html.match(/"videoId":"([a-zA-Z0-9_-]{11})"/)?.[1] || "";
+      return vid ? { trailerYoutubeId: vid, poster: mlbdProxyImageUrl(`https://i.ytimg.com/vi/${vid}/hqdefault.jpg`) } : null;
+    })
+    .catch(() => null);
+
+  const [imdb, wiki, yt] = await Promise.all([imdbTask, wikiTask, ytTask]);
+  return {
+    poster: imdb?.poster || wiki?.poster || yt?.poster || "",
+    year: imdb?.year || year || "",
+    description: wiki?.description || "",
+    staff: imdb?.staff || [],
+    trailerYoutubeId: yt?.trailerYoutubeId || ""
+  };
+}
+
 async function resolveMlbdTitleViaMovieBox(rawPath, hintTitle = "", extraQuery = {}) {
   const cleanPath = String(rawPath || "").trim();
   const regItem = mlbdItemRegistry.get(cleanPath) || mlbdItemRegistry.get(normalizeUpstreamPath(cleanPath));
@@ -1713,24 +1942,36 @@ async function resolveMlbdTitleViaMovieBox(rawPath, hintTitle = "", extraQuery =
     .trim();
   const searchName = cleanMlbdSearchTitle(hintTitle || regItem?.searchTitle || regItem?.title || rawSlugTitle);
   if (!searchName) {
-    throw new Error("MovieLinkBD title could not be resolved");
+    return { params: null, regItem, searchName: "" };
   }
 
   let targetSubjectId = regItem?.mbSubjectId || "";
   let targetDetailPath = regItem?.mbDetailPath || "";
+  const targetYear = String(regItem?.year || String(hintTitle || "").match(/\((19\d\d|20\d\d)\)/)?.[1] || "");
 
   if (!targetSubjectId) {
-    const searchRes = await handleMovieBoxRoute("search", new URLSearchParams({ q: searchName, page: "1" }));
+    const searchRes = await handleMovieBoxRoute("search", new URLSearchParams({ q: searchName, page: "1" })).catch(() => null);
     const candidates = Array.isArray(searchRes?.items) ? searchRes.items : [];
     const wantSeries = regItem?.isSeries ?? /^\/(?:mlbd\/)?(?:series|drama|anime)\//i.test(cleanPath);
-    const best =
-      candidates.find(c => Boolean(c.isSeries) === Boolean(wantSeries) && c.isHindiDubbed) ||
-      candidates.find(c => Boolean(c.isSeries) === Boolean(wantSeries)) ||
-      candidates[0];
+    const scored = candidates
+      .map(c => {
+        const sim = titleSimilarityScore(searchName, c?.title || "");
+        const typeBonus = Boolean(c?.isSeries) === Boolean(wantSeries) ? 0.12 : 0;
+        const yrBonus = targetYear && String(c?.year || "") === targetYear ? 0.18 : 0;
+        const resBonus = c?.hasResource !== false ? 0.08 : 0;
+        return { c, sim, total: sim + typeBonus + yrBonus + resBonus };
+      })
+      .filter(x => x.sim >= 0.48)
+      .sort((a, b) => b.total - a.total);
+    const best = scored[0]?.c;
     if (best) {
       targetSubjectId = best.subjectId || "";
       targetDetailPath = best.detailPath || "";
     }
+  }
+
+  if (!targetSubjectId && !targetDetailPath) {
+    return { params: null, regItem, searchName };
   }
 
   const params = new URLSearchParams({
@@ -1757,17 +1998,79 @@ export async function getMlbdDetails(rawPath, hintTitle = "", extraOpts = {}) {
   try {
     page = await mlbdFetchPage(cleanPath, { ttlMs: 120000 });
   } catch {
-    const { params, regItem } = await resolveMlbdTitleViaMovieBox(rawPath, hintTitle, extraOpts?.dubLock ? { dubLock: "1" } : {});
-    const mbDetails = await handleMovieBoxRoute("details", params);
-    if (!mbDetails?.detail) {
-      throw new Error("MovieLinkBD mirror unreachable and title not found");
+    const { params, regItem, searchName } = await resolveMlbdTitleViaMovieBox(
+      rawPath,
+      hintTitle,
+      extraOpts?.dubLock ? { dubLock: "1" } : {}
+    );
+    if (params) {
+      const mbDetails = await handleMovieBoxRoute("details", params).catch(() => null);
+      if (mbDetails?.detail && titleSimilarityScore(searchName, mbDetails.detail.title || "") >= 0.48) {
+        const detail = {
+          ...mbDetails.detail,
+          mlbdOriginalPath: rawPath,
+          poster: mbDetails.detail.poster || regItem?.poster || "",
+          source: "movielinkbd-bridge"
+        };
+        return setCached(cacheKey, { ok: true, source: "movielinkbd", detail }, 120000);
+      }
     }
-    const matchedMb = titleSimilarityScore(regItem?.searchTitle || "", mbDetails.detail.title || "") >= 0.45;
+
+    // Build accurate metadata detail for this exact MLBD title (never return an unrelated mock item like Padma Horizon)
+    const fallbackSlugTitle = cleanPath
+      .replace(/^\/(?:mlbd\/)?(?:movie|series|drama|anime)\//i, "")
+      .replace(/[-_]+/g, " ")
+      .trim();
+    const displayTitle = regItem?.title || String(hintTitle || "").trim() || searchName || fallbackSlugTitle || "Title Details";
+    const yearMatch = displayTitle.match(/\((19\d\d|20\d\d)\)/)?.[1] || cleanPath.match(/-(19\d\d|20\d\d)(?:$|\b)/)?.[1] || regItem?.year || "";
+    const meta = await lookupExternalTitleMetadata(searchName || cleanMlbdSearchTitle(displayTitle), yearMatch);
+    const isSeries = regItem?.isSeries ?? /^\/(?:mlbd\/)?(?:series|drama|anime)\//i.test(cleanPath);
+    const poster = regItem?.poster || meta.poster || "";
+    const yearNum = Number(yearMatch || meta.year || 0);
+    const isUpcoming = yearNum >= new Date().getFullYear() || regItem?.hasResource === false;
+    const desc =
+      meta.description ||
+      (isUpcoming
+        ? `${displayTitle} is listed on MovieStreamBD as an upcoming release. Direct streaming sources will appear once full video mirror links become available.`
+        : `${displayTitle} metadata loaded from MovieStreamBD catalog. Use the trailer or check back as direct mirror links refresh.`);
+
     const detail = {
-      ...mbDetails.detail,
-      mlbdOriginalPath: rawPath,
-      poster: (matchedMb ? mbDetails.detail.poster : "") || regItem?.poster || mbDetails.detail.poster || "",
-      source: "movielinkbd-bridge"
+      source: "movielinkbd",
+      id: regItem?.id || cleanPath.split("/").pop() || cleanPath,
+      subjectId: regItem?.id || cleanPath,
+      path: rawPath.startsWith("/") ? rawPath : cleanPath,
+      detailPath: cleanPath,
+      title: displayTitle,
+      year: String(yearMatch || meta.year || ""),
+      rating: String(regItem?.rating || ""),
+      poster,
+      description: desc,
+      storyline: desc,
+      language: regItem?.language || "English",
+      type: regItem?.type || (isSeries ? "series" : "movie"),
+      typeBadge: regItem?.typeBadge || (isSeries ? "Series" : "Movie"),
+      isMovie: !isSeries,
+      isSeries,
+      isUpcoming,
+      hasResource: false,
+      trailerYoutubeId: meta.trailerYoutubeId || "",
+      staff: meta.staff || [],
+      totalEpisodes: 1,
+      episodes: [
+        {
+          label: isUpcoming ? `${displayTitle} (Upcoming)` : "Full Video",
+          number: 1,
+          episodeNumber: 1,
+          seasonNumber: 0,
+          se: 0,
+          ep: 1,
+          sources: [],
+          subtitles: [],
+          audioTracks: [],
+          downloadButtons: []
+        }
+      ],
+      downloadButtons: []
     };
     return setCached(cacheKey, { ok: true, source: "movielinkbd", detail }, 120000);
   }
@@ -1964,13 +2267,19 @@ export async function getMlbdStream({ path = "", se = 0, ep = 1, title = "", dub
       subtitles,
       audioTracks,
       hasResource: sources.length > 0,
-      isTrailer: false
+      isTrailer: false,
+      trailerYoutubeId: detail?.trailerYoutubeId || ""
     },
     sources,
     subtitles,
     audioTracks,
+    trailerYoutubeId: detail?.trailerYoutubeId || "",
     downloadButtons: chosen?.downloadButtons || detail.downloadButtons || [],
-    message: sources.length ? "" : "No playable direct stream found for this episode."
+    message: sources.length
+      ? ""
+      : detail?.isUpcoming
+        ? `Upcoming release (${detail.year || "2026"}) — Official details & trailer available; full stream opens after release.`
+        : "No direct video stream available on this mirror right now."
   };
 }
 

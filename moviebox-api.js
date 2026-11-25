@@ -465,6 +465,12 @@ export function normalizeSubject(raw, extra = {}) {
     /hindi/i.test(language) ||
     dubs.some(d => /hindi|^hi$/i.test(String(d?.lanName || d?.lanCode || "")));
 
+  const isAdult =
+    /\b(?:adult|erotic|18\+|xxx|porn|softcore)\b/i.test(`${genreStr} ${title} ${String(extra.platform || "")}`) ||
+    /^(?:hot|midnight)$/i.test(genreStr.trim()) ||
+    /,\s*hot\b|\bhot\s*,/i.test(genreStr) ||
+    /vivamax/i.test(`${genreStr} ${title} ${String(extra.platform || "")}`);
+
   const item = {
     id: subjectId || detailPath,
     subjectId,
@@ -489,6 +495,7 @@ export function normalizeSubject(raw, extra = {}) {
     isMovie: subjectType === 1 && !isAnime,
     isSeries: subjectType === 2 || subjectType === 7,
     isAnime,
+    isAdult,
     quality: String(s.corner || "").trim() || "1080p",
     language,
     dubs,
@@ -605,29 +612,51 @@ function mapPlatformName(name) {
 }
 
 function parseReleaseTs(item) {
+  const nowLimit = Date.now() + 36 * 3600 * 1000;
+  let best = 0;
+  const uploadCandidates = [
+    item?.uploadedAtMs,
+    item?.uploadTimestamp,
+    item?.updatedAt,
+    item?.createdAt
+  ];
+  for (const raw of uploadCandidates) {
+    if (typeof raw === "number" && Number.isFinite(raw) && raw > 0 && raw <= nowLimit) {
+      best = Math.max(best, raw);
+    } else if (raw) {
+      const t = Date.parse(String(raw).trim());
+      if (Number.isFinite(t) && t > 0 && t <= nowLimit) best = Math.max(best, t);
+    }
+  }
+
   const candidates = [
     item?.releaseDate,
     item?.appointmentDate,
-    item?.uploadedAtMs,
     item?.year && /^\d{4}$/.test(String(item.year)) ? `${item.year}-01-01` : ""
   ];
   for (const raw of candidates) {
-    if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) return raw;
+    if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) {
+      best = Math.max(best, raw);
+      break;
+    }
     const s = String(raw || "").trim();
     if (!s) continue;
     const t = Date.parse(s);
-    if (Number.isFinite(t) && t > 0) return t;
+    if (Number.isFinite(t) && t > 0) {
+      best = Math.max(best, t);
+      break;
+    }
   }
-  return 0;
+  return best;
 }
 
-function sortByReleaseNewest(items) {
-  const now = Date.now();
+export function sortByReleaseNewest(items) {
+  const futureCutoff = Date.now() + 36 * 3600 * 1000;
   return [...(Array.isArray(items) ? items : [])].sort((a, b) => {
     const ta = parseReleaseTs(a);
     const tb = parseReleaseTs(b);
-    const aFuture = ta > now;
-    const bFuture = tb > now;
+    const aFuture = (a?.hasResource === false || a?.isUpcoming === true || ta > futureCutoff) && ta > futureCutoff;
+    const bFuture = (b?.hasResource === false || b?.isUpcoming === true || tb > futureCutoff) && tb > futureCutoff;
     if (aFuture !== bFuture) return aFuture ? 1 : -1;
     if (aFuture && bFuture) return ta - tb;
     if (tb !== ta) return tb - ta;
@@ -1000,6 +1029,7 @@ export async function handleMovieBoxRoute(legacy, query) {
     case "search": {
       const keyword = String(query.get("q") || query.get("keyword") || "").trim();
       const page = Math.max(1, Number(query.get("page") || 1));
+      const safeMode = query.get("safe") === "1";
       const rawTypes = String(query.get("subjectType") || "0")
         .split(",")
         .map(n => Number(n.trim()))
@@ -1008,152 +1038,284 @@ export async function handleMovieBoxRoute(legacy, query) {
       if (!keyword) return { ok: true, items: [], page: 1, totalPages: 1 };
 
       const matchesType = item => {
+        if (!item) return false;
+        if (safeMode && item.isAdult) return false;
         if (!rawTypes.length) return true;
         const st = Number(item.subjectType || 1);
         if (rawTypes.includes(st)) return true;
-        if (rawTypes.includes(6) && (item.isAnime === true || /anime|animation/i.test(`${item.genre} ${item.typeBadge} ${item.title}`))) return true;
+        if (rawTypes.includes(6) && (item.isAnime === true || /\banime\b|animation/i.test(`${item.genre} ${item.typeBadge} ${item.title}`))) return true;
+        if (rawTypes.includes(2) && (item.isSeries || item.type === "series")) return true;
         if (rawTypes.includes(7) && /short/i.test(`${item.typeBadge} ${item.genre}`)) return true;
         return false;
       };
 
-      // 1) Try direct MovieBox subject/search endpoint first
-      try {
-        const j = await mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/subject/search`, {
-          method: "POST",
-          body: JSON.stringify({ keyword, page, perPage: 24, subjectType })
-        });
-        if (j?.code === 0 && Array.isArray(j?.data?.items)) {
-          const items = indexList(j.data.items).filter(matchesType);
-          return {
-            ok: true,
-            items,
-            pager: j.data.pager || {},
-            totalPages: j.data.pager?.hasMore ? page + 1 : page
-          };
-        }
-      } catch {
-        // Fall through to suggestion + enriched catalog index search
-      }
-
-      // 2) Enriched multi-token + suggest + filter search fallback
-      await warmSubjectIndexIfNeeded();
-      const lower = keyword.toLowerCase();
-      const tokens = lower.split(/\s+/).filter(Boolean);
+      const lower = keyword.toLowerCase().replace(/\s+/g, " ").trim();
+      const stopWords = new Set(["movie", "movies", "film", "films", "video", "videos", "full", "hd", "watch", "online", "download", "free", "new", "latest", "best", "top", "show", "shows"]);
+      const rawTokens = lower.split(/\s+/).filter(Boolean);
+      const tokens = rawTokens.filter(t => !stopWords.has(t));
+      const searchTokens = tokens.length ? tokens : rawTokens;
+      const isAdultIntent = /\b(sex|sexual|sexy|porn|porno|pornography|xxx|18\+|adult|erotic|hot|nude|nudity|nsfw|bf|blue\s*film|vivamax|softcore|romance\s*18)\b/i.test(lower);
       const uniq = new Map();
 
-      const scoreItem = item => {
+      const addCandidate = (item, bonus = 0) => {
+        if (!item || (!item.subjectId && !item.path)) return;
+        if (!matchesType(item)) return;
         const titleLower = String(item.title || "").toLowerCase();
-        const hay = `${titleLower} ${item.genre} ${item.country} ${item.language} ${item.typeBadge} ${item.description}`.toLowerCase();
-        if (titleLower === lower) return 100;
-        if (titleLower.startsWith(lower)) return 80;
-        if (titleLower.includes(lower)) return 60;
-        if (tokens.length > 1 && tokens.every(t => hay.includes(t))) return 40;
-        if (hay.includes(lower)) return 25;
-        if (rawTypes.includes(6) && /anime/i.test(lower) && (item.isAnime || /animation|anime/i.test(item.genre))) return 20;
-        return 0;
+        const hay = `${titleLower} ${item.genre} ${item.country} ${item.language} ${item.typeBadge} ${item.platform || ""} ${item.description}`.toLowerCase();
+        let sc = bonus;
+        if (titleLower === lower) sc = Math.max(sc, 160);
+        else if (titleLower.startsWith(lower)) sc = Math.max(sc, 140);
+        else if (titleLower.includes(lower)) sc = Math.max(sc, 120);
+        else if (searchTokens.length && searchTokens.every(t => titleLower.includes(t))) sc = Math.max(sc, 108);
+        else if (searchTokens.length && searchTokens.every(t => hay.includes(t))) sc = Math.max(sc, 92);
+        else if (searchTokens.some(t => t.length >= 3 && titleLower.includes(t))) sc = Math.max(sc, 76);
+        else if (searchTokens.some(t => t.length >= 3 && hay.includes(t))) sc = Math.max(sc, 64);
+        if (item.hasResource !== false) sc += 8;
+        if (isAdultIntent && item.isAdult) sc += 45;
+        if (sc <= 0) return;
+        const key = item.subjectId || item.path;
+        const prev = uniq.get(key);
+        if (!prev || sc > prev._sc) uniq.set(key, { ...item, _sc: sc });
       };
 
-      const collectFromIndex = terms => {
-        for (const item of subjectIndex.values()) {
-          if (!item.subjectId || !matchesType(item)) continue;
-          let sc = scoreItem(item);
-          if (!sc && Array.isArray(terms) && terms.length) {
-            const tLower = item.title.toLowerCase();
-            if (terms.some(w => tLower.includes(w))) sc = 35;
-          }
-          if (sc > 0) {
-            const prev = uniq.get(item.subjectId);
-            if (!prev || sc > prev._sc) uniq.set(item.subjectId, { ...item, _sc: sc });
-          }
+      // Build live intent filter calls based on natural user queries (YouTube-style)
+      const dynamicFilters = [];
+      const searchTerms = new Set([keyword]);
+      if (isAdultIntent && !safeMode) {
+        dynamicFilters.push(
+          { body: { page, perPage: 24, channelId: 1, genre: "Adult", sort: "Latest" }, extra: { isAdult: true } },
+          { body: { page, perPage: 24, channelId: 1, genre: "Erotic", sort: "Latest" }, extra: { isAdult: true } },
+          { body: { page, perPage: 24, channelId: 1, genre: "Hot", sort: "Latest" }, extra: { isAdult: true } },
+          { body: { page, perPage: 20, channelId: 2, genre: "Adult", sort: "Latest" }, extra: { isAdult: true } },
+          { body: { page: 1, perPage: 16, channelId: 1, genre: "18+", sort: "Hottest" }, extra: { isAdult: true } }
+        );
+        searchTerms.add("erotic");
+        searchTerms.add("adult");
+        searchTerms.add("vivamax");
+      }
+      if (/\bsouth\b|south\s*indian|tollywood|kollywood|mollywood|sandalwood/i.test(lower)) {
+        dynamicFilters.push(
+          { body: { page, perPage: 24, channelId: 1, country: "India", sort: "Hottest" }, extra: { _southIntent: true } },
+          { body: { page, perPage: 18, channelId: 1, country: "India", sort: "Latest" }, extra: { _southIntent: true } },
+          { body: { page, perPage: 14, channelId: 2, country: "India", sort: "Hottest" }, extra: { _southIntent: true } }
+        );
+        searchTerms.add("tamil");
+        searchTerms.add("telugu");
+        searchTerms.add("malayalam");
+      }
+      if (/\bhindi\b|dubbed|bollywood/i.test(lower)) {
+        dynamicFilters.push(
+          { body: { page, perPage: 24, channelId: 1, classify: "Hindi dub", sort: "Hottest" }, extra: { _hindiCatalog: true } },
+          { body: { page, perPage: 20, channelId: 2, classify: "Hindi dub", sort: "Hottest" }, extra: { _hindiCatalog: true } }
+        );
+        if (/bollywood/i.test(lower)) {
+          dynamicFilters.push({ body: { page, perPage: 24, channelId: 1, country: "India", sort: "Latest" }, extra: {} });
         }
+      }
+      if (/bengali|bangla|natok|dhallywood|kolkata/i.test(lower)) {
+        dynamicFilters.push(
+          { body: { page, perPage: 24, channelId: 1, country: "Bangladesh", sort: "Latest" }, extra: {} },
+          { body: { page, perPage: 24, channelId: 2, country: "Bangladesh", sort: "Latest" }, extra: {} }
+        );
+      }
+      if (/korean|k-?drama|kdrama/i.test(lower)) {
+        dynamicFilters.push(
+          { body: { page, perPage: 24, channelId: 2, country: "Korea", sort: "Hottest" }, extra: {} },
+          { body: { page, perPage: 18, channelId: 1, country: "Korea", sort: "Hottest" }, extra: {} }
+        );
+      }
+      if (/chinese|c-?drama|cdrama/i.test(lower)) {
+        dynamicFilters.push({ body: { page, perPage: 24, channelId: 2, country: "China", sort: "Hottest" }, extra: {} });
+      }
+      if (/turkish|t-?drama/i.test(lower)) {
+        dynamicFilters.push({ body: { page, perPage: 24, channelId: 2, country: "Turkey", sort: "Hottest" }, extra: {} });
+      }
+      if (/japanese|j-?drama/i.test(lower)) {
+        dynamicFilters.push({ body: { page, perPage: 24, channelId: 2, country: "Japan", sort: "Hottest" }, extra: {} });
+      }
+      if (/pakistani|urdu/i.test(lower)) {
+        dynamicFilters.push({ body: { page, perPage: 24, channelId: 2, country: "Pakistan", sort: "Hottest" }, extra: {} });
+      }
+      if (/hollywood|english|american/i.test(lower)) {
+        dynamicFilters.push({ body: { page, perPage: 24, channelId: 1, country: "United States", sort: "Hottest" }, extra: {} });
+      }
+      if (/anime|cartoon|manga|animation/i.test(lower) || rawTypes.includes(6)) {
+        dynamicFilters.push(
+          { body: { page, perPage: 24, channelId: 2, genre: "Anime", sort: "Hottest" }, extra: { isAnime: true, _animeCatalog: true } },
+          { body: { page, perPage: 20, channelId: 1, genre: "Animation", sort: "Hottest" }, extra: { isAnime: true, _animeCatalog: true } }
+        );
+      }
+      if (/short|reel/i.test(lower) || rawTypes.includes(7)) {
+        dynamicFilters.push({ body: { page, perPage: 24, channelId: 7, sort: "Hottest" }, extra: { subjectType: 7 } });
+      }
+      for (const regLang of ["tamil", "telugu", "malayalam", "punjabi", "kannada", "marathi"]) {
+        if (lower.includes(regLang)) {
+          searchTerms.add(regLang);
+          dynamicFilters.push({ body: { page, perPage: 24, channelId: 1, country: "India", sort: "Hottest" }, extra: {} });
+        }
+      }
+      const genreMap = {
+        action: "Action", adventure: "Adventure", comedy: "Comedy", crime: "Crime",
+        documentary: "Documentary", drama: "Drama", family: "Family", fantasy: "Fantasy",
+        history: "History", horror: "Horror", ghost: "Horror", thriller: "Thriller",
+        romance: "Romance", love: "Romance", "sci-fi": "Sci-Fi", scifi: "Sci-Fi",
+        mystery: "Mystery", war: "War", music: "Music", sport: "Sport"
       };
+      for (const [kw, gName] of Object.entries(genreMap)) {
+        if (lower.includes(kw)) {
+          dynamicFilters.push({ body: { page, perPage: 24, channelId: 1, genre: gName, sort: "Hottest" }, extra: {} });
+          dynamicFilters.push({ body: { page, perPage: 16, channelId: 2, genre: gName, sort: "Hottest" }, extra: {} });
+        }
+      }
+      if (/series|web\s*series|drama|season/i.test(lower) && !dynamicFilters.length) {
+        dynamicFilters.push({ body: { page, perPage: 24, channelId: 2, sort: "Hottest" }, extra: {} });
+      }
+      if (/movie|film/i.test(lower) && !dynamicFilters.length) {
+        dynamicFilters.push({ body: { page, perPage: 24, channelId: 1, sort: "Hottest" }, extra: {} });
+      }
 
-      let suggestTerms = [];
-      try {
-        const sg = await mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/subject/search-suggest`, {
+      const platformMatch = /(netflix|prime\s*video|amazon\s*prime|disney\+?|apple\s*tv|viu|hulu|zee5|vivamax|hoichoi)/i.exec(lower);
+      const tasks = [
+        ...[...searchTerms].slice(0, 4).map(term =>
+          mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/subject/search`, {
+            method: "POST",
+            body: JSON.stringify({ keyword: term, page, perPage: 24, subjectType })
+          }, 45000).then(j => ({ kind: "search", term, items: indexList(j?.data?.items) }))
+        ),
+        mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/subject/search-suggest`, {
           method: "POST",
           body: JSON.stringify({ keyword, perPage: 10 })
-        }, 45000);
-        for (const s of sg?.data?.items || []) {
-          if (s?.subject) {
-            const norm = normalizeSubject(s.subject);
-            if (norm?.subjectId && matchesType(norm)) uniq.set(norm.subjectId, { ...norm, _sc: 90 });
-          } else if (typeof s?.word === "string" && s.word.trim()) {
-            suggestTerms.push(s.word.trim().toLowerCase());
-          }
-        }
-      } catch {}
+        }, 45000).then(sg => ({ kind: "suggest", raw: sg?.data?.items || [] })),
+        ...dynamicFilters.slice(0, 6).map(df =>
+          mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/subject/filter`, {
+            method: "POST",
+            body: JSON.stringify(df.body)
+          }, 120000).then(j => ({ kind: "filter", items: indexList(j?.data?.items, df.extra) }))
+        )
+      ];
 
-      collectFromIndex(suggestTerms);
-
-      // If keyword hints at a genre/country/language, also pull live filtered titles on demand
-      const dynamicFilters = [];
-      if (/hindi/i.test(lower)) dynamicFilters.push({ body: { page: 1, perPage: 24, channelId: 1, classify: "Hindi dub", sort: "Hottest" }, extra: { _hindiCatalog: true } });
-      if (/bengali|bangla/i.test(lower)) {
-        dynamicFilters.push({ body: { page: 1, perPage: 24, channelId: 1, country: "Bangladesh", sort: "Hottest" }, extra: {} });
-        dynamicFilters.push({ body: { page: 1, perPage: 24, channelId: 2, country: "Bangladesh", sort: "Hottest" }, extra: {} });
-      }
-      if (/korean|k-?drama/i.test(lower)) dynamicFilters.push({ body: { page: 1, perPage: 24, channelId: 2, country: "Korea", sort: "Hottest" }, extra: {} });
-      if (/anime/i.test(lower) || rawTypes.includes(6)) {
-        dynamicFilters.push({ body: { page: 1, perPage: 24, channelId: 2, genre: "Anime", sort: "Hottest" }, extra: { isAnime: true, _animeCatalog: true } });
-        dynamicFilters.push({ body: { page: 1, perPage: 24, channelId: 1, genre: "Anime", sort: "Hottest" }, extra: { isAnime: true, _animeCatalog: true } });
-      }
-      if (/short/i.test(lower) || rawTypes.includes(7)) dynamicFilters.push({ body: { page: 1, perPage: 24, channelId: 7, sort: "Hottest" }, extra: { subjectType: 7 } });
-      if (dynamicFilters.length && uniq.size < 12) {
-        await Promise.allSettled(
-          dynamicFilters.map(df =>
-            mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/subject/filter`, {
-              method: "POST",
-              body: JSON.stringify(df.body)
-            }, 120000).then(j => indexList(j?.data?.items, df.extra))
-          )
+      if (platformMatch && !(safeMode && /vivamax/i.test(platformMatch[1]))) {
+        const pName = mapPlatformName(platformMatch[1]);
+        tasks.push(
+          mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/platform/play-list?page=1&perPage=6&platform=${encodeURIComponent(pName)}`, {}, 180000)
+            .then(r => {
+              const months = Array.isArray(r?.data?.monthList) ? r.data.monthList : [];
+              return { kind: "filter", items: indexList(months.flatMap(m => Array.isArray(m.subjects) ? m.subjects : []), { platform: pName }) };
+            })
         );
-        collectFromIndex(suggestTerms);
+      } else if (isAdultIntent && !safeMode) {
+        tasks.push(
+          mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/platform/play-list?page=1&perPage=6&platform=Vivamax`, {}, 180000)
+            .then(r => {
+              const months = Array.isArray(r?.data?.monthList) ? r.data.monthList : [];
+              return { kind: "filter", items: indexList(months.flatMap(m => Array.isArray(m.subjects) ? m.subjects : []), { platform: "Vivamax", isAdult: true }) };
+            })
+        );
+      }
+
+      const settled = await Promise.allSettled(tasks);
+      const suggestTerms = [];
+      for (const r of settled) {
+        if (r.status !== "fulfilled" || !r.value) continue;
+        const res = r.value;
+        if (res.kind === "search") {
+          const isExactTerm = res.term.toLowerCase() === keyword.toLowerCase();
+          res.items.forEach((it, idx) => addCandidate(it, (isExactTerm ? 115 : 88) - Math.min(20, idx)));
+        } else if (res.kind === "suggest") {
+          for (const s of res.raw) {
+            if (s?.subject) {
+              const norm = normalizeSubject(s.subject);
+              if (norm) addCandidate(norm, 105);
+            } else if (typeof s?.word === "string" && s.word.trim()) {
+              suggestTerms.push(s.word.trim().toLowerCase());
+            }
+          }
+        } else if (res.kind === "filter") {
+          res.items.forEach((it, idx) => addCandidate(it, 82 - Math.min(18, idx * 0.5)));
+        }
+      }
+
+      // Warm local index only if results are still sparse (< 10)
+      if (uniq.size < 10) {
+        await warmSubjectIndexIfNeeded();
+      }
+      for (const item of subjectIndex.values()) {
+        let extraBonus = 0;
+        if (suggestTerms.length && suggestTerms.some(w => String(item.title || "").toLowerCase().includes(w))) {
+          extraBonus = 68;
+        }
+        addCandidate(item, extraBonus);
       }
 
       const list = [...uniq.values()]
-        .sort((a, b) => (b._sc || 0) - (a._sc || 0) || (b.views || 0) - (a.views || 0))
-        .map(({ _sc, ...rest }) => rest);
-      return { ok: true, items: list, page: 1, totalPages: 1 };
+        .sort((a, b) => (b._sc || 0) - (a._sc || 0) || (b.views || 0) - (a.views || 0) || parseReleaseTs(b) - parseReleaseTs(a))
+        .map(({ _sc, _southIntent, ...rest }) => rest)
+        .slice(0, 60);
+
+      return { ok: true, items: list, page, totalPages: list.length >= 24 ? page + 1 : page };
     }
 
     case "suggest": {
       const keyword = String(query.get("q") || query.get("keyword") || "").trim();
-      const pool = await getHindiDubbedPool().catch(() => []);
+      const safeMode = query.get("safe") === "1";
       if (!keyword) {
-        return { ok: true, items: pool.slice(0, 12) };
+        const home = await getHomeFeed().catch(() => ({ trending: [] }));
+        const base = (home?.trending || []).filter(x => !safeMode || !x.isAdult).slice(0, 12);
+        return { ok: true, items: base };
       }
-      const lower = keyword.toLowerCase();
-      const poolMatches = pool.filter(item =>
-        `${item.title} ${item.genre} ${item.country} ${item.description}`.toLowerCase().includes(lower)
-      );
-      const j = await mbFetch(
-        `${MOVIEBOX_API}/wefeed-h5api-bff/subject/search-suggest`,
-        {
-          method: "POST",
-          body: JSON.stringify({ keyword: `${keyword} hindi`, perPage: 10 })
-        },
-        45000
-      ).catch(() => null);
-      const raw = Array.isArray(j?.data?.items) ? j.data.items : [];
-      const liveItems = raw
-        .map(x => (x?.subject ? normalizeSubject(x.subject, { _hindiCatalog: true }) : null))
-        .filter(x => x && (x.isHindiDubbed || /hindi/i.test(`${x.title} ${x.language}`)));
-      const merged = sortByReleaseNewest(
-        [...new Map([...poolMatches, ...liveItems].map(x => [x.subjectId || x.path || x.title, x])).values()]
-      );
-      return { ok: true, items: merged.length ? merged : pool.slice(0, 12) };
+      return await handleMovieBoxRoute("search", new URLSearchParams({
+        q: keyword,
+        page: "1",
+        ...(query.get("subjectType") ? { subjectType: query.get("subjectType") } : {}),
+        ...(safeMode ? { safe: "1" } : {})
+      }));
     }
 
     case "hot-search": {
-      const pool = await getHindiDubbedPool().catch(() => []);
-      if (pool.length) {
-        const titles = [...new Set(pool.map(x => String(x.title || "").trim()).filter(Boolean))].slice(0, 16);
-        return { ok: true, items: titles, subjects: pool.slice(0, 16) };
-      }
+      const safeMode = query.get("safe") === "1";
+      const safeFilter = list => (Array.isArray(list) ? list : []).filter(x => x && (!safeMode || !x.isAdult));
+      const filterCall = (body, extra = {}) =>
+        mbFetch(
+          `${MOVIEBOX_API}/wefeed-h5api-bff/subject/filter`,
+          { method: "POST", body: JSON.stringify(body) },
+          180000
+        ).then(j => indexList(j?.data?.items, extra).filter(x => x.hasResource !== false));
+
+      const [homeRes, movieRes, seriesRes, animeRes, dramaRes] = await Promise.allSettled([
+        getHomeFeed(),
+        filterCall({ page: 1, perPage: 16, channelId: 1, sort: "Hottest" }),
+        filterCall({ page: 1, perPage: 16, channelId: 2, sort: "Hottest" }),
+        filterCall({ page: 1, perPage: 16, channelId: 2, genre: "Anime", sort: "Hottest" }, { isAnime: true, _animeCatalog: true }),
+        filterCall({ page: 1, perPage: 16, channelId: 2, country: "Korea", sort: "Hottest" })
+      ]);
+
+      const home = homeRes.status === "fulfilled" ? homeRes.value : {};
+      const movies = safeFilter(movieRes.status === "fulfilled" ? movieRes.value : home?.curated?.latestMovies || []);
+      const series = safeFilter(seriesRes.status === "fulfilled" ? seriesRes.value : home?.curated?.hindiSeries || []);
+      const anime = safeFilter(animeRes.status === "fulfilled" ? animeRes.value : home?.curated?.anime || []);
+      const drama = safeFilter(dramaRes.status === "fulfilled" ? dramaRes.value : home?.curated?.kDramas || []);
+      const trending = safeFilter(home?.trending || []);
+
+      const hotKeywords = [...new Set([
+        ...trending.slice(0, 6).map(x => String(x.title || "").trim()),
+        ...movies.slice(0, 3).map(x => String(x.title || "").trim()),
+        ...anime.slice(0, 3).map(x => String(x.title || "").trim()),
+        "South Indian Hindi",
+        "Bangla Movies",
+        "K-Drama",
+        "Hindi Dubbed"
+      ].filter(Boolean))].slice(0, 14);
+
       return {
         ok: true,
-        items: ["Hindi Dubbed Movies", "Hindi Dubbed Series", "South Indian Hindi Dubbed", "Korean Drama Hindi", "Anime Hindi Dub", "Bollywood Hindi"]
+        items: hotKeywords,
+        subjects: [...trending.slice(0, 8), ...movies.slice(0, 6)].slice(0, 12),
+        rankings: {
+          movie: movies.slice(0, 12),
+          series: series.slice(0, 12),
+          anime: anime.slice(0, 12),
+          drama: drama.slice(0, 12)
+        }
       };
     }
 

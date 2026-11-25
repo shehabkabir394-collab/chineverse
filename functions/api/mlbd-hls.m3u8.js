@@ -14,7 +14,7 @@ export async function onRequest({ request, env }) {
   const token = String(url.searchParams.get("t") || "").trim();
   const targetUrl = resolveSafeMlbdToken(token);
   if (!targetUrl) {
-    return new Response("Invalid or expired MovieLinkBD HLS token", {
+    return new Response("Invalid or expired MovieStreamBD HLS token", {
       status: 400,
       headers: { "content-type": "text/plain; charset=utf-8" }
     });
@@ -45,6 +45,6 @@ export async function onRequest({ request, env }) {
       }
     });
   } catch (err) {
-    return new Response(err?.message || "MovieLinkBD HLS proxy failed", { status: 502 });
+    return new Response(err?.message || "MovieStreamBD HLS proxy failed", { status: 502 });
   }
 }

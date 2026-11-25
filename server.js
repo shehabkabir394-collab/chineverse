@@ -8,6 +8,7 @@ import {
   MOVIEBOX_UA,
   handleMovieBoxRoute,
   signMediaToken,
+  sortByReleaseNewest,
   verifyMediaToken
 } from "./moviebox-api.js";
 import {
@@ -825,25 +826,89 @@ app.get("/api/server-health", async (_req, res) => {
   }
 });
 
+function isAdultCatalogItem(item) {
+  if (!item || typeof item !== "object") return false;
+  if (item.isAdult === true) return true;
+  const hay = `${item.title || ""} ${item.genre || ""} ${item.category || ""} ${item.platform || ""}`;
+  return /\b(?:adult|erotic|18\+|xxx|porn|softcore|vivamax)\b/i.test(hay) || /^(?:hot|midnight)$/i.test(String(item.genre || "").trim());
+}
+
+function matchesSearchType(item, rawTypeParam) {
+  const rawTypes = String(rawTypeParam || "0")
+    .split(",")
+    .map(n => Number(n.trim()))
+    .filter(n => Number.isFinite(n) && n > 0);
+  if (!rawTypes.length) return true;
+  const st = Number(item?.subjectType || (item?.isSeries ? 2 : 1));
+  if (rawTypes.includes(st)) return true;
+  if (rawTypes.includes(6) && (item?.isAnime === true || /\banime\b|animation/i.test(`${item?.genre || ""} ${item?.typeBadge || ""} ${item?.title || ""}`))) return true;
+  if (rawTypes.includes(2) && (item?.isSeries || item?.type === "series" || /series|drama|show/i.test(String(item?.typeBadge || "")))) return true;
+  if (rawTypes.includes(1) && !item?.isSeries && item?.type !== "series" && !item?.isAnime) return true;
+  if (rawTypes.includes(7) && /short/i.test(`${item?.typeBadge || ""} ${item?.genre || ""}`)) return true;
+  return false;
+}
+
+function scoreMergedSearchItem(item, q) {
+  const lower = String(q || "").trim().toLowerCase();
+  if (!lower) return 10;
+  const title = String(item?.title || "").toLowerCase();
+  const hay = `${title} ${item?.genre || ""} ${item?.language || ""} ${item?.country || ""} ${item?.typeBadge || ""} ${item?.platform || ""}`.toLowerCase();
+  const stop = new Set(["movie", "movies", "film", "films", "video", "videos", "full", "hd", "watch", "online", "download", "free", "new", "latest"]);
+  const rawTokens = lower.split(/\s+/).filter(Boolean);
+  const tokens = rawTokens.filter(t => !stop.has(t));
+  const useTokens = tokens.length ? tokens : rawTokens;
+  let score = 0;
+  if (title === lower) score = 200;
+  else if (title.startsWith(lower)) score = 170;
+  else if (title.includes(lower)) score = 145;
+  else if (useTokens.length && useTokens.every(t => title.includes(t))) score = 125;
+  else if (useTokens.length && useTokens.every(t => hay.includes(t))) score = 105;
+  else if (useTokens.some(t => t.length >= 3 && title.includes(t))) score = 80;
+  else if (useTokens.some(t => t.length >= 3 && hay.includes(t))) score = 60;
+  else score = 25;
+
+  // Regional & format relevance boosts
+  if (/\bsouth\b/i.test(lower) && !/south\s*(africa|korea|park)/i.test(lower)) {
+    if (/south\s*indian|tamil|telugu|malayalam|kannada|tollywood|kollywood/i.test(hay)) score += 75;
+    if (/india/i.test(String(item?.country || ""))) score += 35;
+    if (/\bvs\b/i.test(title)) score -= 60;
+  }
+  if (/\bmovie|movies|film\b/i.test(lower) && item?.isMovie) score += 12;
+  if (/\bseries|drama\b/i.test(lower) && item?.isSeries) score += 12;
+
+  if (item?.hasResource !== false) score += 10;
+  if (item?.poster || item?.previewImage) score += 8;
+  if (item?.source === "movielinkbd" || String(item?.path || "").startsWith("/mlbd/")) score += 4;
+  return score;
+}
+
 app.get("/api/suggest", async (req, res) => {
   const q = String(req.query.q || "").trim();
+  const safeMode = req.query.safe === "1";
+  const subjectType = String(req.query.subjectType || "0");
   if (!q) return res.json({ ok: true, query: "", items: [], suggestions: [] });
   try {
+    const mbParams = new URLSearchParams({ q, page: "1", subjectType });
+    if (safeMode) mbParams.set("safe", "1");
     const [mlbdRes, mbRes] = await Promise.allSettled([
       getMlbdSuggest(q),
-      handleMovieBoxRoute("search", new URLSearchParams({ q, page: "1" }))
+      handleMovieBoxRoute("search", mbParams)
     ]);
     const mlbdItems = mlbdRes.status === "fulfilled" && Array.isArray(mlbdRes.value?.items) ? mlbdRes.value.items : [];
     const mbItems = mbRes.status === "fulfilled" && Array.isArray(mbRes.value?.items) ? mbRes.value.items : [];
     const seen = new Set();
-    const merged = [];
-    for (const item of [...mlbdItems, ...mbItems]) {
-      const key = item?.path || item?.title;
+    const candidates = [];
+    for (const item of [...mbItems, ...mlbdItems]) {
+      if (!item) continue;
+      if (safeMode && isAdultCatalogItem(item)) continue;
+      if (!matchesSearchType(item, subjectType)) continue;
+      const key = item?.path || String(item?.title || "").toLowerCase();
       if (!key || seen.has(key)) continue;
       seen.add(key);
-      merged.push(item);
-      if (merged.length >= 16) break;
+      candidates.push(item);
     }
+    candidates.sort((a, b) => scoreMergedSearchItem(b, q) - scoreMergedSearchItem(a, q) || (Number(b.views) || 0) - (Number(a.views) || 0));
+    const merged = candidates.slice(0, 32);
     res.setHeader("Cache-Control", "public, max-age=60");
     return res.json({
       ok: true,
@@ -917,7 +982,7 @@ app.get("/api/mlbd-hls.m3u8", async (req, res) => {
   const token = String(req.query.t || "").trim();
   const targetUrl = resolveSafeMlbdToken(token);
   if (!targetUrl) {
-    return res.status(400).type("text/plain").send("Invalid or expired MovieLinkBD HLS token");
+    return res.status(400).type("text/plain").send("Invalid or expired MovieStreamBD HLS token");
   }
   try {
     const upstream = await fetchMediaWithRetry(
@@ -943,7 +1008,7 @@ app.get("/api/mlbd-hls.m3u8", async (req, res) => {
     res.setHeader("X-Content-Type-Options", "nosniff");
     return res.send(rewritten);
   } catch (err) {
-    return res.status(502).type("text/plain").send(err?.message || "MovieLinkBD HLS proxy failed");
+    return res.status(502).type("text/plain").send(err?.message || "MovieStreamBD HLS proxy failed");
   }
 });
 
@@ -954,7 +1019,7 @@ app.all("/api/mlbd-stream.mp4", async (req, res) => {
   const token = String(req.query.t || "").trim();
   const targetUrl = resolveSafeMlbdToken(token);
   if (!targetUrl) {
-    return res.status(400).type("text/plain").send("Invalid or expired MovieLinkBD stream token");
+    return res.status(400).type("text/plain").send("Invalid or expired MovieStreamBD stream token");
   }
   const forceDownload = req.query.download === "1";
   const customFilename = String(req.query.filename || "");
@@ -969,7 +1034,7 @@ app.all("/api/mlbd-stream.mp4", async (req, res) => {
     );
   } catch (err) {
     return res.status(502).type("text/plain").send(
-      err?.name === "TimeoutError" ? "MovieLinkBD stream timed out" : "MovieLinkBD stream unavailable"
+      err?.name === "TimeoutError" ? "MovieStreamBD stream timed out" : "MovieStreamBD stream unavailable"
     );
   }
 });
@@ -1041,7 +1106,7 @@ app.all("/api/movie-api/*", async (req, res) => {
         ep: query.get("ep") || "0",
         status: 200,
         sourceCount: payload.sources?.length || 0,
-        message: "MovieLinkBD",
+        message: "MovieStreamBD",
         durationMs: Date.now() - startedAt
       });
       res.setHeader("Cache-Control", "no-store");
@@ -1101,25 +1166,27 @@ app.all("/api/movie-api/*", async (req, res) => {
     if (legacy === "search") {
       const q = String(query.get("q") || "").trim();
       const page = Math.max(1, Number(query.get("page")) || 1);
+      const safeMode = query.get("safe") === "1";
+      const subjectType = String(query.get("subjectType") || "0");
       const [mbRes, mlbdRes] = await Promise.allSettled([
         handleMovieBoxRoute("search", query),
         q ? getMlbdCatalog({ path: "/search", q, page }) : Promise.resolve({ items: [] })
       ]);
       const mbItems = mbRes.status === "fulfilled" && Array.isArray(mbRes.value?.items) ? mbRes.value.items : [];
       const mlbdItems = mlbdRes.status === "fulfilled" && Array.isArray(mlbdRes.value?.items) ? mlbdRes.value.items : [];
-      const merged = [];
+      const candidates = [];
       const seen = new Set();
-      // Interleave exact MovieLinkBD + MovieBox matches cleanly
-      const maxLen = Math.max(mlbdItems.length, mbItems.length);
-      for (let i = 0; i < maxLen; i++) {
-        for (const candidate of [mlbdItems[i], mbItems[i]]) {
-          if (!candidate) continue;
-          const key = candidate.path || candidate.title;
-          if (!key || seen.has(key)) continue;
-          seen.add(key);
-          merged.push(candidate);
-        }
+      for (const candidate of [...mbItems, ...mlbdItems]) {
+        if (!candidate) continue;
+        if (safeMode && isAdultCatalogItem(candidate)) continue;
+        if (!matchesSearchType(candidate, subjectType)) continue;
+        const key = candidate.path || String(candidate.title || "").toLowerCase();
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        candidates.push(candidate);
       }
+      candidates.sort((a, b) => scoreMergedSearchItem(b, q) - scoreMergedSearchItem(a, q) || (Number(b.views) || 0) - (Number(a.views) || 0));
+      const merged = candidates.slice(0, 60);
       res.setHeader("Cache-Control", "public, max-age=60");
       return res.json({
         ok: true,
@@ -1169,11 +1236,12 @@ app.all("/api/movie-api/*", async (req, res) => {
         seen.add(key);
         merged.push(item);
       }
+      const sortedMerged = sortByReleaseNewest(merged);
       res.setHeader("Cache-Control", "public, max-age=60");
       return res.json({
         ...mbPayload,
         ok: true,
-        items: merged,
+        items: sortedMerged,
         maxPage: Math.max(
           Number(mbPayload?.maxPage || 1),
           Number(mlbdRes.status === "fulfilled" ? mlbdRes.value?.maxPage || 1 : 1)

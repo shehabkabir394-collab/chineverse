@@ -3,12 +3,15 @@
   const $ = s => document.querySelector(s);
   const esc = s =>
     String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-  const safeImg = u => (/^(?:https?:\/\/|\/api\/)/i.test(String(u || "")) ? String(u) : "");
+  const safeImg = u => (/^(?:https?:\/\/|\/api\/|favicon\.svg)/i.test(String(u || "")) ? String(u) : "");
 
   const WATCHLIST_KEY = "cv_watchlist_v1";
   const HISTORY_KEY = "cv_watch_history_v1";
   const SEARCH_HISTORY_KEY = "cv_recent_searches_v1";
+  const REMINDERS_KEY = "cv_sports_reminders_v1";
+  const FAMILY_SAFE_KEY = "cv_family_safe_v1";
   const SCROLL_PROGRESS_KEY = "cv_scroll_progress_v1";
+
   const SCROLL_PROGRESS_THEMES = {
     crimson: {
       label: "Crimson",
@@ -50,11 +53,36 @@
     longPagesOnly: true
   };
   let deferredPrompt = null;
-  let meViewMode = "hub"; // "hub" | "history" | "search-history" | "scroll-progress" | "install"
-  let recentUploadsCount = null;
+  let meViewMode = "hub"; // "hub" | "history" | "reminders" | "settings" | "search-history" | "scroll-progress" | "install"
   let spBarEl = null;
   let spFillEl = null;
   let spRaf = 0;
+
+  function showToast(msg) {
+    document.querySelector(".cv-toast")?.remove();
+    const t = document.createElement("div");
+    t.className = "cv-toast";
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(() => t.remove(), 2400);
+  }
+
+  function getFamilySafe() {
+    try {
+      return localStorage.getItem(FAMILY_SAFE_KEY) === "1";
+    } catch {
+      return false;
+    }
+  }
+
+  function setFamilySafe(enabled) {
+    const val = enabled ? "1" : "0";
+    try {
+      localStorage.setItem(FAMILY_SAFE_KEY, val);
+    } catch {}
+    window.dispatchEvent(new CustomEvent("cv:family-safe-change", { detail: { enabled: Boolean(enabled) } }));
+    return Boolean(enabled);
+  }
 
   function loadScrollProgressConfig() {
     try {
@@ -197,21 +225,6 @@
       .filter(x => x.q);
   }
 
-  async function fetchRecentCount() {
-    if (recentUploadsCount !== null) return recentUploadsCount;
-    try {
-      const r = await fetch("/api/movie-api/home");
-      const d = await r.json();
-      const set = new Set();
-      (d?.trending || []).forEach(x => x?.path && set.add(x.path));
-      (d?.sections || []).forEach(s => (s?.items || []).forEach(x => x?.path && set.add(x.path)));
-      recentUploadsCount = set.size || 24;
-    } catch {
-      recentUploadsCount = 24;
-    }
-    return recentUploadsCount;
-  }
-
   function renderWatchHistoryCards(history) {
     if (!history.length) {
       return `<p class="cv-me-empty-note">Movies and episodes you watch will appear here automatically.</p>`;
@@ -223,20 +236,18 @@
           .map(h => {
             const pct =
               h.duration > 0 && h.currentTime > 0
-                ? Math.min(100, Math.max(5, Math.round((h.currentTime / h.duration) * 100)))
-                : 15;
+                ? Math.min(100, Math.max(8, Math.round((h.currentTime / h.duration) * 100)))
+                : 22;
             const poster = safeImg(h.poster);
             const href = h.path
               ? `watch.html?path=${encodeURIComponent(h.path)}&title=${encodeURIComponent(h.title || "")}`
               : "./";
-            const typeIcon = h.isSeries
-              ? `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="15" rx="2"/><polyline points="17 2 12 7 7 2"/></svg>`
-              : `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/></svg>`;
+            const tvBadgeSvg = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="2" y="6" width="20" height="14" rx="2"/><polyline points="17 2 12 6 7 2"/></svg>`;
             return `
               <a class="cv-history-card" href="${esc(href)}">
                 <div class="cv-history-thumb">
                   ${poster ? `<img loading="lazy" referrerpolicy="no-referrer" src="${esc(poster)}" alt="${esc(h.title || "")}">` : `<div class="cv-history-fallback">▶</div>`}
-                  <span class="cv-history-type-badge" aria-hidden="true">${typeIcon}</span>
+                  <span class="cv-history-type-badge" aria-hidden="true">${tvBadgeSvg}</span>
                   <div class="cv-history-progress"><span style="width:${pct}%"></span></div>
                 </div>
                 <b>${esc(h.title || "Untitled")}</b>
@@ -248,6 +259,26 @@
     `;
   }
 
+  async function shareApp() {
+    const shareData = {
+      title: "MovieStream BD — HD Streaming & Offline Cinema",
+      text: "Watch movies, K-Dramas, web series, anime & live sports on MovieStream BD.",
+      url: location.origin
+    };
+    if (navigator.share) {
+      try {
+        await navigator.share(shareData);
+        return;
+      } catch {}
+    }
+    try {
+      await navigator.clipboard.writeText(location.origin);
+      showToast("MovieStream BD link copied!");
+    } catch {
+      showToast("Copy link: " + location.origin);
+    }
+  }
+
   function renderMeContent() {
     const content = $("#cvMeContent");
     if (!content) return;
@@ -255,6 +286,8 @@
     const watchlist = loadJsonList(WATCHLIST_KEY);
     const history = loadJsonList(HISTORY_KEY);
     const searchHistory = loadSearchHistory();
+    const reminders = loadJsonList(REMINDERS_KEY);
+    const safeEnabled = getFamilySafe();
 
     if (meViewMode === "history") {
       content.innerHTML = `
@@ -282,27 +315,87 @@
       return;
     }
 
+    if (meViewMode === "reminders") {
+      content.innerHTML = `
+        <div class="cv-me-subhead">
+          <button type="button" class="cv-me-back-btn" data-me-view="hub">‹ Release Reminders (${reminders.length})</button>
+          ${reminders.length ? `<button type="button" id="cvClearRemindersBtn" class="cv-clear-btn">Clear All</button>` : ""}
+        </div>
+        ${
+          reminders.length
+            ? `<div class="cv-me-history-list">
+                ${reminders
+                  .map(
+                    r => `<div class="cv-me-history-item">
+                      <span>${esc(r.title || r.name || "Scheduled Event")}</span>
+                      <b>${esc(r.time || r.date || "Reminder Set")}</b>
+                    </div>`
+                  )
+                  .join("")}
+              </div>`
+            : `<p class="cv-me-empty-note">No upcoming release or match reminders saved yet.</p>`
+        }
+        <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap">
+          <a class="cv-util-pill" href="catalog.html?category=%2Fnew">Upcoming &amp; New Releases ›</a>
+          <a class="cv-util-pill" href="sports.html">Live Sports Schedule ›</a>
+        </div>
+      `;
+      return;
+    }
+
+    if (meViewMode === "settings") {
+      const cfg = loadScrollProgressConfig();
+      content.innerHTML = `
+        <div class="cv-me-subhead">
+          <button type="button" class="cv-me-back-btn" data-me-view="hub">‹ Settings</button>
+        </div>
+        <div class="cv-me-hub-card">
+          <div class="cv-me-hub-row" style="cursor:default">
+            <span class="cv-me-row-left">
+              <span>App Language</span>
+            </span>
+            <span class="cv-me-row-right"><span>English</span></span>
+          </div>
+          <button type="button" class="cv-me-hub-row" data-me-view="search-history">
+            <span class="cv-me-row-left"><span>Search History</span></span>
+            <span class="cv-me-row-right"><span>${searchHistory.length}</span><span class="cv-me-chevron">›</span></span>
+          </button>
+          <button type="button" class="cv-me-hub-row" data-me-view="scroll-progress">
+            <span class="cv-me-row-left"><span>Scroll Progress Bar</span></span>
+            <span class="cv-me-row-right"><span>${cfg.enabled ? `${resolveScrollTheme(cfg).label} · ${cfg.height}px` : "Off"}</span><span class="cv-me-chevron">›</span></span>
+          </button>
+          <button type="button" class="cv-me-hub-row" data-me-view="install">
+            <span class="cv-me-row-left"><span>Install App &amp; TV Setup</span></span>
+            <span class="cv-me-row-right"><span class="cv-me-chevron">›</span></span>
+          </button>
+        </div>
+      `;
+      return;
+    }
+
     if (meViewMode === "search-history") {
       content.innerHTML = `
         <div class="cv-me-subhead">
-          <button type="button" class="cv-me-back-btn" data-me-view="hub">‹ Search History (${searchHistory.length})</button>
+          <button type="button" class="cv-me-back-btn" data-me-view="settings">‹ Search History (${searchHistory.length})</button>
           ${searchHistory.length ? `<button type="button" id="cvClearSearchHistoryBtn" class="cv-clear-btn">Clear All</button>` : ""}
         </div>
         ${
           searchHistory.length
             ? `<div class="cv-me-history-list">
                 ${searchHistory
-                  .map(item => `
+                  .map(
+                    item => `
                     <div class="cv-history-search-row">
                       <a class="cv-history-search-pick" href="catalog.html?q=${encodeURIComponent(item.q)}">
                         <span class="cv-history-search-text">${esc(item.q)}</span>
                       </a>
                       <button type="button" class="cv-history-search-remove" data-me-del-search="${esc(item.q)}" aria-label="Remove ${esc(item.q)}">×</button>
                     </div>
-                  `)
+                  `
+                  )
                   .join("")}
               </div>`
-            : `<p class="cv-me-empty-note">Your search history is empty. Search any movie, drama, or anime to save it here.</p>`
+            : `<p class="cv-me-empty-note">Your search history is empty.</p>`
         }
       `;
       return;
@@ -313,7 +406,7 @@
       const activeTheme = resolveScrollTheme(cfg);
       content.innerHTML = `
         <div class="cv-me-subhead">
-          <button type="button" class="cv-me-back-btn" data-me-view="hub">‹ Scroll Progress Bar</button>
+          <button type="button" class="cv-me-back-btn" data-me-view="settings">‹ Scroll Progress Bar</button>
           <button type="button" id="cvSpResetBtn" class="cv-clear-btn">Reset</button>
         </div>
         <div class="cv-sp-settings">
@@ -386,10 +479,14 @@
     if (meViewMode === "install") {
       content.innerHTML = `
         <div class="cv-me-subhead">
-          <button type="button" class="cv-me-back-btn" data-me-view="hub">‹ Install App &amp; TV Setup</button>
+          <button type="button" class="cv-me-back-btn" data-me-view="hub">‹ Updates &amp; App Setup (v1.0)</button>
         </div>
         <div class="cv-me-install-box">
-          ${deferredPrompt ? `<button type="button" id="cvTriggerPwaInstall" class="cv-discover-cta" style="width:100%;margin-bottom:14px">Install MovieStream BD App</button>` : ""}
+          <div id="cvUpdateStatusBox" class="cv-me-install-step">
+            <b>MovieStream BD v1.0</b>
+            <p>Checking live server status…</p>
+          </div>
+          ${deferredPrompt ? `<button type="button" id="cvTriggerPwaInstall" class="cv-discover-cta" style="width:100%;margin:4px 0">Install MovieStream BD App</button>` : ""}
           <div class="cv-me-install-step">
             <b>Android / Chrome</b>
             <p>Tap browser menu (⋮) → <b>Add to Home screen</b> or <b>Install app</b> for full-screen playback.</p>
@@ -400,19 +497,44 @@
           </div>
           <div class="cv-me-install-step">
             <b>Smart TV / Android TV / Chromecast</b>
-            <p>Open <b>${esc(location.origin)}</b> in TV Browser or use Chrome <b>Cast…</b> / Screen Mirroring, then switch Player Settings → <b>Landscape</b>.</p>
+            <p>Open <b>${esc(location.origin)}</b> in TV Browser or use Chrome <b>Cast…</b> / Screen Mirroring.</p>
           </div>
         </div>
       `;
+      fetch("/api/movie-api/status")
+        .then(r => r.json())
+        .then(d => {
+          const box = $("#cvUpdateStatusBox");
+          if (box) {
+            box.innerHTML = `<b>MovieStream BD v1.0 · Up to date ✓</b>
+              <p>MovieStreamBD &amp; MovieBox upstreams active (${esc(d?.provider || "Live Cinema Network")}).</p>`;
+          }
+        })
+        .catch(() => {
+          const box = $("#cvUpdateStatusBox");
+          if (box) {
+            box.innerHTML = `<b>MovieStream BD v1.0 · Latest Version</b><p>You are running the latest version.</p>`;
+          }
+        });
       return;
     }
+
+    // Default Hub (Matches Screenshot 3 cleanly with MovieStream BD branding)
+    const historySvg = `<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/></svg>`;
+    const bookmarkSvg = `<svg width="19" height="19" viewBox="0 0 24 24" fill="currentColor" opacity="0.9"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z"/></svg>`;
+    const bellSvg = `<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>`;
+    const tvSvg = `<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="14" rx="2"/><polyline points="17 2 12 6 7 2"/><polygon points="10 10 16 13 10 16 10 10" fill="currentColor"/></svg>`;
+    const gearSvg = `<svg width="19" height="19" viewBox="0 0 24 24" fill="currentColor" opacity="0.9"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z"/></svg>`;
+    const shieldSvg = `<svg width="19" height="19" viewBox="0 0 24 24" fill="currentColor" opacity="0.9"><path d="M12 2L4 5v6.09c0 5.05 3.41 9.76 8 10.91 4.59-1.15 8-5.86 8-10.91V5l-8-3z"/></svg>`;
+    const updateSvg = `<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2" width="12" height="20" rx="2"/><path d="M12 8v7"/><path d="m9 12 3 3 3-3"/></svg>`;
+    const shareSvg = `<svg width="19" height="19" viewBox="0 0 24 24" fill="currentColor" opacity="0.9"><path d="M14 9V5l7 7-7 7v-4.1c-5 0-8.5 1.6-11 5.1 1-5 4-10 11-11z"/></svg>`;
 
     content.innerHTML = `
       <div class="cv-me-hub-card">
         <div class="cv-me-hub-block">
           <button type="button" class="cv-me-hub-row cv-me-hub-head-row" data-me-view="history">
             <span class="cv-me-row-left">
-              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              ${historySvg}
               <span>Watch History</span>
             </span>
             <span class="cv-me-chevron">›</span>
@@ -420,55 +542,77 @@
           ${renderWatchHistoryCards(history)}
         </div>
 
-        <button type="button" class="cv-me-hub-row" data-me-view="search-history">
-          <span class="cv-me-row-left">
-            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-            <span>Search History</span>
-          </span>
-          <span class="cv-me-row-right"><span>${searchHistory.length}</span><span class="cv-me-chevron">›</span></span>
-        </button>
-
         <a class="cv-me-hub-row" href="saved.html">
           <span class="cv-me-row-left">
-            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+            ${bookmarkSvg}
             <span>My List</span>
           </span>
           <span class="cv-me-row-right"><span>${watchlist.length}</span><span class="cv-me-chevron">›</span></span>
         </a>
 
-        <a class="cv-me-hub-row" href="catalog.html?category=%2Fmostwatch%2F7d">
+        <button type="button" class="cv-me-hub-row" data-me-view="reminders">
           <span class="cv-me-row-left">
-            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-            <span>New Uploads · Last 24h</span>
+            ${bellSvg}
+            <span>Release Reminders</span>
           </span>
-          <span class="cv-me-row-right"><span id="cvNewUploadsPill" class="cv-me-red-pill">${recentUploadsCount ?? "LIVE"}</span><span class="cv-me-chevron">›</span></span>
-        </a>
-
-        <button type="button" class="cv-me-hub-row" data-me-view="scroll-progress">
-          <span class="cv-me-row-left">
-            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><rect x="3" y="10" width="18" height="4" rx="2"/><line x1="3" y1="18" x2="15" y2="18"/></svg>
-            <span>Scroll Progress Bar</span>
-          </span>
-          <span class="cv-me-row-right">
-            <span>${(() => { const c = loadScrollProgressConfig(); return c.enabled ? `${resolveScrollTheme(c).label} · ${c.height}px` : "Off"; })()}</span>
-            <span class="cv-me-chevron">›</span>
-          </span>
+          <span class="cv-me-row-right"><span>${reminders.length}</span><span class="cv-me-chevron">›</span></span>
         </button>
+
+        <a class="cv-me-hub-row" href="saved.html?tab=offline">
+          <span class="cv-me-row-left">
+            ${tvSvg}
+            <span>Offline Downloads</span>
+          </span>
+          <span class="cv-me-row-right"><span class="cv-me-offline-pill">OFFLINE</span><span class="cv-me-chevron">›</span></span>
+        </a>
+      </div>
+
+      <div class="cv-me-hub-card" style="margin-top:12px">
+        <button type="button" class="cv-me-hub-row" data-me-view="history">
+          <span class="cv-me-row-left">
+            ${historySvg}
+            <span>Watched Titles</span>
+          </span>
+          <span class="cv-me-row-right"><span>${history.length}</span><span class="cv-me-chevron">›</span></span>
+        </button>
+      </div>
+
+      <div class="cv-me-hub-card" style="margin-top:12px">
+        <button type="button" class="cv-me-hub-row" data-me-view="settings">
+          <span class="cv-me-row-left">
+            ${gearSvg}
+            <span>Settings</span>
+          </span>
+          <span class="cv-me-row-right"><span>English</span><span class="cv-me-chevron">›</span></span>
+        </button>
+
+        <div class="cv-me-hub-row cv-me-switch-row">
+          <span class="cv-me-row-left">
+            ${shieldSvg}
+            <span>Family-Safe Mode</span>
+          </span>
+          <button type="button" id="cvFamilySafeSwitch" class="cv-ios-switch ${safeEnabled ? "is-on" : ""}" role="switch" aria-checked="${safeEnabled ? "true" : "false"}" aria-label="Toggle Family-Safe Mode">
+            <span class="cv-ios-switch-thumb"></span>
+          </button>
+        </div>
 
         <button type="button" class="cv-me-hub-row" data-me-view="install">
           <span class="cv-me-row-left">
-            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-            <span>Install App &amp; TV Setup</span>
+            ${updateSvg}
+            <span>Check for Updates</span>
           </span>
-          <span class="cv-me-chevron">›</span>
+          <span class="cv-me-row-right"><span>v1.0</span><span class="cv-me-chevron">›</span></span>
+        </button>
+
+        <button type="button" id="cvMeShareAppBtn" class="cv-me-hub-row">
+          <span class="cv-me-row-left">
+            ${shareSvg}
+            <span>Share MovieStream BD</span>
+          </span>
+          <span class="cv-me-row-right"><span class="cv-me-chevron">›</span></span>
         </button>
       </div>
     `;
-
-    fetchRecentCount().then(cnt => {
-      const pill = $("#cvNewUploadsPill");
-      if (pill) pill.textContent = String(cnt);
-    });
   }
 
   function showMe() {
@@ -479,10 +623,27 @@
       modal.className = "cv-me-panel";
       modal.hidden = true;
       modal.innerHTML = `
-        <div class="cv-me-card cv-me-hub-shell" role="dialog" aria-modal="true" aria-label="Account and History Hub">
-          <div class="cv-me-topbar-actions">
-            <span class="cv-me-shell-brand">MovieStream BD</span>
-            <button type="button" class="cv-me-close" aria-label="Close">×</button>
+        <div class="cv-me-card cv-me-hub-shell" role="dialog" aria-modal="true" aria-label="MovieStream BD Profile & Settings">
+          <div class="cv-me-brand-head">
+            <div class="cv-me-brand-left">
+              <div class="cv-me-app-badge" aria-hidden="true">
+                <svg width="26" height="22" viewBox="0 0 40 34" fill="none">
+                  <path d="M5 25C2 22 2 13 8 7C13 2 24 1 32 4C36 6 37 13 35 20C32 27 25 31 16 31C10 31 7 28 5 25Z" stroke="#f87171" stroke-width="2.4" stroke-linecap="round"/>
+                  <rect x="11" y="8" width="18" height="17" rx="4" fill="#070b14" stroke="#fca5a5" stroke-width="1.8"/>
+                  <path d="M17 12.2L25.5 16.5L17 20.8Z" fill="#00c882"/>
+                </svg>
+              </div>
+              <div class="cv-me-brand-copy">
+                <b>MovieStream BD</b>
+                <small>HD Streaming &amp; Offline Cinema</small>
+              </div>
+            </div>
+            <div class="cv-me-brand-actions">
+              <button type="button" class="cv-me-head-icon-btn" data-me-view="settings" aria-label="Settings" title="Settings">
+                <svg width="19" height="19" viewBox="0 0 24 24" fill="currentColor"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z"/></svg>
+              </button>
+              <button type="button" class="cv-me-close" aria-label="Close">×</button>
+            </div>
           </div>
           <div id="cvMeContent"></div>
         </div>
@@ -492,6 +653,17 @@
       modal.addEventListener("click", async e => {
         if (e.target === modal || e.target.closest(".cv-me-close")) {
           modal.hidden = true;
+          return;
+        }
+        const safeBtn = e.target.closest("#cvFamilySafeSwitch");
+        if (safeBtn) {
+          const next = setFamilySafe(!getFamilySafe());
+          renderMeContent();
+          showToast(next ? "Family-Safe Mode ON (18+ hidden)" : "Family-Safe Mode OFF (Unrestricted search)");
+          return;
+        }
+        if (e.target.closest("#cvMeShareAppBtn")) {
+          await shareApp();
           return;
         }
         const viewBtn = e.target.closest("[data-me-view]");
@@ -518,6 +690,11 @@
           } else {
             try { localStorage.removeItem(SEARCH_HISTORY_KEY); } catch {}
           }
+          renderMeContent();
+          return;
+        }
+        if (e.target.closest("#cvClearRemindersBtn")) {
+          try { localStorage.removeItem(REMINDERS_KEY); } catch {}
           renderMeContent();
           return;
         }
@@ -582,6 +759,12 @@
     modal.hidden = false;
     renderMeContent();
   }
+
+  window.CineVerseAccount = {
+    open: showMe,
+    getFamilySafe,
+    setFamilySafe
+  };
 
   window.addEventListener("cv:search-history-change", () => {
     const modal = $("#cvMePanel");

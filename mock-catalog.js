@@ -533,10 +533,13 @@ export function handleMockMovieApi(legacy, query, baseUrl) {
 
     case "details": {
       const reqPath = String(query.get("path") || "");
-      const reqTitle = String(query.get("title") || "").toLowerCase();
-      const found = items.find(i => i.path === reqPath)
+      const reqTitle = String(query.get("title") || "").trim().toLowerCase();
+      const found = items.find(i => reqPath && i.path === reqPath)
         || (reqTitle ? items.find(i => i.title.toLowerCase() === reqTitle) : null)
-        || items[0];
+        || (!reqPath && !reqTitle ? items[0] : null);
+      if (!found) {
+        return { ok: false, error: "Title details unavailable." };
+      }
       const epCount = found.totalEpisodes || 1;
       const episodes = Array.from({ length: epCount }, (_, idx) => ({
         label: found.type === "movie" ? `${found.title} (${found.quality})` : `Episode ${idx + 1}`,

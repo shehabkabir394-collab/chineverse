@@ -1347,7 +1347,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   position: fixed;
   inset: 0;
   z-index: 250;
-  background: var(--cv-bg);
+  background: #0a0c10;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1360,19 +1360,41 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .cv-search-overlay-head {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--cv-border);
+  gap: 8px;
+  padding: 10px 12px;
+  max-width: 960px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.cv-search-back-btn,
+.cv-search-mic-btn {
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #f3f5f8;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 150ms var(--cv-ease);
+}
+
+.cv-search-back-btn:hover,
+.cv-search-mic-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .cv-search-overlay-input-box {
   flex: 1 1 auto;
   min-width: 0;
-  height: 44px;
-  padding: 0 12px;
+  height: 42px;
+  padding: 0 6px 0 14px;
   border-radius: 999px;
-  background: var(--cv-surface);
-  border: 1px solid var(--cv-border-strong);
+  background: #171a21;
+  border: 1px solid rgba(255, 255, 255, 0.08);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1388,11 +1410,51 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   outline: none;
 }
 
+.cv-search-overlay-input-box input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+}
+
+.cv-search-input-clear {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  color: #cbd5e1;
+  font-size: 16px;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.cv-search-inline-submit {
+  height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #10b981;
+  font-family: var(--cv-font-display);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.cv-search-inline-submit:hover {
+  background: rgba(16, 185, 129, 0.12);
+}
+
 .cv-search-overlay-tabs {
   display: flex;
   align-items: center;
-  gap: 22px;
+  gap: 24px;
   padding: 0 16px;
+  max-width: 960px;
+  width: 100%;
+  margin: 0 auto;
   border-bottom: 1px solid var(--cv-border);
   overflow-x: auto;
   scrollbar-width: none;
@@ -1402,10 +1464,48 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   display: none;
 }
 
+.cv-search-tab,
+.cv-rank-tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 6px 2px 10px;
+  border: 0;
+  background: transparent;
+  color: #8b95a7;
+  font-family: var(--cv-font-display);
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: color 150ms var(--cv-ease);
+}
+
+.cv-search-tab.active,
+.cv-rank-tab.active {
+  color: #fff;
+  font-weight: 700;
+}
+
+.cv-search-tab.active::after,
+.cv-rank-tab.active::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 2px;
+  width: 24px;
+  height: 3px;
+  border-radius: 999px;
+  background: #10b981;
+}
+
 .cv-search-overlay-body {
   flex: 1 1 auto;
   overflow-y: auto;
-  padding: 16px;
+  padding: 12px 16px 32px;
   max-width: 960px;
   width: 100%;
   margin: 0 auto;
@@ -1421,8 +1521,32 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .cv-recent-head h3 {
   margin: 0;
   font-family: var(--cv-font-display);
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 700;
+  color: #f3f5f8;
+}
+
+.cv-hot-title-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.cv-search-clear-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 32px;
+  padding: 0 6px;
+  border: 0;
+  background: transparent;
+  color: #98a2b3;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.cv-search-clear-action:hover {
   color: #fff;
 }
 
@@ -1440,26 +1564,197 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-bottom: 22px;
+  margin-bottom: 20px;
 }
 
 .cv-search-chip {
   display: inline-flex;
   align-items: center;
-  min-height: 36px;
-  padding: 6px 14px;
-  border-radius: 999px;
-  border: 1px solid var(--cv-border);
-  background: var(--cv-surface);
-  color: #e4e8f0;
+  min-height: 34px;
+  padding: 6px 13px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: #161920;
+  color: #d6dce6;
   font-size: 13px;
+  font-weight: 500;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   cursor: pointer;
   transition: background 150ms var(--cv-ease), border-color 150ms var(--cv-ease);
 }
 
 .cv-search-chip:hover {
-  background: var(--cv-surface-2);
-  border-color: var(--cv-border-strong);
+  background: #202530;
+  border-color: rgba(255, 255, 255, 0.16);
+  color: #fff;
+}
+
+/* Search Idle Ranking Header & Horizontal Cards */
+.cv-rank-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 6px 0 12px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.cv-rank-header::-webkit-scrollbar {
+  display: none;
+}
+
+.cv-rank-chart-icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.cv-rank-tabs {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+}
+
+.cv-rank-scroller {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  padding-bottom: 12px;
+}
+
+.cv-rank-scroller::-webkit-scrollbar {
+  display: none;
+}
+
+.cv-rank-card {
+  flex: 0 0 min(86vw, 340px);
+  scroll-snap-align: start;
+  padding: 12px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(20, 27, 34, 0.96), rgba(16, 19, 25, 0.98));
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  display: grid;
+  gap: 12px;
+}
+
+.cv-rank-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-decoration: none;
+  min-width: 0;
+}
+
+.cv-rank-thumb-wrap {
+  position: relative;
+  width: 68px;
+  height: 92px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #1b2029;
+  flex-shrink: 0;
+}
+
+.cv-rank-thumb-wrap img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.cv-rank-thumb-fallback {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  color: #8b95a7;
+}
+
+.cv-rank-badge {
+  position: absolute;
+  top: 0;
+  left: 0;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 6px;
+  border-bottom-right-radius: 8px;
+  font-family: var(--cv-font-display);
+  font-size: 12px;
+  font-weight: 800;
+  color: #fff;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
+.cv-rank-badge.r1 { background: #ec4899; }
+.cv-rank-badge.r2 { background: #f97316; }
+.cv-rank-badge.r3 { background: #eab308; color: #111827; }
+.cv-rank-badge.rn { background: rgba(51, 65, 85, 0.92); }
+
+.cv-rank-thumb-lang {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 10px 5px 3px;
+  background: linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.88));
+  color: #e2e8f0;
+  font-size: 10px;
+  font-weight: 600;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cv-rank-copy {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.cv-rank-copy b {
+  font-family: var(--cv-font-display);
+  font-size: 14.5px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: #f3f5f8;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.cv-rank-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  font-size: 12px;
+  color: #8b95a7;
+  font-variant-numeric: tabular-nums;
+}
+
+.cv-rank-tv {
+  display: inline-flex;
+  align-items: center;
+  color: #8b95a7;
+}
+
+.cv-rank-star {
+  color: #f5b932;
+  font-weight: 700;
+}
+
+.cv-rank-sep {
+  color: rgba(255, 255, 255, 0.22);
 }
 
 .cv-search-result-list {
@@ -2205,38 +2500,115 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   color: #fca5a5;
 }
 
-/* Me Hub WA0067 */
+/* Me Hub (Screenshot 3 Layout) */
 .cv-me-hub-shell {
   width: min(460px, 100%);
+  max-height: 90vh;
   padding: 16px !important;
-  background: #0d1015 !important;
-  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  background: #0a0c10 !important;
+  border: 1px solid rgba(255, 255, 255, 0.09) !important;
+  border-radius: 22px !important;
 }
 
-.cv-me-topbar-actions {
+.cv-me-brand-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 12px;
+  gap: 12px;
+  margin-bottom: 16px;
 }
 
-.cv-me-shell-brand {
+.cv-me-brand-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.cv-me-app-badge {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: linear-gradient(145deg, #161b26, #0b0e14);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45);
+}
+
+.cv-me-brand-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.cv-me-brand-copy b {
   font-family: var(--cv-font-display);
-  font-size: 15px;
-  font-weight: 700;
+  font-size: 17px;
+  font-weight: 800;
+  color: #fff;
+  line-height: 1.2;
+}
+
+.cv-me-brand-copy small {
+  font-size: 12px;
+  color: #8b95a7;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cv-me-brand-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.cv-me-head-icon-btn {
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #e2e8f0;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.cv-me-head-icon-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.cv-me-hub-shell .cv-me-close {
+  position: static !important;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  font-size: 24px;
+  color: #98a2b3;
+  line-height: 1;
+}
+
+.cv-me-hub-shell .cv-me-close:hover {
+  background: rgba(255, 255, 255, 0.08);
   color: #fff;
 }
 
 .cv-me-hub-card {
   border-radius: 16px;
   background: #14171d;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.07);
   overflow: hidden;
 }
 
 .cv-me-hub-block {
   padding-bottom: 14px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .cv-me-hub-row {
@@ -2248,13 +2620,18 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   min-height: 54px;
   padding: 12px 16px;
   border: 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   background: transparent;
   color: #f3f5f8;
   font-size: 15px;
   font-weight: 600;
   text-decoration: none;
   cursor: pointer;
+  text-align: left;
+}
+
+.cv-me-switch-row {
+  cursor: default;
 }
 
 .cv-me-hub-card > .cv-me-hub-row:last-child,
@@ -2263,7 +2640,11 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 }
 
 .cv-me-hub-row:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.cv-me-switch-row:hover {
+  background: transparent;
 }
 
 .cv-me-row-left,
@@ -2271,6 +2652,11 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+.cv-me-row-left svg {
+  color: #cbd5e1;
+  flex-shrink: 0;
 }
 
 .cv-me-row-right {
@@ -2284,18 +2670,50 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   color: #6b7280;
 }
 
-.cv-me-red-pill {
+.cv-me-offline-pill {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 44px;
-  padding: 3px 10px;
-  border-radius: 999px;
-  background: #dc2626;
+  padding: 3px 11px;
+  border-radius: 6px;
+  background: #ef4444;
   color: #fff;
-  font-size: 12px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
+  font-family: var(--cv-font-display);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.cv-ios-switch {
+  position: relative;
+  width: 50px;
+  height: 28px;
+  padding: 2px;
+  border: 0;
+  border-radius: 999px;
+  background: #334155;
+  cursor: pointer;
+  transition: background 180ms var(--cv-ease);
+  flex-shrink: 0;
+}
+
+.cv-ios-switch.is-on {
+  background: #10b981;
+}
+
+.cv-ios-switch-thumb {
+  display: block;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+  transform: translateX(0);
+  transition: transform 180ms var(--cv-ease);
+}
+
+.cv-ios-switch.is-on .cv-ios-switch-thumb {
+  transform: translateX(22px);
 }
 
 .cv-history-strip {
@@ -2311,7 +2729,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 }
 
 .cv-history-card {
-  flex: 0 0 144px;
+  flex: 0 0 148px;
   display: grid;
   gap: 6px;
   text-decoration: none;
@@ -2319,7 +2737,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 
 .cv-history-thumb {
   position: relative;
-  width: 144px;
+  width: 148px;
   aspect-ratio: 16 / 9;
   border-radius: 10px;
   overflow: hidden;
@@ -2348,8 +2766,9 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   width: 24px;
   height: 24px;
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.9);
-  color: #111;
+  background: rgba(15, 23, 42, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  color: #fff;
   display: grid;
   place-items: center;
 }
@@ -2360,13 +2779,13 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   right: 0;
   bottom: 0;
   height: 3px;
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.22);
 }
 
 .cv-history-progress span {
   display: block;
   height: 100%;
-  background: #14b8a6;
+  background: #10b981;
 }
 
 .cv-history-card b {

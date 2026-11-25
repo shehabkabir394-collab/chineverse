@@ -900,8 +900,6 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .cv-resources-panel,
 .cv-cast-card,
 .cv-saved-card,
-.cv-me-hub-card,
-.cv-me-card,
 .cv-ps-card,
 .cv-status-banner,
 .sports-status,
@@ -947,7 +945,6 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .cv-boost-presets button,
 .cv-sub-pill,
 .cv-speed-pills button,
-.cv-search-chip,
 .cv-search-result-row {
   background: var(--cv-glass-bg), var(--cv-glass-tint-soft) !important;
   border: 1px solid var(--cv-glass-border) !important;
@@ -1101,7 +1098,6 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .catalog-chip:hover,
   .catalog-letter:hover,
   .btn.ghost:hover,
-  .cv-search-chip:hover,
   .cv-search-result-row:hover {
     background: var(--cv-glass-bg-strong), rgba(22, 18, 38, 0.88) !important;
     border-color: rgba(248, 113, 113, 0.45) !important;
@@ -1151,35 +1147,30 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   color: #f5f6fa;
 }
 
-/* Search Overlay — Full-Viewport Dark Navy + Soft Red Liquid Glass */
+/* Search Overlay — Dark Cinema Slate + Emerald Accent (Screenshot 1) */
 .cv-search-overlay {
-  background:
-    radial-gradient(ellipse 75% 45% at 15% 0%, rgba(248, 113, 113, 0.18), transparent 60%),
-    radial-gradient(ellipse 60% 40% at 85% 10%, rgba(251, 113, 133, 0.12), transparent 55%),
-    rgba(5, 7, 17, 0.94) !important;
-  backdrop-filter: blur(18px) saturate(150%) !important;
-  -webkit-backdrop-filter: blur(18px) saturate(150%) !important;
+  background: #0a0c10 !important;
 }
 
 .cv-search-overlay-head {
-  background: rgba(8, 12, 26, 0.8);
-  border-bottom: 1px solid var(--cv-glass-border) !important;
+  background: transparent;
+  border-bottom: 0 !important;
 }
 
 .cv-search-overlay-input-box {
-  background: rgba(252, 165, 165, 0.08) !important;
-  border: 1px solid rgba(248, 180, 188, 0.24) !important;
-  box-shadow: var(--cv-glass-highlight) !important;
+  background: #171a21 !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  box-shadow: none !important;
 }
 
 .cv-search-overlay-tabs {
-  background: rgba(8, 12, 26, 0.58);
-  border-bottom: 1px solid rgba(248, 180, 188, 0.1) !important;
+  background: transparent;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
 }
 
 .cv-search-result-row:hover .cv-search-play-circle {
-  background: var(--cv-accent-grad) !important;
-  color: #fff !important;
+  background: #10b981 !important;
+  color: #051610 !important;
 }
 
 /* Search History Items */
@@ -1336,29 +1327,35 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   color: #fecaca;
 }
 
-/* Me Hub & Toast Liquid Glass */
+/* Me Hub & Toast (Screenshot 3 Layout) */
 .cv-me-panel,
 .cv-ps-backdrop {
-  background: rgba(3, 5, 12, 0.76) !important;
+  background: rgba(3, 5, 12, 0.82) !important;
   backdrop-filter: blur(14px) !important;
   -webkit-backdrop-filter: blur(14px) !important;
 }
 
 .cv-me-hub-shell {
-  background: var(--cv-glass-bg), rgba(8, 12, 26, 0.94) !important;
-  border: 1px solid var(--cv-glass-border-hover) !important;
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.65), var(--cv-glass-highlight) !important;
+  background: #0a0c10 !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.72) !important;
+}
+
+.cv-me-hub-card {
+  background: #14171d !important;
+  border: 1px solid rgba(255, 255, 255, 0.07) !important;
+  box-shadow: none !important;
 }
 
 .cv-me-history-item,
 .cv-me-install-step {
-  background: var(--cv-glass-bg), rgba(11, 16, 34, 0.84) !important;
-  border: 1px solid var(--cv-glass-border) !important;
-  box-shadow: var(--cv-glass-highlight) !important;
+  background: #14171d !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  box-shadow: none !important;
 }
 
 .cv-me-red-pill {
-  background: var(--cv-accent-grad) !important;
+  background: #ef4444 !important;
 }
 
 .cv-toast {

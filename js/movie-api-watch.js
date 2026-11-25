@@ -778,18 +778,27 @@
       const renderStageRetry = errText => {
         if (streamMsg) streamMsg.textContent = errText;
         const altDub = currentDubs.find(d => d?.path && d.path !== path);
+        const trailerId = String(streamRoot?.trailerYoutubeId || payload?.trailerYoutubeId || watchDetail?.trailerYoutubeId || "").trim();
+        const safeYtId = /^[A-Za-z0-9_-]{8,20}$/.test(trailerId) ? trailerId : "";
         const stage = root.querySelector(".cv-player-stage");
         if (stage) {
           stage.querySelector(".cv-stage-fallback")?.remove();
           const box = document.createElement("div");
           box.className = "cv-stage-fallback";
           box.style.cssText =
-            "position:absolute;inset:0;z-index:20;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:20px;text-align:center;background:rgba(11,13,16,.88);color:#f3f4f6;";
+            "position:absolute;inset:0;z-index:20;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:20px;text-align:center;background:rgba(11,13,16,.9);color:#f3f4f6;";
           box.innerHTML = `<div style="max-width:460px;font-size:14px;line-height:1.5">${esc(errText)}</div>
             <div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:center">
+              ${safeYtId ? `<button type="button" data-play-trailer class="cv-action-btn" style="background:#00c882;border-color:#00c882;color:#051610;cursor:pointer">▶ Watch Official Trailer</button>` : ""}
               <button type="button" data-retry-stream class="cv-action-btn" style="background:var(--cv-red,#f87171);border-color:var(--cv-red,#f87171);color:#fff;cursor:pointer">↻ Retry Stream</button>
               ${altDub ? `<button type="button" data-switch-alt-dub class="cv-action-btn" style="cursor:pointer">Switch to ${esc(altDub.language || altDub.lanName || "Original Audio")}</button>` : ""}
             </div>`;
+          box.querySelector("[data-play-trailer]")?.addEventListener("click", () => {
+            if (!safeYtId) return;
+            box.style.padding = "0";
+            box.innerHTML = `<iframe title="Official Trailer" src="https://www.youtube.com/embed/${encodeURIComponent(safeYtId)}?autoplay=1&rel=0" style="width:100%;height:100%;border:0" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>`;
+            if (streamMsg) streamMsg.textContent = "Playing Official Trailer · Full stream releases soon";
+          });
           box.querySelector("[data-retry-stream]")?.addEventListener("click", () => {
             box.remove();
             playEpisode(idx, { ...opts, retryCount: 0 });
@@ -1235,6 +1244,7 @@
       const isSeries = seasonKeys.some(k => k > 0) || episodes.length > 1;
       const seasonsLabel = isSeries ? `${seasonKeys.filter(k => k > 0).length || 1} season${seasonKeys.length > 1 ? "s" : ""}` : "Feature Film";
       const metaItems = [
+        d.isUpcoming ? `<span style="color:#00c882;font-weight:700">Upcoming</span>` : "",
         d.rating ? `<span class="cv-star">★ ${esc(d.rating)}</span>` : "",
         d.year ? `<span>${esc(d.year)}</span>` : "",
         d.language ? `<span>${esc(String(d.language).split("·")[0].trim())}</span>` : "",

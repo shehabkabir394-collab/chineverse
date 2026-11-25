@@ -56,23 +56,33 @@
   ];
 
   const releaseTime = item => {
-    const raw = item?.releaseDate || item?.appointmentDate || item?.uploadedAtMs || (item?.year && /^\d{4}$/.test(String(item.year)) ? `${item.year}-01-01` : "");
-    if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) return raw;
-    const t = Date.parse(String(raw || ""));
-    return Number.isFinite(t) && t > 0 ? t : 0;
+    const nowLimit = Date.now() + 36 * 3600 * 1000;
+    let best = 0;
+    for (const raw of [item?.uploadedAtMs, item?.uploadTimestamp, item?.updatedAt, item?.createdAt]) {
+      if (typeof raw === "number" && Number.isFinite(raw) && raw > 0 && raw <= nowLimit) {
+        best = Math.max(best, raw);
+      } else if (raw) {
+        const t = Date.parse(String(raw || ""));
+        if (Number.isFinite(t) && t > 0 && t <= nowLimit) best = Math.max(best, t);
+      }
+    }
+    const relRaw = item?.releaseDate || item?.appointmentDate || (item?.year && /^\d{4}$/.test(String(item.year)) ? `${item.year}-01-01` : "");
+    const relT = typeof relRaw === "number" ? relRaw : Date.parse(String(relRaw || ""));
+    if (Number.isFinite(relT) && relT > 0) best = Math.max(best, relT);
+    return best;
   };
 
   const sortNewestFirst = list => {
-    const now = Date.now();
+    const futureCutoff = Date.now() + 36 * 3600 * 1000;
     return [...(Array.isArray(list) ? list : [])].sort((a, b) => {
       const ta = releaseTime(a);
       const tb = releaseTime(b);
-      const aFuture = ta > now;
-      const bFuture = tb > now;
+      const aFuture = (a?.hasResource === false || a?.isUpcoming === true || ta > futureCutoff) && ta > futureCutoff;
+      const bFuture = (b?.hasResource === false || b?.isUpcoming === true || tb > futureCutoff) && tb > futureCutoff;
       if (aFuture !== bFuture) return aFuture ? 1 : -1;
       if (aFuture && bFuture) return ta - tb;
       if (tb !== ta) return tb - ta;
-      return (Number(b?.views) || 0) - (Number(a?.views) || 0);
+      return 0;
     });
   };
 
@@ -835,7 +845,7 @@
         if (!cleanTitle || !items.length) return null;
         return {
           title: cleanTitle,
-          items,
+          items: sortNewestFirst(items),
           moreHref: `catalog.html?category=${encodeURIComponent(sec.categoryPath || "/new")}`
         };
       })
@@ -850,7 +860,7 @@
       ...(mlbdItems.length
         ? [{
             title: "🟢 Latest & Bangla",
-            items: mlbdItems,
+            items: sortNewestFirst(mlbdItems),
             moreHref: "catalog.html?category=%2Flanguage%2Fbangla"
           }]
         : []),
@@ -1018,7 +1028,7 @@
       const d = await r.json();
       const incoming = (Array.isArray(d?.items) ? d.items : []).filter(x => x && !isNigerian(x));
       const merged = dedupeList([...existingItems, ...incoming]);
-      const items = tabKey === "trending" ? merged : sortNewestFirst(merged);
+      const items = sortNewestFirst(merged);
       const hasMore = Boolean(d?.hasMore || (d?.maxPage && appendPage < Number(d.maxPage)) || incoming.length >= 18);
       statusEl.hidden = true;
       sectionsRoot.innerHTML = `

@@ -34,13 +34,18 @@
   return 0;
  };
  const releaseTime=item=>{
+  const nowLimit=Date.now()+36*3600*1000;
+  const up=uploadTime(item);
+  let best=up&&up<=nowLimit?up:0;
   const fields=[item?.releaseTimestamp,item?.releaseTime,item?.release_time,item?.releaseDate,item?.release_date,item?.releaseAt,item?.release_at,item?.firstAirDate,item?.first_air_date,item?.airDate,item?.air_date,item?.premiereDate,item?.premiere_date,item?.theatricalReleaseDate,item?.theatrical_release_date,item?.publishDate,item?.publish_date,item?.date];
-  for(const value of fields){const time=dateValue(value);if(time)return time;}
-  if(item?.year&&/^\d{4}$/.test(String(item.year))){const yt=Date.parse(String(item.year)+"-01-01");if(Number.isFinite(yt))return yt;}
-  return uploadTime(item);
+  for(const value of fields){const time=dateValue(value);if(time){best=Math.max(best,time);return best;}}
+  if(item?.year&&/^\d{4}$/.test(String(item.year))){const yt=Date.parse(String(item.year)+"-01-01");if(Number.isFinite(yt))best=Math.max(best,yt);}
+  return best||up;
  };
  const latestFirst=(a,b)=>{
-  const now=Date.now(),ta=releaseTime(a),tb=releaseTime(b),aFuture=ta>now,bFuture=tb>now;
+  const futureCutoff=Date.now()+36*3600*1000,ta=releaseTime(a),tb=releaseTime(b);
+  const aFuture=(a?.hasResource===false||a?.isUpcoming===true||ta>futureCutoff)&&ta>futureCutoff;
+  const bFuture=(b?.hasResource===false||b?.isUpcoming===true||tb>futureCutoff)&&tb>futureCutoff;
   if(aFuture!==bFuture)return aFuture?1:-1;
   if(aFuture&&bFuture)return ta-tb;
   return tb-ta||popularity(b)-popularity(a);
@@ -340,7 +345,8 @@
     const cats=await catsPromise;
     data={categories:cats};
     status.textContent="Searching movies and dramas…";
-    const {res:response,data:payload}=await fetchJsonSafe("/api/movie-api/search?q="+encodeURIComponent(q)+"&page="+page,{headers:{Accept:"application/json"},cache:"default"});
+    const safeQs = localStorage.getItem("cv_family_safe_v1")==="1" ? "&safe=1" : "";
+    const {res:response,data:payload}=await fetchJsonSafe("/api/movie-api/search?q="+encodeURIComponent(q)+"&page="+page+safeQs,{headers:{Accept:"application/json"},cache:"default"});
     if(!response.ok||payload.ok!==true)throw new Error(payload.error||"Movie Search API unavailable");
     const unique=new Map();
     (Array.isArray(payload.items)?payload.items:[]).filter(item=>!isNigerian(item)).forEach(item=>{
