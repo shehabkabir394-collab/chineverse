@@ -1067,12 +1067,11 @@ app.all("/api/movie-api/*", async (req, res) => {
           ...(payload.categories || []),
           ...(mlbd.categories || []).filter(c => c?.path && !existingCats.has(c.path))
         ];
-        const existingBanners = new Set((payload.banners || []).map(b => b?.path || b?.title));
         payload.banners = [
-          ...(payload.banners || []),
-          ...(mlbd.banners || []).filter(b => (b?.path || b?.title) && !existingBanners.has(b.path || b.title)).slice(0, 6)
+          ...(mlbd.banners || []).slice(0, 6),
+          ...(payload.banners || []).filter(b => (b?.path || b?.title) && !(mlbd.banners || []).some(mb => (mb?.path || mb?.title) === (b?.path || b?.title)))
         ];
-        payload.sections = [...(payload.sections || []), ...(mlbd.sections || [])];
+        payload.sections = [...(mlbd.sections || []), ...(payload.sections || [])];
         payload.activeMlbdMirror = mlbd.activeMirror;
       }
       if (mlbdBanglaRes.status === "fulfilled" && Array.isArray(mlbdBanglaRes.value?.items)) {
@@ -1113,7 +1112,7 @@ app.all("/api/movie-api/*", async (req, res) => {
       // Interleave exact MovieLinkBD + MovieBox matches cleanly
       const maxLen = Math.max(mlbdItems.length, mbItems.length);
       for (let i = 0; i < maxLen; i++) {
-        for (const candidate of [mbItems[i], mlbdItems[i]]) {
+        for (const candidate of [mlbdItems[i], mbItems[i]]) {
           if (!candidate) continue;
           const key = candidate.path || candidate.title;
           if (!key || seen.has(key)) continue;
@@ -1161,8 +1160,7 @@ app.all("/api/movie-api/*", async (req, res) => {
       const mbPayload = mbRes.status === "fulfilled" && mbRes.value?.ok ? mbRes.value : { ok: true, items: [] };
       const mbItems = Array.isArray(mbPayload?.items) ? mbPayload.items : [];
       const mlbdItems = mlbdRes.status === "fulfilled" && Array.isArray(mlbdRes.value?.items) ? mlbdRes.value.items : [];
-      const mlbdFirst = /^\/(?:language\/(?:bangla|bangla-dubbed)|bengali-series|mlbd)/i.test(category);
-      const ordered = mlbdFirst ? [...mlbdItems, ...mbItems] : [...mbItems, ...mlbdItems];
+      const ordered = [...mlbdItems, ...mbItems];
       const merged = [];
       const seen = new Set();
       for (const item of ordered) {

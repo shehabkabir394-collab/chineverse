@@ -235,7 +235,7 @@ export async function onRequest({ request, env, params }) {
           ...(payload.categories || []),
           ...(mlbd.categories || []).filter(c => c?.path && !existingCats.has(c.path))
         ];
-        payload.sections = [...(payload.sections || []), ...(mlbd.sections || [])];
+        payload.sections = [...(mlbd.sections || []), ...(payload.sections || [])];
         payload.activeMlbdMirror = mlbd.activeMirror;
       }
       if (mlbdBanglaRes.status === "fulfilled" && Array.isArray(mlbdBanglaRes.value?.items)) {
@@ -273,7 +273,7 @@ export async function onRequest({ request, env, params }) {
       const seen = new Set();
       const maxLen = Math.max(mlbdItems.length, mbItems.length);
       for (let i = 0; i < maxLen; i++) {
-        for (const candidate of [mbItems[i], mlbdItems[i]]) {
+        for (const candidate of [mlbdItems[i], mbItems[i]]) {
           if (!candidate) continue;
           const key = candidate.path || candidate.title;
           if (!key || seen.has(key)) continue;
@@ -315,8 +315,7 @@ export async function onRequest({ request, env, params }) {
       const mbPayload = mbRes.status === "fulfilled" && mbRes.value?.ok ? mbRes.value : { ok: true, items: [] };
       const mbItems = Array.isArray(mbPayload?.items) ? mbPayload.items : [];
       const mlbdItems = mlbdRes.status === "fulfilled" && Array.isArray(mlbdRes.value?.items) ? mlbdRes.value.items : [];
-      const mlbdFirst = /^\/(?:language\/(?:bangla|bangla-dubbed)|bengali-series|mlbd)/i.test(catPath);
-      const ordered = mlbdFirst ? [...mlbdItems, ...mbItems] : [...mbItems, ...mlbdItems];
+      const ordered = [...mlbdItems, ...mbItems];
       const merged = [];
       const seen = new Set();
       for (const item of ordered) {
