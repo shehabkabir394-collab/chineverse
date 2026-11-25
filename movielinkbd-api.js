@@ -1356,7 +1356,7 @@ async function resolvePosterForItem(item) {
   return await job;
 }
 
-async function enrichMlbdItemsWithPosters(items = [], maxToEnrich = 36) {
+async function enrichMlbdItemsWithPosters(items = [], maxToEnrich = 24, concurrency = 4) {
   const list = Array.isArray(items) ? items : [];
   // Pass 1: instant in-memory poster registry match
   for (const item of list) {
@@ -1371,13 +1371,13 @@ async function enrichMlbdItemsWithPosters(items = [], maxToEnrich = 36) {
     }
   }
 
-  // Pass 2: multi-source async enrichment in parallel batches
+  // Pass 2: bounded async enrichment so shared cPanel/Cloudflare workers stay under socket & subrequest limits
   const needPoster = list.filter(it => it && !it.poster && (it.searchTitle || it.title)).slice(0, maxToEnrich);
   if (!needPoster.length) return list;
 
-  const CONCURRENCY = 12;
-  for (let i = 0; i < needPoster.length; i += CONCURRENCY) {
-    const batch = needPoster.slice(i, i + CONCURRENCY);
+  const step = Math.max(1, Math.min(6, Number(concurrency) || 4));
+  for (let i = 0; i < needPoster.length; i += step) {
+    const batch = needPoster.slice(i, i + step);
     await Promise.allSettled(
       batch.map(async item => {
         const hit = await resolvePosterForItem(item);
@@ -1465,7 +1465,7 @@ async function getMlbdComCatalog({ path = "/", q = "", page = 1 } = {}) {
   const perPage = 24;
   const startIdx = (pageNum - 1) * perPage;
   const slice = all.slice(startIdx, startIdx + perPage);
-  await enrichMlbdItemsWithPosters(slice, 24);
+  await enrichMlbdItemsWithPosters(slice, 12, 4);
   const maxPage = Math.max(1, Math.ceil(all.length / perPage));
 
   return {
@@ -1511,10 +1511,8 @@ async function getMlbdComHomeFeed() {
     }
   }
 
-  // Enrich any cards missing posters across all home sections (up to 24 per section)
-  await Promise.allSettled(
-    parsedSections.map(sec => enrichMlbdItemsWithPosters(sec.items, 24))
-  );
+  // Enrich missing posters with a single bounded pool across sections (avoids socket/subrequest exhaustion)
+  await enrichMlbdItemsWithPosters(parsedSections.flatMap(sec => sec.items), 16, 4);
 
   const sections = parsedSections.map(s => ({
     id: s.id,
