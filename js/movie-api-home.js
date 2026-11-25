@@ -29,14 +29,22 @@
   const SPORTS_REMINDER_KEY = "cv_sports_reminders_v1";
 
   const EXPLORE_CATEGORIES = [
+    { icon: "🇧🇩", title: "Bangla", href: "catalog.html?category=%2Flanguage%2Fbangla" },
+    { icon: "🎙️", title: "Bangla Dubbed", href: "catalog.html?category=%2Flanguage%2Fbangla-dubbed" },
+    { icon: "🎧", title: "Dual Audio", href: "catalog.html?category=%2Flanguage%2Fdual-audio" },
+    { icon: "🎤", title: "Hindi Dubbed", href: "catalog.html?category=%2Flanguage%2Fhindi-dubbed" },
     { icon: "🎬", title: "Bollywood", href: "catalog.html?category=%2Fbollywood" },
     { icon: "🎥", title: "Hollywood", href: "catalog.html?category=%2Flanguage%2Fenglish" },
-    { icon: "🇮🇳", title: "South Indian", href: "catalog.html?category=%2FsouthIndian" },
+    { icon: "🌏", title: "South Indian", href: "catalog.html?category=%2FsouthIndian" },
     { icon: "🇰🇷", title: "K-Drama", href: "catalog.html?category=%2Flanguage%2Fkorean" },
     { icon: "🇨🇳", title: "C-Drama", href: "catalog.html?category=%2Flanguage%2Fchinese" },
     { icon: "🇯🇵", title: "J-Drama", href: "catalog.html?category=%2Flanguage%2Fjapanese-drama" },
     { icon: "🍥", title: "Anime", href: "catalog.html?category=%2Fanime" },
-    { icon: "🇧🇩", title: "Bengali", href: "catalog.html?category=%2Flanguage%2Fbengali" }
+    { icon: "🎨", title: "Animation", href: "catalog.html?category=%2Fgenre%2Fanimation" },
+    { icon: "🤼", title: "WWE", href: "catalog.html?category=%2Fcategory%2Fwwe" },
+    { icon: "🛡️", title: "MCU", href: "catalog.html?category=%2Fcollection%2Fmcu-marvel-cinematic-universe" },
+    { icon: "🦇", title: "DC Universe", href: "catalog.html?category=%2Fcollection%2Fdc-universe-dceu-dcu" },
+    { icon: "👻", title: "Horror", href: "catalog.html?category=%2Fgenre%2Fhorror" }
   ];
 
   const PLATFORMS = [
@@ -271,15 +279,131 @@
 
   function renderCategories() {
     if (!catGrid) return;
-    catGrid.innerHTML = EXPLORE_CATEGORIES.map(
-      c => `<a class="cv-cat-card" href="${esc(c.href)}">
-        <span class="cv-cat-emoji" aria-hidden="true">${c.icon}</span>
-        <div class="cv-cat-copy">
-          <b>${esc(c.title)}</b>
-        </div>
-        <span class="cv-cat-arrow" aria-hidden="true">›</span>
-      </a>`
-    ).join("");
+    const perSlide = 4;
+    const slides = [];
+    for (let i = 0; i < EXPLORE_CATEGORIES.length; i += perSlide) {
+      slides.push(EXPLORE_CATEGORIES.slice(i, i + perSlide));
+    }
+
+    catGrid.innerHTML = slides
+      .map(
+        group => `<div class="cv-cat-slide">
+          ${group
+            .map(
+              c => `<a class="cv-cat-card" href="${esc(c.href)}">
+                <span class="cv-cat-emoji" aria-hidden="true">${c.icon}</span>
+                <div class="cv-cat-copy">
+                  <b>${esc(c.title)}</b>
+                </div>
+                <span class="cv-cat-arrow" aria-hidden="true">›</span>
+              </a>`
+            )
+            .join("")}
+        </div>`
+      )
+      .join("");
+
+    const dotsEl = $("#cvCategoryDots");
+    const prevBtn = $("#cvCatPrev");
+    const nextBtn = $("#cvCatNext");
+    const totalSlides = slides.length;
+
+    if (dotsEl) {
+      dotsEl.innerHTML = slides
+        .map((_, idx) => `<button type="button" class="cv-cat-dot ${idx === 0 ? "active" : ""}" data-cat-slide="${idx}" aria-label="Category page ${idx + 1}"></button>`)
+        .join("");
+    }
+
+    const slideWidth = () => {
+      const first = catGrid.querySelector(".cv-cat-slide");
+      return (first ? first.getBoundingClientRect().width : catGrid.clientWidth) + 12;
+    };
+
+    const updateNavState = () => {
+      const step = slideWidth();
+      const idx = step > 0 ? Math.max(0, Math.min(totalSlides - 1, Math.round(catGrid.scrollLeft / step))) : 0;
+      if (dotsEl) {
+        dotsEl.querySelectorAll(".cv-cat-dot").forEach((dot, i) => dot.classList.toggle("active", i === idx));
+      }
+      if (prevBtn) prevBtn.disabled = idx <= 0;
+      if (nextBtn) nextBtn.disabled = idx >= totalSlides - 1;
+    };
+
+    const goToSlide = idx => {
+      const clamped = Math.max(0, Math.min(totalSlides - 1, idx));
+      catGrid.scrollTo({ left: clamped * slideWidth(), behavior: "smooth" });
+    };
+
+    if (!catGrid.dataset.sliderBound) {
+      catGrid.dataset.sliderBound = "1";
+      let scrollRaf = 0;
+      catGrid.addEventListener(
+        "scroll",
+        () => {
+          if (scrollRaf) cancelAnimationFrame(scrollRaf);
+          scrollRaf = requestAnimationFrame(updateNavState);
+        },
+        { passive: true }
+      );
+      prevBtn?.addEventListener("click", () => {
+        const step = slideWidth();
+        const cur = step > 0 ? Math.round(catGrid.scrollLeft / step) : 0;
+        goToSlide(cur - 1);
+      });
+      nextBtn?.addEventListener("click", () => {
+        const step = slideWidth();
+        const cur = step > 0 ? Math.round(catGrid.scrollLeft / step) : 0;
+        goToSlide(cur + 1);
+      });
+      dotsEl?.addEventListener("click", e => {
+        const dot = e.target.closest("[data-cat-slide]");
+        if (dot) goToSlide(Number(dot.dataset.catSlide) || 0);
+      });
+      window.addEventListener("resize", updateNavState, { passive: true });
+    }
+    updateNavState();
+  }
+
+  function renderMoreCategories(cats) {
+    const list = Array.isArray(cats) ? cats : [];
+    const seen = new Set();
+    const deduped = [];
+    for (const c of list) {
+      const path = String(c?.path || "").trim();
+      const label = String(c?.label || "").trim();
+      if (!path || !label || seen.has(path)) continue;
+      seen.add(path);
+      deduped.push({ path, label, group: c.group || "Collections", icon: c.icon || "🎬" });
+    }
+    if (!deduped.length) return;
+
+    const allCatsLink = $("#cvAllCategoriesLink");
+    if (allCatsLink) allCatsLink.textContent = `All Categories (${deduped.length}) ›`;
+
+    const dropBody = $("#cvMoreDropdownBody");
+    if (!dropBody) return;
+    const groupsOrder = ["Collections", "Languages & Regions", "Genres"];
+    const grouped = new Map();
+    for (const c of deduped) {
+      if (!grouped.has(c.group)) grouped.set(c.group, []);
+      grouped.get(c.group).push(c);
+    }
+    const orderedGroups = [...new Set([...groupsOrder, ...grouped.keys()])].filter(g => grouped.has(g));
+    dropBody.innerHTML = orderedGroups
+      .map(groupName => {
+        const items = grouped.get(groupName) || [];
+        return `
+          <div class="cv-more-group-label">${esc(groupName)} (${items.length})</div>
+          <div class="cv-more-dropdown-grid">
+            ${items
+              .map(
+                c => `<a class="cv-more-item" role="menuitem" href="catalog.html?category=${encodeURIComponent(c.path)}">${esc(c.icon)} ${esc(c.label)}</a>`
+              )
+              .join("")}
+          </div>
+        `;
+      })
+      .join("");
   }
 
   function renderPlatforms() {
@@ -696,8 +820,29 @@
 
     const matchAny = (pred) => allPool.filter(pred);
     const mlbdSections = Array.isArray(homeData.mlbdSections) ? homeData.mlbdSections : [];
-    const mlbdItems = dedupeList([...(homeData.mlbdTrending || []), ...mlbdSections.flatMap(s => s.items || [])]);
+    const mlbdTop10Sec = mlbdSections.find(s => /top\s*10/i.test(String(s?.title || "")));
+    const top10Keys = new Set((mlbdTop10Sec?.items || []).map(x => x?.path || x?.subjectId || x?.title).filter(Boolean));
+    const mlbdBanglaRaw = dedupeList([
+      ...(Array.isArray(homeData.mlbdBangla) ? homeData.mlbdBangla : []),
+      ...mlbdSections.flatMap(s => s.items || []).filter(x => /bangla|bengali/i.test(`${x?.language || ""} ${x?.title || ""}`)),
+      ...(Array.isArray(homeData.mlbdTrending) ? homeData.mlbdTrending : [])
+    ]);
+    const mlbdBanglaDistinct = mlbdBanglaRaw.filter(x => !top10Keys.has(x?.path || x?.subjectId || x?.title));
+    const mlbdItems = mlbdBanglaDistinct.length ? mlbdBanglaDistinct : mlbdBanglaRaw;
     const hasLang = (x, re) => re.test([x.language, x.audioLanguage, x.country, x.title, x.genre].filter(Boolean).join(" "));
+
+    const mlbdSectionShelves = mlbdSections
+      .map(sec => {
+        const cleanTitle = String(sec?.title || "").trim();
+        const items = dedupeList(sec?.items || []);
+        if (!cleanTitle || !items.length) return null;
+        return {
+          title: cleanTitle,
+          items,
+          moreHref: `catalog.html?category=${encodeURIComponent(sec.categoryPath || "/new")}`
+        };
+      })
+      .filter(Boolean);
 
     const orderedShelves = [
       {
@@ -712,6 +857,7 @@
             moreHref: "catalog.html?category=%2Flanguage%2Fbangla"
           }]
         : []),
+      ...mlbdSectionShelves,
       {
         title: "🏆 Top 10 This Week",
         top10: true,
@@ -946,16 +1092,30 @@
     } catch {}
   }
 
+  async function loadAllCategories() {
+    try {
+      const r = await fetch("/api/movie-api/categories");
+      const d = await r.json();
+      if (r.ok && d?.ok && Array.isArray(d.categories) && d.categories.length) {
+        renderMoreCategories(d.categories);
+      }
+    } catch {}
+  }
+
   async function init() {
     renderCategories();
     statusEl.hidden = false;
     statusEl.textContent = "Loading featured movies and dramas…";
     loadSportsPreview();
+    loadAllCategories();
     try {
       const r = await fetch("/api/movie-api/home");
       const d = await r.json();
       if (!r.ok || d.ok !== true) throw new Error(d.error || "API unavailable");
       homeData = d;
+      if (Array.isArray(d.categories) && d.categories.length) {
+        renderMoreCategories(d.categories);
+      }
       renderHomeView();
     } catch (err) {
       statusEl.textContent = "Could not load catalog: " + (err?.message || "Network error");

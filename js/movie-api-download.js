@@ -726,7 +726,7 @@
   });
 
   async function load() {
-    if (!/^\/(?:mb|mlbd|movie|series|anime)\/[a-zA-Z0-9_./-]{1,300}$/i.test(path)) {
+    if (!/^\/(?:mb|mlbd|movie|series|drama|anime)\/[a-zA-Z0-9_./-]{1,300}$/i.test(path)) {
       $("#downloadStatus").textContent = "Invalid title link.";
       return;
     }

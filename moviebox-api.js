@@ -1122,9 +1122,21 @@ export async function handleMovieBoxRoute(legacy, query) {
       await mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/filter`, {}, 600000).catch(() => null);
       return {
         ok: true,
-        languages: ["Hindi", "Korean", "Chinese", "English", "Bengali", "Japanese", "Tamil", "Urdu"],
+        languages: [
+          "Bangla", "Bangla Dubbed", "Dual Audio", "Hindi", "Hindi Dubbed",
+          "English", "Korean", "Chinese", "Japanese", "Tamil", "Telugu",
+          "Malayalam", "Kannada", "Punjabi", "Marathi", "Gujrati",
+          "Indonesian", "Turkish", "Urdu", "Spanish", "French", "German",
+          "Italian", "Portuguese", "Vietnamese", "Malaysian"
+        ],
         types: ["Movie", "Series", "Anime", "Short Drama"],
-        genres: ["Action", "Adult", "Adventure", "Animation", "Comedy", "Crime", "Drama", "Erotic", "Family", "Fantasy", "Horror", "Hot", "Mystery", "Romance", "Sci-Fi", "Thriller"]
+        genres: [
+          "Action", "Adventure", "Animation", "Biographical", "Comedy", "Crime",
+          "Documentary", "Drama", "Family", "Fantasy", "Historical", "Horror",
+          "Music", "Musical", "Mystery", "Romance", "Sci-Fi", "Sports",
+          "Superhero", "Survival", "Suspense", "Thriller", "War",
+          "Adult", "Erotic", "Hot"
+        ]
       };
     }
 

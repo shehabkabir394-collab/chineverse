@@ -81,9 +81,18 @@
  };
  const badge=item=>isHindiDubbed(item)?"HINDI DUBBED":"";
  const pathOf=item=>{
-  if(typeof item.path==="string"&&/^\/(?:mb|mlbd|movie|series|anime)\//i.test(item.path))return item.path;
-  try{const u=new URL(item.detailsEndpoint,location.origin);const p=u.searchParams.get("path");return p&&/^\/(?:mb|mlbd|movie|series|anime)\//i.test(p)?p:"";}catch{return "";}
+  if(typeof item.path==="string"&&/^\/(?:mb|mlbd|movie|series|drama|anime)\//i.test(item.path))return item.path;
+  try{const u=new URL(item.detailsEndpoint,location.origin);const p=u.searchParams.get("path");return p&&/^\/(?:mb|mlbd|movie|series|drama|anime)\//i.test(p)?p:"";}catch{return "";}
  };
+ async function fetchJsonSafe(url,init){
+  const res=await fetch(url,init);
+  const raw=await res.text();
+  const trimmed=String(raw||"").trim();
+  if(trimmed.startsWith("<")||/^<!doctype/i.test(trimmed)){
+   throw new Error("Server returned an HTML error page (HTTP "+res.status+").");
+  }
+  try{return{res,data:trimmed?JSON.parse(trimmed):{}};}catch{throw new Error("Invalid JSON response (HTTP "+res.status+").");}
+ }
  function flatten(d){
   const map=new Map();
   const add=(item,section,source)=>{
@@ -104,6 +113,7 @@
   return [...map.values()].filter(item=>!isNigerian(item)).sort(categoryPriority);
  }
  const customLabels={
+  "/":"MovieLinkBD Home Feed",
   "cv:movie":"Movie",
   "cv:anime":"Anime",
   "cv:drama":"Drama",
@@ -116,18 +126,40 @@
   "/language/telugu":"Telugu Movies",
   "/language/malayalam":"Malayalam Movies",
   "/language/punjabi":"Punjabi Movies",
-  "/language/bangla":"Bangla Movies (MovieLinkBD)",
+  "/language/bangla":"Bangla Movies",
   "/language/bangla-dubbed":"Bangla Dubbed",
   "/language/dual-audio":"Dual Audio",
+  "/language/kannada":"Kannada Movies",
+  "/language/marathi":"Marathi Movies",
+  "/language/gujrati":"Gujarati Movies",
+  "/language/malaysian":"Malaysian Movies",
+  "/language/vietnamese":"Vietnamese Movies",
+  "/language/german":"German Movies",
+  "/language/italian":"Italian Movies",
+  "/language/portuguese":"Portuguese Movies",
+  "/language/others":"Other Languages",
   "/language/japanese-drama":"Japanese Drama (J-Drama)",
   "/language/turkish":"Turkish Drama",
   "/indian-series":"Indian Web Series",
   "/bengali-series":"Bengali Series",
   "/language/hindi-dubbed-series":"Hindi Dubbed Web Series",
   "/top-rated":"IMDb Top Rated",
+  "/top10":"Top 10 This Week",
+  "/popular":"Most Popular",
   "/recently-updated":"Recently Updated",
-  "/new":"Recently Added",
+  "/new":"New & Popular",
   "/mostwatch/7d":"Trending Now",
+  "/category/wwe":"WWE & Wrestling",
+  "/collection/mcu-marvel-cinematic-universe":"Marvel Cinematic Universe (MCU)",
+  "/collection/dc-universe-dceu-dcu":"DC Universe (DCEU & DCU)",
+  "/collection/best-bangla-dubbed-movies":"Best Bangla Dubbed Movies",
+  "/collection/top-rated-hindi-dubbed-action":"Top Rated Hindi Dubbed Action",
+  "/collection/bangla-web-series":"Bangla Web Series",
+  "/collection/korean-drama-must-watch":"Korean Drama Must Watch",
+  "/collection/south-indian-blockbusters":"South Indian Blockbusters",
+  "/collection/horror-night":"Horror Night",
+  "/collection/family-animation":"Family Animation",
+  "/collection/thriller-mystery":"Thriller & Mystery",
   "/adult18plus":"Midnight (18+)",
   "/midnight":"Midnight (18+)",
   "/genre/adult":"Adult",
@@ -273,7 +305,7 @@
    const label=text(c.label)||text(c.name)||text(c.title)||text(c.slug)||value,key=norm(value);
    if(value&&label&&!seen.has(key)){seen.add(key);items.push({value,label,group:c.group,icon:c.icon});}
   });
-  const topQuick=items.filter(c=>c.group!=="Genres").slice(0,18);
+  const topQuick=items.filter(c=>c.group!=="Genres");
   const quickList=topQuick.length?topQuick:items;
   nav.innerHTML='<a class="catalog-chip '+(!selected?"active":"")+'" href="catalog.html">ALL A–Z</a>'+quickList.map(c=>'<a class="catalog-chip '+(norm(c.value)===norm(selected)?"active":"")+'" href="catalog.html?category='+encodeURIComponent(c.value)+'">'+esc(c.label)+'</a>').join("");
   renderAllCatsPanel(cats);
@@ -311,8 +343,7 @@
     const cats=await catsPromise;
     data={categories:cats};
     status.textContent="Searching movies and dramas…";
-    const response=await fetch("/api/movie-api/search?q="+encodeURIComponent(q)+"&page="+page,{headers:{Accept:"application/json"},cache:"default"});
-    const payload=await response.json();
+    const {res:response,data:payload}=await fetchJsonSafe("/api/movie-api/search?q="+encodeURIComponent(q)+"&page="+page,{headers:{Accept:"application/json"},cache:"default"});
     if(!response.ok||payload.ok!==true)throw new Error(payload.error||"Movie Search API unavailable");
     const unique=new Map();
     (Array.isArray(payload.items)?payload.items:[]).filter(item=>!isNigerian(item)).forEach(item=>{
@@ -323,11 +354,10 @@
     if(!all.length)status.textContent="No matching movies or dramas found.";
    }else{
     status.textContent="Loading Movie API catalog…";
-    const [response,cats]=await Promise.all([
-     fetch("/api/movie-api/home",{headers:{Accept:"application/json"},cache:"default"}),
+    const [{res:response,data:payload},cats]=await Promise.all([
+     fetchJsonSafe("/api/movie-api/home",{headers:{Accept:"application/json"},cache:"default"}),
      catsPromise
     ]);
-    const payload=await response.json();
     if(!response.ok||payload.ok!==true)throw new Error(payload.error||"Movie API unavailable");
     data=payload;
     if(cats.length)data.categories=cats;
@@ -344,10 +374,9 @@
     };
     const category=(data.categories||[]).find(x=>[x.path,x.slug,x.label,x.name,x.title].some(v=>norm(v)===norm(selected)));
     const apiPath=customPaths[selected]||text(category?.path)||(selected.startsWith("/")?selected:(!selected?"/type/movies":""));
-    if(apiPath&&apiPath!=="/"){
+    if(apiPath&&(apiPath!=="/"||selected==="/")){
      status.textContent="Loading "+(category?.label||customLabels[selected]||"Category")+" · Page "+page+"…";
-     const cr=await fetch("/api/movie-api/catalog?category="+encodeURIComponent(apiPath)+"&page="+Math.max(1,Math.min(100,page)),{headers:{Accept:"application/json"},cache:"default"});
-     const pagePayload=await cr.json();
+     const {res:cr,data:pagePayload}=await fetchJsonSafe("/api/movie-api/catalog?category="+encodeURIComponent(apiPath)+"&page="+Math.max(1,Math.min(100,page)),{headers:{Accept:"application/json"},cache:"default"});
      if(!cr.ok||pagePayload.ok!==true)throw new Error(pagePayload.error||"Movie Catalog API unavailable");
      const unique=new Map();
      (Array.isArray(pagePayload.items)?pagePayload.items:[]).forEach(item=>{

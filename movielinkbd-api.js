@@ -1,8 +1,8 @@
 import { MOVIEBOX_UA, signMediaToken, verifyMediaToken } from "./moviebox-api.js";
 
 export const MLBD_MIRRORS = [
-  { id: "primary", name: "Primary", baseUrl: "https://h5esed.movielinkbd.at", priority: 1 },
-  { id: "mirror2", name: "Mirror 2", baseUrl: "https://movielinkbd.at", priority: 2 },
+  { id: "primary", name: "Primary", baseUrl: "https://fvuyyu.movielinkbd.at", priority: 1 },
+  { id: "mirror2", name: "Mirror 2", baseUrl: "https://h5esed.movielinkbd.at", priority: 2 },
   { id: "mirror3", name: "Mirror 3", baseUrl: "https://movielinkbd.com", priority: 3 },
   { id: "backup", name: "Backup", baseUrl: "https://cmyyhb.movielinkbd.at", priority: 4 }
 ];
@@ -32,7 +32,7 @@ const DEFAULT_FALLBACK_CATEGORIES = [
 
 const mlbdCache = new Map();
 const mlbdInFlight = new Map();
-let activeResolvedOrigin = "https://h5esed.movielinkbd.at";
+let activeResolvedOrigin = "https://fvuyyu.movielinkbd.at";
 
 function getCached(key) {
   const entry = mlbdCache.get(key);
@@ -100,7 +100,7 @@ export function normalizeUpstreamPath(rawPath) {
 
 export function isMlbdPath(rawPath) {
   const s = String(rawPath || "").trim();
-  return /^\/(?:mlbd\/|movie\/|series\/|anime\/)/i.test(s);
+  return /^\/(?:mlbd\/|movie\/|series\/|drama\/|anime\/)/i.test(s);
 }
 
 export function decodeHtmlEntities(str) {
@@ -191,22 +191,60 @@ function cookieStringFromResponse(res) {
   }
 }
 
+const BLOCKED_TRAP_HOSTS = new Set(["movielinkbd.tv", "www.movielinkbd.tv", "movielinkbd.app", "www.movielinkbd.app"]);
+
+function ensureTrailingSlashPath(pathWithQuery) {
+  const raw = String(pathWithQuery || "/");
+  const qIdx = raw.indexOf("?");
+  const p = qIdx >= 0 ? raw.slice(0, qIdx) : raw;
+  const q = qIdx >= 0 ? raw.slice(qIdx) : "";
+  if (!p || p === "/" || p === "/new" || /^\/(?:movie|series|drama|anime|p|updates)\//i.test(p)) {
+    return raw;
+  }
+  return (p.endsWith("/") ? p : p + "/") + q;
+}
+
 async function fetchMirrorOnce(baseUrl, pathWithQuery, extraHeaders = {}, timeoutMs = 14000) {
-  const target = new URL(pathWithQuery, baseUrl).href;
-  const res = await fetch(target, {
-    headers: {
-      "User-Agent": MOVIEBOX_UA,
-      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      "Accept-Language": "en-US,en;q=0.9",
-      ...extraHeaders
-    },
-    redirect: "follow",
-    signal: AbortSignal.timeout(timeoutMs)
-  });
-  const finalOrigin = new URL(res.url || target).origin;
-  const cookies = cookieStringFromResponse(res);
-  const text = await res.text();
-  return { res, text, finalUrl: res.url || target, finalOrigin, cookies };
+  let currentUrl = new URL(pathWithQuery, baseUrl).href;
+  let allCookies = [];
+  for (let hop = 0; hop < 5; hop++) {
+    const res = await fetch(currentUrl, {
+      headers: {
+        "User-Agent": MOVIEBOX_UA,
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        ...extraHeaders
+      },
+      redirect: "manual",
+      signal: AbortSignal.timeout(timeoutMs)
+    });
+    const hopCookies = cookieStringFromResponse(res);
+    if (hopCookies) allCookies.push(hopCookies);
+
+    if (res.status >= 300 && res.status < 400) {
+      const loc = res.headers.get("location");
+      try { await res.body?.cancel(); } catch {}
+      if (!loc) return { res, text: "", finalUrl: currentUrl, finalOrigin: new URL(currentUrl).origin, cookies: allCookies.join("; ") };
+      const nextUrl = new URL(loc, currentUrl);
+      if (BLOCKED_TRAP_HOSTS.has(nextUrl.hostname.toLowerCase())) {
+        return {
+          res,
+          text: "",
+          finalUrl: currentUrl,
+          finalOrigin: new URL(currentUrl).origin,
+          cookies: allCookies.join("; "),
+          blockedRedirect: nextUrl.href
+        };
+      }
+      currentUrl = nextUrl.href;
+      continue;
+    }
+
+    const finalOrigin = new URL(res.url || currentUrl).origin;
+    const text = await res.text();
+    return { res, text, finalUrl: res.url || currentUrl, finalOrigin, cookies: allCookies.join("; ") };
+  }
+  throw new Error(`Too many redirects from ${baseUrl}`);
 }
 
 function isPortalLandingHtml(html) {
@@ -221,17 +259,28 @@ function isPortalLandingHtml(html) {
 function extractMirrorOriginsFromPortal(html) {
   const out = [];
   const seen = new Set();
-  const re = /https:\/\/([a-z0-9.-]*movielinkbd\.[a-z]{2,10})/gi;
+  const re = /https:\/\/([a-z0-9-]+\.movielinkbd\.at)/gi;
   let m;
   while ((m = re.exec(String(html || "")))) {
     const origin = `https://${m[1].toLowerCase()}`;
-    if (origin === "https://movielinkbd.com" || origin === "https://www.movielinkbd.com" || origin === "https://movielinkbd.at") continue;
+    if (origin === "https://www.movielinkbd.at") continue;
     if (!seen.has(origin)) {
       seen.add(origin);
       out.push(origin);
     }
   }
   return out;
+}
+
+async function discoverLiveMirrorOrigin(timeoutMs = 8000) {
+  try {
+    const portal = await fetchMirrorOnce("https://movielinkbd.com", "/", {}, timeoutMs);
+    if (portal.res.ok && portal.text) {
+      const origins = extractMirrorOriginsFromPortal(portal.text);
+      if (origins.length) return origins;
+    }
+  } catch {}
+  return [];
 }
 
 export async function mlbdFetchPage(upstreamPath = "/", options = {}) {
@@ -250,42 +299,83 @@ export async function mlbdFetchPage(upstreamPath = "/", options = {}) {
   const job = (async () => {
     const candidateBases = [...new Set([
       activeResolvedOrigin,
-      ...MLBD_MIRRORS.map(m => m.baseUrl),
-      "https://movielinkbd.tv"
-    ])];
+      ...MLBD_MIRRORS.map(m => m.baseUrl)
+    ])].filter(b => {
+      try { return !BLOCKED_TRAP_HOSTS.has(new URL(b).hostname.toLowerCase()); } catch { return false; }
+    });
     const tried = new Set();
 
+    const slashVariant = ensureTrailingSlashPath(cleanPath);
+    const pathVariants = [...new Set(
+      cleanPath === "/"
+        ? ["/", "/new"]
+        : [slashVariant, cleanPath]
+    )];
+
     let lastErr = null;
+    let portalChecked = false;
+
     for (let i = 0; i < candidateBases.length; i++) {
       const base = candidateBases[i];
       if (!base || tried.has(base)) continue;
       tried.add(base);
-      try {
-        const extra = options.headers || {};
-        const out = await fetchMirrorOnce(base, cleanPath, extra, options.timeoutMs || 14000);
-        if (out.res.ok && out.text && out.text.length > 400) {
-          if (isPortalLandingHtml(out.text)) {
-            for (const discovered of extractMirrorOriginsFromPortal(out.text)) {
-              if (!tried.has(discovered) && !candidateBases.includes(discovered)) {
-                candidateBases.push(discovered);
-              }
+
+      // Portal root movielinkbd.com only gives mirror origins, not full category pages
+      if (/^https?:\/\/(?:www\.)?movielinkbd\.com$/i.test(base)) {
+        if (!portalChecked) {
+          portalChecked = true;
+          const discovered = await discoverLiveMirrorOrigin(options.timeoutMs || 8000);
+          for (const d of discovered) {
+            if (!tried.has(d) && !candidateBases.includes(d)) {
+              candidateBases.splice(i + 1, 0, d);
             }
-            lastErr = new Error(`Portal landing or challenge page from ${base}`);
+          }
+        }
+        continue;
+      }
+
+      for (const reqVariant of pathVariants) {
+        try {
+          const extra = options.headers || {};
+          const out = await fetchMirrorOnce(base, reqVariant, extra, options.timeoutMs || 14000);
+          if (out.blockedRedirect) {
+            lastErr = new Error(`Blocked redirect (${out.blockedRedirect}) from ${base}`);
             continue;
           }
-          activeResolvedOrigin = out.finalOrigin || base;
-          const result = {
-            html: out.text,
-            finalUrl: out.finalUrl,
-            origin: out.finalOrigin,
-            cookies: out.cookies,
-            mirrorUsed: base
-          };
-          return setCached(cacheKey, result, ttlMs);
+          if (out.res.ok && out.text && out.text.length > 400) {
+            if (isPortalLandingHtml(out.text)) {
+              for (const discovered of extractMirrorOriginsFromPortal(out.text)) {
+                if (!tried.has(discovered) && !candidateBases.includes(discovered)) {
+                  candidateBases.splice(i + 1, 0, discovered);
+                }
+              }
+              lastErr = new Error(`Portal landing or challenge page from ${base}`);
+              break;
+            }
+            activeResolvedOrigin = out.finalOrigin || base;
+            const result = {
+              html: out.text,
+              finalUrl: out.finalUrl,
+              origin: out.finalOrigin,
+              cookies: out.cookies,
+              mirrorUsed: base
+            };
+            return setCached(cacheKey, result, ttlMs);
+          }
+          lastErr = new Error(`HTTP ${out.res.status} from ${base}${reqVariant}`);
+        } catch (err) {
+          lastErr = err;
         }
-        lastErr = new Error(`HTTP ${out.res.status} from ${base}`);
-      } catch (err) {
-        lastErr = err;
+      }
+
+      if (!portalChecked) {
+        portalChecked = true;
+        const discovered = await discoverLiveMirrorOrigin(options.timeoutMs || 8000);
+        for (const d of discovered) {
+          if (!tried.has(d) && !candidateBases.includes(d)) {
+            candidateBases.splice(i + 1, 0, d);
+          }
+        }
       }
     }
     throw lastErr || new Error("All MovieLinkBD mirrors are currently unreachable");
@@ -369,7 +459,7 @@ function normalizeMlbdItemPath(rawHref) {
     if (!s) return "";
     const u = /^https?:\/\//i.test(s) ? new URL(s) : new URL(s, "https://movielinkbd.at");
     const p = u.pathname;
-    if (/^\/(?:movie|series|anime)\/[^/]+/i.test(p)) return p;
+    if (/^\/(?:movie|series|drama|anime)\/[^/]+/i.test(p)) return p;
     return "";
   } catch {
     return "";
@@ -383,7 +473,7 @@ export function extractCardsFromHtml(html, baseOrigin = activeResolvedOrigin) {
 
   for (let i = 1; i < blocks.length; i++) {
     const chunk = blocks[i].slice(0, 2600);
-    const hrefMatch = chunk.match(/href="([^"]*\/(?:movie|series|anime)\/[^"]+)"/i);
+    const hrefMatch = chunk.match(/href="([^"]*\/(?:movie|series|drama|anime)\/[^"]+)"/i);
     const itemPath = normalizeMlbdItemPath(hrefMatch?.[1]);
     if (!itemPath || seen.has(itemPath)) continue;
     seen.add(itemPath);
@@ -408,7 +498,7 @@ export function extractCardsFromHtml(html, baseOrigin = activeResolvedOrigin) {
     const epBadge = stripTags(chunk.match(/<span class="badge ep-badge[^"]*"[^>]*>([\s\S]*?)<\/span>/i)?.[1] || "");
     const uploadTime = stripTags(chunk.match(/<div class="upload-time"[^>]*>([\s\S]*?)<\/div>/i)?.[1] || "");
     const yearMatch = title.match(/\((19\d\d|20\d\d)\)/);
-    const isSeries = /^\/(?:series|anime)\//i.test(itemPath) || /series|drama|episode|s\d+/i.test(`${typeText} ${epBadge}`);
+    const isSeries = /^\/(?:series|drama|anime)\//i.test(itemPath) || /series|drama|episode|s\d+/i.test(`${typeText} ${epBadge}`);
     const isAnime = /^\/anime\//i.test(itemPath) || /anime/i.test(`${typeText} ${title}`);
     const ratingMatch = chunk.match(/★\s*(\d+(?:\.\d+)?)/);
 
@@ -447,6 +537,7 @@ export function extractCategoriesFromHtml(html) {
   while ((m = re.exec(String(html || "")))) {
     const rawPath = decodeHtmlEntities(m[1]).split("#")[0].trim();
     if (!rawPath || rawPath.includes("'") || rawPath.includes("{") || rawPath.length > 80) continue;
+    if (/^\/(?:anime|movie|series|drama|mlbd)\/[^/]+/i.test(rawPath)) continue;
     const rawLabel = stripTags(m[2]);
     if (!rawLabel || rawLabel.length > 42 || /show all/i.test(rawLabel)) continue;
     if (seen.has(rawPath)) continue;
@@ -478,6 +569,26 @@ export function extractCategoriesFromHtml(html) {
   return found;
 }
 
+function guessMlbdSectionPath(title, secHtml) {
+  const hrefMatch = String(secHtml || "").match(/<a[^>]+href="(\/(?:language|genre|type|category|collection|southIndian|anime|new|mostwatch)[^"]*)"[^>]*>[\s\S]*?(?:view all|see all|more|›)?[\s\S]*?<\/a>/i);
+  if (hrefMatch?.[1] && !/^\/(?:anime|movie|series)\/[^/]+/i.test(hrefMatch[1])) {
+    return decodeHtmlEntities(hrefMatch[1]).split("#")[0].trim();
+  }
+  const t = String(title || "").toLowerCase();
+  if (/top\s*10/i.test(t)) return "/top10";
+  if (/new\s*&\s*popular|recently\s*added/i.test(t)) return "/new";
+  if (/ongoing|series|tv\s*shows/i.test(t)) return "/type/series";
+  if (/south\s*indian/i.test(t)) return "/southIndian";
+  if (/anime/i.test(t)) return "/anime";
+  if (/animation/i.test(t)) return "/genre/animation";
+  if (/bangla\s*dub/i.test(t)) return "/language/bangla-dubbed";
+  if (/bangla|bengali/i.test(t)) return "/language/bangla";
+  if (/hindi\s*dub/i.test(t)) return "/language/hindi-dubbed";
+  if (/dual\s*audio/i.test(t)) return "/language/dual-audio";
+  if (/movies/i.test(t)) return "/type/movies";
+  return "/new";
+}
+
 function extractHomeSections(html, baseOrigin) {
   const sections = [];
   const railSplits = String(html || "").split(/<section[^>]+class="[^"]*rail-section[^"]*"[^>]*>/i);
@@ -492,6 +603,7 @@ function extractHomeSections(html, baseOrigin) {
       sections.push({
         id: `mlbd-${i}`,
         title,
+        categoryPath: guessMlbdSectionPath(title, secHtml),
         items,
         source: "movielinkbd"
       });
@@ -501,7 +613,7 @@ function extractHomeSections(html, baseOrigin) {
   if (!sections.length) {
     const fallbackItems = extractCardsFromHtml(html, baseOrigin);
     if (fallbackItems.length) {
-      sections.push({ id: "mlbd-latest", title: "🔥 MovieLinkBD Latest", items: fallbackItems, source: "movielinkbd" });
+      sections.push({ id: "mlbd-latest", title: "🔥 MovieLinkBD Latest", categoryPath: "/new", items: fallbackItems, source: "movielinkbd" });
     }
   }
 
@@ -790,14 +902,45 @@ export async function getMlbdHomeFeed() {
   if (cached) return cached;
 
   const page = await mlbdFetchPage("/", { ttlMs: 120000 });
-  const sections = extractHomeSections(page.html, page.origin);
+  let sections = extractHomeSections(page.html, page.origin);
   const categories = extractCategoriesFromHtml(page.html);
 
+  // If root '/' fell back to '/new' (single rail), compose the core MovieLinkBD shelves in parallel
+  if (sections.length <= 1) {
+    const extraShelves = [
+      { id: "mlbd-new", title: "🆕 NEW & POPULAR", path: "/new" },
+      { id: "mlbd-movies", title: "🎬 MOVIES", path: "/type/movies/" },
+      { id: "mlbd-series", title: "📺 SERIES & TV SHOWS", path: "/type/series/" },
+      { id: "mlbd-south", title: "💫 SOUTH INDIAN", path: "/southIndian/" },
+      { id: "mlbd-anime", title: "🍥 ANIME ZONE", path: "/anime/" },
+      { id: "mlbd-anim", title: "🎨 ANIMATION", path: "/genre/animation/" }
+    ];
+    const settled = await Promise.allSettled(
+      extraShelves.map(s => getMlbdCatalog({ path: s.path, page: 1 }))
+    );
+    const built = [];
+    for (let i = 0; i < extraShelves.length; i++) {
+      const res = settled[i];
+      if (res.status === "fulfilled" && Array.isArray(res.value?.items) && res.value.items.length) {
+        built.push({
+          id: extraShelves[i].id,
+          title: extraShelves[i].title,
+          categoryPath: extraShelves[i].path.replace(/\/+$/, "") || "/new",
+          items: res.value.items.slice(0, 14),
+          source: "movielinkbd"
+        });
+      }
+    }
+    if (built.length) sections = built;
+  }
+
   const top10Sec = sections.find(s => /top\s*10/i.test(s.title));
-  const trendingSec = sections.find(s => /new|popular|recently/i.test(s.title)) || sections[0];
+  const trendingSec = sections.find(s => s !== top10Sec && /new|popular|recently/i.test(s.title)) || sections.find(s => s !== top10Sec) || sections[0];
   const allItems = sections.flatMap(s => s.items);
   const deduped = [...new Map(allItems.map(it => [it.path, it])).values()];
-  const trending = top10Sec?.items?.length ? top10Sec.items : trendingSec?.items || deduped.slice(0, 18);
+  const top10Set = new Set((top10Sec?.items || []).map(it => it.path));
+  const nonTop10 = deduped.filter(it => !top10Set.has(it.path));
+  const trending = trendingSec?.items?.length ? trendingSec.items : (nonTop10.length ? nonTop10.slice(0, 18) : deduped.slice(0, 18));
   const banners = deduped.filter(it => it.poster).slice(0, 8);
 
   return setCached(
@@ -825,13 +968,15 @@ export async function getMlbdCatalog({ path = "/", q = "", page = 1 } = {}) {
   if (cleanQuery || basePath === "/search" || basePath.startsWith("/search?")) {
     const searchTerm = cleanQuery || new URL("https://x.test" + basePath).searchParams.get("q") || "";
     upstreamPath = pageNum > 1
-      ? `/search/page/${pageNum}?q=${encodeURIComponent(searchTerm)}`
-      : `/search?q=${encodeURIComponent(searchTerm)}`;
+      ? `/search/page/${pageNum}/?q=${encodeURIComponent(searchTerm)}`
+      : `/search/?q=${encodeURIComponent(searchTerm)}`;
   } else if (basePath === "/") {
-    upstreamPath = pageNum > 1 ? `/new/page/${pageNum}` : "/";
+    upstreamPath = pageNum > 1 ? `/new/page/${pageNum}/` : "/new";
+  } else if (basePath === "/new") {
+    upstreamPath = pageNum > 1 ? `/new/page/${pageNum}/` : "/new";
   } else {
     const cleanBase = basePath.replace(/\/page\/\d+\/?$/i, "").replace(/\/+$/, "") || "/";
-    upstreamPath = pageNum > 1 ? `${cleanBase}/page/${pageNum}` : cleanBase;
+    upstreamPath = pageNum > 1 ? `${cleanBase}/page/${pageNum}/` : `${cleanBase}/`;
   }
 
   const cacheKey = `catalog:${upstreamPath}`;

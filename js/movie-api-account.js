@@ -8,9 +8,171 @@
   const WATCHLIST_KEY = "cv_watchlist_v1";
   const HISTORY_KEY = "cv_watch_history_v1";
   const SEARCH_HISTORY_KEY = "cv_recent_searches_v1";
+  const SCROLL_PROGRESS_KEY = "cv_scroll_progress_v1";
+  const SCROLL_PROGRESS_THEMES = {
+    crimson: {
+      label: "Crimson",
+      bg: "linear-gradient(90deg, #ef4444, #f87171, #fca5a5)",
+      glow: "0 0 12px rgba(248, 113, 113, 0.6)",
+      swatch: "#f87171"
+    },
+    ocean: {
+      label: "Ocean",
+      bg: "linear-gradient(90deg, #0284c7, #38bdf8, #7dd3fc)",
+      glow: "0 0 12px rgba(56, 189, 248, 0.55)",
+      swatch: "#38bdf8"
+    },
+    emerald: {
+      label: "Emerald",
+      bg: "linear-gradient(90deg, #059669, #34d399, #6ee7b7)",
+      glow: "0 0 12px rgba(52, 211, 153, 0.55)",
+      swatch: "#34d399"
+    },
+    amber: {
+      label: "Gold",
+      bg: "linear-gradient(90deg, #d97706, #fbbf24, #fde68a)",
+      glow: "0 0 12px rgba(251, 191, 36, 0.55)",
+      swatch: "#fbbf24"
+    },
+    frost: {
+      label: "Frost",
+      bg: "linear-gradient(90deg, rgba(226, 232, 240, 0.85), #ffffff)",
+      glow: "0 0 10px rgba(255, 255, 255, 0.45)",
+      swatch: "#f8fafc"
+    }
+  };
+  const DEFAULT_SCROLL_PROGRESS = {
+    enabled: true,
+    theme: "crimson",
+    customColor: "",
+    height: 3,
+    glow: true,
+    longPagesOnly: true
+  };
   let deferredPrompt = null;
-  let meViewMode = "hub"; // "hub" | "history" | "search-history" | "install"
+  let meViewMode = "hub"; // "hub" | "history" | "search-history" | "scroll-progress" | "install"
   let recentUploadsCount = null;
+  let spBarEl = null;
+  let spFillEl = null;
+  let spRaf = 0;
+
+  function loadScrollProgressConfig() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(SCROLL_PROGRESS_KEY) || "{}");
+      if (!raw || typeof raw !== "object") return { ...DEFAULT_SCROLL_PROGRESS };
+      const theme = raw.theme === "custom" || SCROLL_PROGRESS_THEMES[raw.theme] ? raw.theme : "crimson";
+      const customColor = /^#[0-9a-f]{6}$/i.test(String(raw.customColor || "")) ? String(raw.customColor) : "";
+      const heightNum = Number(raw.height);
+      const height = [2, 3, 4, 5].includes(heightNum) ? heightNum : DEFAULT_SCROLL_PROGRESS.height;
+      return {
+        enabled: raw.enabled !== false,
+        theme: theme === "custom" && !customColor ? "crimson" : theme,
+        customColor,
+        height,
+        glow: raw.glow !== false,
+        longPagesOnly: raw.longPagesOnly !== false
+      };
+    } catch {
+      return { ...DEFAULT_SCROLL_PROGRESS };
+    }
+  }
+
+  function resolveScrollTheme(cfg) {
+    if (cfg.theme === "custom" && cfg.customColor) {
+      return {
+        label: "Custom",
+        bg: `linear-gradient(90deg, ${cfg.customColor}, ${cfg.customColor}cc)`,
+        glow: `0 0 12px ${cfg.customColor}99`,
+        swatch: cfg.customColor
+      };
+    }
+    return SCROLL_PROGRESS_THEMES[cfg.theme] || SCROLL_PROGRESS_THEMES.crimson;
+  }
+
+  function ensureScrollProgressBar() {
+    if (spBarEl && document.body?.contains(spBarEl)) return spBarEl;
+    if (!document.body) return null;
+    spBarEl = document.createElement("div");
+    spBarEl.id = "cvScrollProgress";
+    spBarEl.className = "cv-scroll-progress";
+    spBarEl.setAttribute("role", "progressbar");
+    spBarEl.setAttribute("aria-label", "Page scroll progress");
+    spBarEl.setAttribute("aria-valuemin", "0");
+    spBarEl.setAttribute("aria-valuemax", "100");
+    spBarEl.setAttribute("aria-valuenow", "0");
+    spFillEl = document.createElement("div");
+    spFillEl.className = "cv-scroll-progress-fill";
+    spBarEl.appendChild(spFillEl);
+    document.body.appendChild(spBarEl);
+    return spBarEl;
+  }
+
+  function updateScrollProgress() {
+    spRaf = 0;
+    const bar = ensureScrollProgressBar();
+    if (!bar || !spFillEl) return;
+    const cfg = loadScrollProgressConfig();
+    const theme = resolveScrollTheme(cfg);
+    bar.style.setProperty("--cv-sp-height", `${cfg.height}px`);
+    bar.style.setProperty("--cv-sp-bg", theme.bg);
+    bar.style.setProperty("--cv-sp-glow", cfg.glow ? theme.glow : "none");
+
+    const docHeight = Math.max(
+      document.documentElement?.scrollHeight || 0,
+      document.body?.scrollHeight || 0
+    );
+    const maxScroll = Math.max(0, docHeight - window.innerHeight);
+    const threshold = cfg.longPagesOnly ? Math.max(240, Math.round(window.innerHeight * 0.35)) : 20;
+    const shouldShow = cfg.enabled && maxScroll >= threshold;
+    bar.classList.toggle("is-visible", shouldShow);
+
+    const ratio = maxScroll > 0 ? Math.min(1, Math.max(0, (window.scrollY || window.pageYOffset || 0) / maxScroll)) : 0;
+    spFillEl.style.transform = `scaleX(${ratio.toFixed(4)})`;
+    bar.setAttribute("aria-valuenow", String(Math.round(ratio * 100)));
+  }
+
+  function scheduleScrollProgressUpdate() {
+    if (spRaf) return;
+    spRaf = requestAnimationFrame(updateScrollProgress);
+  }
+
+  function saveScrollProgressConfig(patch) {
+    const next = { ...loadScrollProgressConfig(), ...(patch || {}) };
+    try {
+      localStorage.setItem(SCROLL_PROGRESS_KEY, JSON.stringify(next));
+    } catch {}
+    scheduleScrollProgressUpdate();
+    return next;
+  }
+
+  function resetScrollProgressConfig() {
+    try {
+      localStorage.removeItem(SCROLL_PROGRESS_KEY);
+    } catch {}
+    scheduleScrollProgressUpdate();
+    return { ...DEFAULT_SCROLL_PROGRESS };
+  }
+
+  window.CineVerseScrollProgress = {
+    getConfig: loadScrollProgressConfig,
+    updateConfig: saveScrollProgressConfig,
+    resetConfig: resetScrollProgressConfig,
+    refresh: scheduleScrollProgressUpdate
+  };
+
+  window.addEventListener("scroll", scheduleScrollProgressUpdate, { passive: true });
+  window.addEventListener("resize", scheduleScrollProgressUpdate, { passive: true });
+  window.addEventListener("storage", e => {
+    if (e.key === SCROLL_PROGRESS_KEY) scheduleScrollProgressUpdate();
+  });
+  if (typeof ResizeObserver === "function" && document.body) {
+    new ResizeObserver(scheduleScrollProgressUpdate).observe(document.body);
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", scheduleScrollProgressUpdate, { once: true });
+  } else {
+    scheduleScrollProgressUpdate();
+  }
 
   window.addEventListener("beforeinstallprompt", e => {
     e.preventDefault();
@@ -146,6 +308,81 @@
       return;
     }
 
+    if (meViewMode === "scroll-progress") {
+      const cfg = loadScrollProgressConfig();
+      const activeTheme = resolveScrollTheme(cfg);
+      content.innerHTML = `
+        <div class="cv-me-subhead">
+          <button type="button" class="cv-me-back-btn" data-me-view="hub">‹ Scroll Progress Bar</button>
+          <button type="button" id="cvSpResetBtn" class="cv-clear-btn">Reset</button>
+        </div>
+        <div class="cv-sp-settings">
+          <div class="cv-sp-preview-box">
+            <div class="cv-sp-preview-head">
+              <span>Live Top Bar Preview</span>
+              <span>${cfg.enabled ? `${esc(activeTheme.label)} · ${cfg.height}px` : "Hidden"}</span>
+            </div>
+            <div class="cv-sp-preview-track" style="height:${cfg.height}px">
+              <div class="cv-sp-preview-fill" style="background:${esc(activeTheme.bg)};box-shadow:${esc(cfg.glow ? activeTheme.glow : "none")};opacity:${cfg.enabled ? 1 : 0.25}"></div>
+            </div>
+          </div>
+
+          <div class="cv-sp-card">
+            <div class="cv-sp-row">
+              <div class="cv-sp-row-copy">
+                <b>Show Progress Bar</b>
+                <small>Tracks scroll depth at the top of the screen</small>
+              </div>
+              <button type="button" class="cv-sp-toggle ${cfg.enabled ? "active" : ""}" data-sp-toggle="enabled" aria-pressed="${cfg.enabled ? "true" : "false"}">${cfg.enabled ? "ON" : "OFF"}</button>
+            </div>
+            <div class="cv-sp-row">
+              <div class="cv-sp-row-copy">
+                <b>Long Listing Pages Only</b>
+                <small>Auto-hide on short non-scrollable pages</small>
+              </div>
+              <button type="button" class="cv-sp-toggle ${cfg.longPagesOnly ? "active" : ""}" data-sp-toggle="longPagesOnly" aria-pressed="${cfg.longPagesOnly ? "true" : "false"}">${cfg.longPagesOnly ? "ON" : "OFF"}</button>
+            </div>
+            <div class="cv-sp-row">
+              <div class="cv-sp-row-copy">
+                <b>Soft Glow Effect</b>
+                <small>Adds subtle ambient glow under the bar</small>
+              </div>
+              <button type="button" class="cv-sp-toggle ${cfg.glow ? "active" : ""}" data-sp-toggle="glow" aria-pressed="${cfg.glow ? "true" : "false"}">${cfg.glow ? "ON" : "OFF"}</button>
+            </div>
+          </div>
+
+          <div class="cv-sp-card">
+            <span class="cv-sp-label">Accent Color</span>
+            <div class="cv-sp-swatches">
+              ${Object.entries(SCROLL_PROGRESS_THEMES)
+                .map(
+                  ([key, t]) => `
+                    <button type="button" class="cv-sp-swatch ${cfg.theme === key ? "active" : ""}" data-sp-theme="${key}">
+                      <span class="cv-sp-swatch-dot" style="background:${t.swatch}"></span>
+                      <span>${esc(t.label)}</span>
+                    </button>
+                  `
+                )
+                .join("")}
+              <input id="cvSpCustomColor" class="cv-sp-color-input" type="color" value="${esc(cfg.customColor || activeTheme.swatch)}" title="Custom bar color" aria-label="Custom progress bar color">
+            </div>
+          </div>
+
+          <div class="cv-sp-card">
+            <span class="cv-sp-label">Thickness</span>
+            <div class="cv-sp-chips">
+              ${[2, 3, 4, 5]
+                .map(
+                  px => `<button type="button" class="cv-sp-chip ${cfg.height === px ? "active" : ""}" data-sp-height="${px}">${px}px</button>`
+                )
+                .join("")}
+            </div>
+          </div>
+        </div>
+      `;
+      return;
+    }
+
     if (meViewMode === "install") {
       content.innerHTML = `
         <div class="cv-me-subhead">
@@ -206,6 +443,17 @@
           </span>
           <span class="cv-me-row-right"><span id="cvNewUploadsPill" class="cv-me-red-pill">${recentUploadsCount ?? "LIVE"}</span><span class="cv-me-chevron">›</span></span>
         </a>
+
+        <button type="button" class="cv-me-hub-row" data-me-view="scroll-progress">
+          <span class="cv-me-row-left">
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><rect x="3" y="10" width="18" height="4" rx="2"/><line x1="3" y1="18" x2="15" y2="18"/></svg>
+            <span>Scroll Progress Bar</span>
+          </span>
+          <span class="cv-me-row-right">
+            <span>${(() => { const c = loadScrollProgressConfig(); return c.enabled ? `${resolveScrollTheme(c).label} · ${c.height}px` : "Off"; })()}</span>
+            <span class="cv-me-chevron">›</span>
+          </span>
+        </button>
 
         <button type="button" class="cv-me-hub-row" data-me-view="install">
           <span class="cv-me-row-left">
@@ -280,6 +528,31 @@
           renderMeContent();
           return;
         }
+        const spToggle = e.target.closest("[data-sp-toggle]");
+        if (spToggle) {
+          const key = spToggle.dataset.spToggle;
+          const cur = loadScrollProgressConfig();
+          saveScrollProgressConfig({ [key]: !cur[key] });
+          renderMeContent();
+          return;
+        }
+        const spTheme = e.target.closest("[data-sp-theme]");
+        if (spTheme) {
+          saveScrollProgressConfig({ theme: spTheme.dataset.spTheme || "crimson" });
+          renderMeContent();
+          return;
+        }
+        const spHeight = e.target.closest("[data-sp-height]");
+        if (spHeight) {
+          saveScrollProgressConfig({ height: Number(spHeight.dataset.spHeight) || 3 });
+          renderMeContent();
+          return;
+        }
+        if (e.target.closest("#cvSpResetBtn")) {
+          resetScrollProgressConfig();
+          renderMeContent();
+          return;
+        }
         if (e.target.closest("#cvTriggerPwaInstall") && deferredPrompt) {
           deferredPrompt.prompt();
           try {
@@ -287,6 +560,21 @@
           } catch {}
           deferredPrompt = null;
           renderMeContent();
+        }
+      });
+
+      modal.addEventListener("input", e => {
+        if (e.target?.id === "cvSpCustomColor") {
+          saveScrollProgressConfig({ theme: "custom", customColor: e.target.value });
+          const previewFill = modal.querySelector(".cv-sp-preview-fill");
+          const previewHead = modal.querySelector(".cv-sp-preview-head span:last-child");
+          const cfg = loadScrollProgressConfig();
+          const t = resolveScrollTheme(cfg);
+          if (previewFill) {
+            previewFill.style.background = t.bg;
+            previewFill.style.boxShadow = cfg.glow ? t.glow : "none";
+          }
+          if (previewHead) previewHead.textContent = cfg.enabled ? `${t.label} · ${cfg.height}px` : "Hidden";
         }
       });
     }

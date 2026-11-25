@@ -992,9 +992,10 @@ app.all("/api/movie-api/*", async (req, res) => {
     }
 
     if (legacy === "home") {
-      const [mbRes, mlbdRes] = await Promise.allSettled([
+      const [mbRes, mlbdRes, mlbdBanglaRes] = await Promise.allSettled([
         handleMovieBoxRoute("home", query),
-        getMlbdHomeFeed()
+        getMlbdHomeFeed(),
+        getMlbdCatalog({ path: "/language/bangla", page: 1 })
       ]);
       const payload = mbRes.status === "fulfilled"
         ? mbRes.value
@@ -1003,8 +1004,17 @@ app.all("/api/movie-api/*", async (req, res) => {
         const mlbd = mlbdRes.value;
         payload.mlbdSections = mlbd.sections || [];
         payload.mlbdTrending = mlbd.trending || [];
+        payload.mlbdCategories = mlbd.categories || [];
+        const existingCats = new Set((payload.categories || []).map(c => c?.path));
+        payload.categories = [
+          ...(payload.categories || []),
+          ...(mlbd.categories || []).filter(c => c?.path && !existingCats.has(c.path))
+        ];
         payload.sections = [...(payload.sections || []), ...(mlbd.sections || [])];
         payload.activeMlbdMirror = mlbd.activeMirror;
+      }
+      if (mlbdBanglaRes.status === "fulfilled" && Array.isArray(mlbdBanglaRes.value?.items)) {
+        payload.mlbdBangla = mlbdBanglaRes.value.items;
       }
       res.setHeader("Cache-Control", "public, max-age=60");
       return res.status(200).json(payload);
@@ -1061,33 +1071,53 @@ app.all("/api/movie-api/*", async (req, res) => {
     if (legacy === "catalog") {
       const category = String(query.get("category") || "/");
       const page = Math.max(1, Number(query.get("page")) || 1);
-      const isMlbdOnlyCategory = /^\/(?:language\/(?:bangla|bangla-dubbed|dual-audio)|category\/|collection\/)/i.test(category);
+      const isMlbdOnlyCategory = /^\/(?:language\/(?:dual-audio|gujrati|kannada|marathi|malaysian|vietnamese|german|italian|portuguese|others)|genre\/(?:biographical|historical|musical|sports|superhero|survival|suspense)|category\/|collection\/|collections|popular)/i.test(category);
       if (isMlbdOnlyCategory) {
-        const mlbdCat = await getMlbdCatalog({ path: category, page });
-        res.setHeader("Cache-Control", "public, max-age=60");
-        return res.json(mlbdCat);
+        try {
+          const mlbdCat = await getMlbdCatalog({ path: category, page });
+          if (Array.isArray(mlbdCat?.items) && mlbdCat.items.length > 0) {
+            res.setHeader("Cache-Control", "public, max-age=60");
+            return res.json(mlbdCat);
+          }
+        } catch (err) {
+          console.warn(`[MLBD catalog error] ${category}:`, err?.message || err);
+        }
+        try {
+          const mbFallback = await handleMovieBoxRoute("catalog", query);
+          if (mbFallback?.ok && Array.isArray(mbFallback.items)) {
+            res.setHeader("Cache-Control", "public, max-age=60");
+            return res.json(mbFallback);
+          }
+        } catch {}
+        res.setHeader("Cache-Control", "no-store");
+        return res.json({ ok: true, items: [], maxPage: 1, page });
       }
       const [mbRes, mlbdRes] = await Promise.allSettled([
         handleMovieBoxRoute("catalog", query),
         getMlbdCatalog({ path: category, page })
       ]);
-      const mbPayload = mbRes.status === "fulfilled" ? mbRes.value : { ok: true, items: [] };
+      const mbPayload = mbRes.status === "fulfilled" && mbRes.value?.ok ? mbRes.value : { ok: true, items: [] };
       const mbItems = Array.isArray(mbPayload?.items) ? mbPayload.items : [];
       const mlbdItems = mlbdRes.status === "fulfilled" && Array.isArray(mlbdRes.value?.items) ? mlbdRes.value.items : [];
-      const merged = [...mbItems];
-      const seen = new Set(merged.map(x => x.path));
-      for (const item of mlbdItems) {
-        if (item?.path && !seen.has(item.path)) {
-          seen.add(item.path);
-          merged.push(item);
-        }
+      const mlbdFirst = /^\/(?:language\/(?:bangla|bangla-dubbed)|bengali-series|mlbd)/i.test(category);
+      const ordered = mlbdFirst ? [...mlbdItems, ...mbItems] : [...mbItems, ...mlbdItems];
+      const merged = [];
+      const seen = new Set();
+      for (const item of ordered) {
+        const key = item?.path || String(item?.title || "").trim().toLowerCase();
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        merged.push(item);
       }
       res.setHeader("Cache-Control", "public, max-age=60");
       return res.json({
         ...mbPayload,
         ok: true,
         items: merged,
-        maxPage: Math.max(Number(mbPayload?.maxPage || 1), Number(mlbdRes.value?.maxPage || 1))
+        maxPage: Math.max(
+          Number(mbPayload?.maxPage || 1),
+          Number(mlbdRes.status === "fulfilled" ? mlbdRes.value?.maxPage || 1 : 1)
+        )
       });
     }
 

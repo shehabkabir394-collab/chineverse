@@ -43,6 +43,47 @@
     setTimeout(() => t.remove(), 2600);
   }
 
+  async function safeFetchJson(url, opts = {}) {
+    let lastErr = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const res = await fetch(url, opts);
+        const text = await res.text();
+        const trimmed = String(text || "").trim();
+        const looksHtml = trimmed.startsWith("<") || /^<!doctype/i.test(trimmed);
+        if (looksHtml || res.status === 502 || res.status === 503 || res.status === 504) {
+          if (attempt === 0) {
+            await new Promise(resolve => setTimeout(resolve, 700));
+            continue;
+          }
+          throw new Error(
+            looksHtml
+              ? `Server returned an unexpected page (HTTP ${res.status}). Please tap Retry.`
+              : `Upstream server busy (HTTP ${res.status}). Please tap Retry.`
+          );
+        }
+        let data;
+        try {
+          data = trimmed ? JSON.parse(trimmed) : {};
+        } catch {
+          if (attempt === 0) {
+            await new Promise(resolve => setTimeout(resolve, 700));
+            continue;
+          }
+          throw new Error(`Invalid server response (HTTP ${res.status}). Please tap Retry.`);
+        }
+        return { res, data };
+      } catch (err) {
+        lastErr = err;
+        if (attempt === 0) {
+          await new Promise(resolve => setTimeout(resolve, 700));
+          continue;
+        }
+      }
+    }
+    throw lastErr || new Error("Network error while connecting to server.");
+  }
+
   function getWatchlist() {
     try {
       const list = JSON.parse(localStorage.getItem(WATCHLIST_KEY) || "[]");
@@ -422,8 +463,7 @@
         se: String(se),
         ep: String(epNum)
       });
-      const r = await fetch(`/api/movie-api/stream?${qs.toString()}`, { cache: "no-store" });
-      const payload = await r.json();
+      const { res: r, data: payload } = await safeFetchJson(`/api/movie-api/stream?${qs.toString()}`, { cache: "no-store" });
       if (reqId !== streamReqId) return;
 
       const streamRoot = payload.stream || payload.data?.stream || payload.result?.stream || payload.data || payload.result || payload;
@@ -651,11 +691,10 @@
     if (streamMsg) streamMsg.textContent = `Switching audio to ${selectedLabel || "selected dub"}…`;
 
     try {
-      const r = await fetch(
+      const { res: r, data } = await safeFetchJson(
         `/api/movie-api/details?path=${encodeURIComponent(targetPath)}&title=${encodeURIComponent(watchDetail?.title || requestedTitle)}`,
         { cache: "no-store" }
       );
-      const data = await r.json();
       if (!r.ok || !data?.detail) throw new Error(data?.error || "Dub version unavailable");
 
       path = targetPath;
@@ -715,15 +754,13 @@
     if (!grid) return;
     let items = [];
     try {
-      const r = await fetch(`/api/movie-api/related?subjectId=${encodeURIComponent(detail.subjectId || "")}&title=${encodeURIComponent(detail.title || "")}`);
-      const d = await r.json();
+      const { data: d } = await safeFetchJson(`/api/movie-api/related?subjectId=${encodeURIComponent(detail.subjectId || "")}&title=${encodeURIComponent(detail.title || "")}`);
       items = Array.isArray(d?.items) ? d.items : [];
     } catch {}
 
     if (!items.length) {
       try {
-        const hr = await fetch("/api/movie-api/home");
-        const hd = await hr.json();
+        const { data: hd } = await safeFetchJson("/api/movie-api/home");
         items = [...(hd?.curated?.hindiMovies || []), ...(hd?.curated?.hindiSeries || []), ...(hd?.trending || [])];
       } catch {}
     }
@@ -769,8 +806,7 @@
     const box = $("#cvReviewsPanel");
     if (!box || !detail?.subjectId) return;
     try {
-      const r = await fetch(`/api/movie-api/comments?subjectId=${encodeURIComponent(detail.subjectId)}&page=1`);
-      const d = await r.json();
+      const { data: d } = await safeFetchJson(`/api/movie-api/comments?subjectId=${encodeURIComponent(detail.subjectId)}&page=1`);
       const rows = Array.isArray(d?.comments) ? d.comments : [];
       box.innerHTML = rows.length
         ? rows
@@ -790,16 +826,16 @@
   }
 
   async function load() {
-    if (!/^\/(?:mb|mlbd|movie|series|anime)\/[a-zA-Z0-9_./-]{1,300}$/i.test(path)) {
+    if (!/^\/(?:mb|mlbd|movie|series|drama|anime)\/[a-zA-Z0-9_./-]{1,300}$/i.test(path)) {
       statusEl.textContent = "Invalid title URL. Returning to home or select another title.";
       return;
     }
 
     try {
-      const r = await fetch(`/api/movie-api/details?path=${encodeURIComponent(path)}&title=${encodeURIComponent(requestedTitle)}`, {
-        cache: "no-store"
-      });
-      const data = await r.json();
+      const { res: r, data } = await safeFetchJson(
+        `/api/movie-api/details?path=${encodeURIComponent(path)}&title=${encodeURIComponent(requestedTitle)}`,
+        { cache: "no-store" }
+      );
       if (!r.ok || !data?.detail) throw new Error(data?.error || "Title details unavailable.");
 
       const d = data.detail;
@@ -1021,8 +1057,7 @@
           bio.hidden = false;
           bio.textContent = "Loading actor profile…";
           try {
-            const sr = await fetch(`/api/movie-api/staff?staffId=${encodeURIComponent(castCard.dataset.staffId)}&page=1`);
-            const sd = await sr.json();
+            const { data: sd } = await safeFetchJson(`/api/movie-api/staff?staffId=${encodeURIComponent(castCard.dataset.staffId)}&page=1`);
             bio.textContent = sd?.staff?.biography || `${sd?.staff?.name || "Actor"} — No additional details.`;
           } catch {
             bio.textContent = "Profile unavailable right now.";
@@ -1039,7 +1074,18 @@
       loadComments(d);
     } catch (err) {
       statusEl.hidden = false;
-      statusEl.textContent = err?.message || "Could not load this title. Try selecting another movie or series.";
+      statusEl.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center;padding:8px 0">
+        <span>${esc(err?.message || "Could not load this title. Try selecting another movie or series.")}</span>
+        <div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:center">
+          <button type="button" id="cvWatchRetryBtn" class="cv-util-pill" style="cursor:pointer">↻ Retry</button>
+          <a class="cv-util-pill" href="catalog.html">Browse Catalog</a>
+          <a class="cv-util-pill" href="./">Home</a>
+        </div>
+      </div>`;
+      $("#cvWatchRetryBtn")?.addEventListener("click", () => {
+        statusEl.textContent = "Retrying…";
+        load();
+      });
     }
   }
 
