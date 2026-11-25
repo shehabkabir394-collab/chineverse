@@ -862,7 +862,7 @@ app.get("/api/home-feed", async (_req, res) => {
     res.setHeader("Cache-Control", "public, max-age=120");
     return res.json(data);
   } catch (err) {
-    return res.status(502).json({ ok: false, error: err?.message || "Home feed unavailable" });
+    return res.status(503).json({ ok: false, error: err?.message || "Home feed unavailable" });
   }
 });
 
@@ -875,7 +875,7 @@ app.get("/api/catalog", async (req, res) => {
     res.setHeader("Cache-Control", "public, max-age=90");
     return res.json(data);
   } catch (err) {
-    return res.status(502).json({ ok: false, error: err?.message || "Catalog unavailable" });
+    return res.status(503).json({ ok: false, error: err?.message || "Catalog unavailable" });
   }
 });
 
@@ -898,7 +898,7 @@ app.get("/api/details", async (req, res) => {
     res.setHeader("Cache-Control", "public, max-age=120");
     return res.json(data);
   } catch (err) {
-    return res.status(502).json({ ok: false, error: err?.message || "Title details unavailable" });
+    return res.status(503).json({ ok: false, error: err?.message || "Title details unavailable" });
   }
 });
 
