@@ -5,6 +5,8 @@
   const HISTORY_KEY = "cv_watch_history_v1";
   const BOOST_KEY = "cv_sound_boost_v1";
   const BRIGHT_KEY = "cv_brightness_v1";
+  const AMBIENT_KEY = "cv_ambient_mode_v1";
+  const AMBIENT_LEVEL_KEY = "cv_ambient_level_v1";
 
   function srtToVtt(text) {
     const clean = String(text || "").replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n").trim();
@@ -127,6 +129,17 @@
 
     let soundBoostPct = Math.max(100, Math.min(400, Number(localStorage.getItem(BOOST_KEY) || 100)));
     let brightnessPct = Math.max(30, Math.min(180, Number(localStorage.getItem(BRIGHT_KEY) || 100)));
+    let ambientMode = (() => {
+      try { return localStorage.getItem(AMBIENT_KEY) !== "0"; } catch { return true; }
+    })();
+    let ambientLevel = (() => {
+      try {
+        const v = localStorage.getItem(AMBIENT_LEVEL_KEY);
+        return ["soft", "cinema", "vivid"].includes(v) ? v : "cinema";
+      } catch {
+        return "cinema";
+      }
+    })();
     let preferredQuality = "auto";
     let activeSubtitleIdx = -1;
     let subtitleItems = [];
@@ -135,6 +148,108 @@
     let activeSource = null;
     let failedSources = new Set();
     let retriedUrls = new Set();
+
+    // Cinema Ambient Mode backdrop behind .cv-player-stage
+    const stageEl = wrap.closest(".cv-player-stage") || wrap.parentElement;
+    let ambientWrap = stageEl?.closest(".cv-ambient-stage-wrap");
+    if (stageEl && stageEl.parentNode && !ambientWrap) {
+      ambientWrap = document.createElement("div");
+      ambientWrap.className = "cv-ambient-stage-wrap";
+      stageEl.parentNode.insertBefore(ambientWrap, stageEl);
+      ambientWrap.appendChild(stageEl);
+    }
+    let ambientBackdrop = ambientWrap?.querySelector(".cv-ambient-backdrop");
+    if (ambientWrap && !ambientBackdrop) {
+      ambientBackdrop = document.createElement("div");
+      ambientBackdrop.className = "cv-ambient-backdrop";
+      ambientBackdrop.setAttribute("aria-hidden", "true");
+      ambientBackdrop.innerHTML =
+        '<div class="cv-ambient-poster-fallback"></div><canvas class="cv-ambient-canvas" width="48" height="27"></canvas>';
+      ambientWrap.insertBefore(ambientBackdrop, ambientWrap.firstChild);
+    }
+    const ambientPosterFallback = ambientBackdrop?.querySelector(".cv-ambient-poster-fallback");
+    const ambientCanvas = ambientBackdrop?.querySelector(".cv-ambient-canvas");
+    const ambientCtx = ambientCanvas?.getContext("2d", { alpha: false }) || null;
+    const reducedMotionQuery = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+    let ambientRaf = 0;
+    let ambientLastTick = 0;
+    let ambientHasVideoFrame = false;
+    let ambientCorsTainted = false;
+
+    function syncAmbientPoster() {
+      if (!ambientPosterFallback) return;
+      const posterSrc = String(video.poster || currentMeta?.poster || "").trim();
+      if (posterSrc && /^(?:https?:\/\/|\/\/|\/api\/)/i.test(posterSrc)) {
+        ambientPosterFallback.style.backgroundImage = `url("${posterSrc.replace(/"/g, '\\"')}")`;
+      } else {
+        ambientPosterFallback.style.backgroundImage =
+          "radial-gradient(circle at 30% 40%, rgba(248, 113, 113, 0.36), rgba(30, 41, 59, 0.45) 60%, transparent 100%)";
+      }
+      if (ambientBackdrop) {
+        ambientBackdrop.classList.toggle("use-poster", !ambientHasVideoFrame || ambientCorsTainted);
+      }
+    }
+
+    function drawAmbientSample(forceSnap = false) {
+      if (!ambientMode || !ambientBackdrop || !ambientCtx || !ambientCanvas) return;
+      if (document.fullscreenElement) return;
+      if (!ambientCorsTainted && video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0) {
+        try {
+          ambientCtx.globalAlpha = forceSnap || !ambientHasVideoFrame ? 1 : 0.24;
+          ambientCtx.drawImage(video, 0, 0, ambientCanvas.width, ambientCanvas.height);
+          ambientCtx.globalAlpha = 1;
+          ambientHasVideoFrame = true;
+          ambientBackdrop.classList.remove("use-poster");
+          return;
+        } catch (err) {
+          if (err && err.name === "SecurityError") {
+            ambientCorsTainted = true;
+          }
+        }
+      }
+      syncAmbientPoster();
+    }
+
+    function stopAmbientLoop() {
+      if (ambientRaf) {
+        cancelAnimationFrame(ambientRaf);
+        ambientRaf = 0;
+      }
+    }
+
+    function scheduleAmbientLoop() {
+      stopAmbientLoop();
+      if (!ambientMode || !ambientBackdrop || document.hidden || document.fullscreenElement) return;
+      if (video.paused || video.ended || reducedMotionQuery?.matches) {
+        drawAmbientSample(true);
+        return;
+      }
+      const step = ts => {
+        if (!ambientMode || video.paused || video.ended || document.hidden || document.fullscreenElement) {
+          ambientRaf = 0;
+          return;
+        }
+        if (ts - ambientLastTick >= 95) {
+          ambientLastTick = ts;
+          drawAmbientSample(false);
+        }
+        ambientRaf = requestAnimationFrame(step);
+      };
+      ambientRaf = requestAnimationFrame(step);
+    }
+
+    function applyAmbientState() {
+      if (!ambientBackdrop) return;
+      ambientBackdrop.dataset.ambientLevel = ambientLevel;
+      ambientBackdrop.classList.toggle("is-active", ambientMode && !document.fullscreenElement);
+      syncAmbientPoster();
+      if (ambientMode) {
+        drawAmbientSample(true);
+        scheduleAmbientLoop();
+      } else {
+        stopAmbientLoop();
+      }
+    }
 
     // Audio boost via Web Audio GainNode (safe on same-origin proxied streams)
     let audioCtx = null;
@@ -295,6 +410,14 @@
     const mute = $(".cv-mute");
     volume.value = String(video.volume);
 
+    const ambientTopBtn = document.createElement("button");
+    ambientTopBtn.type = "button";
+    ambientTopBtn.className = "cv-top-pill cv-ambient-top-btn";
+    ambientTopBtn.setAttribute("aria-label", "Toggle Ambient Mode");
+    ambientTopBtn.title = "Ambient Mode";
+    ambientTopBtn.innerHTML =
+      '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="6" width="16" height="12" rx="2.5"/><path d="M8 2v2M16 2v2M8 20v2M16 20v2M1 12h1.5M21.5 12H23"/></svg>';
+
     const qualBtn = document.createElement("button");
     qualBtn.type = "button";
     qualBtn.className = "cv-top-pill cv-qual-btn";
@@ -324,6 +447,9 @@
       qualBtn.textContent = `${qText} ▾`;
       const activeSub = activeSubtitleIdx >= 0 ? subtitleItems[activeSubtitleIdx] : null;
       subsBtn.textContent = activeSub ? `CC: ${activeSub.label} ▾` : "CC: Off ▾";
+      ambientTopBtn.classList.toggle("active", ambientMode);
+      ambientTopBtn.setAttribute("aria-pressed", ambientMode ? "true" : "false");
+      ambientTopBtn.title = ambientMode ? "Ambient Mode: ON" : "Ambient Mode: OFF";
     }
 
     function openTopMenu(type) {
@@ -357,6 +483,11 @@
       topMenu.hidden = false;
     }
 
+    ambientTopBtn.addEventListener("click", e => {
+      e.stopPropagation();
+      toggleAmbientMode();
+      scheduleHide(1200);
+    });
     qualBtn.addEventListener("click", e => {
       e.stopPropagation();
       openTopMenu("quality");
@@ -390,8 +521,9 @@
       if (!silent) unmuteBtn.hidden = true;
     }
     syncSound();
-    topRight.append(qualBtn, subsBtn);
+    topRight.append(ambientTopBtn, qualBtn, subsBtn);
     syncTopButtons();
+    applyAmbientState();
 
     function emitState() {
       syncTopButtons();
@@ -775,6 +907,7 @@
       centerPlay.setAttribute("aria-label", "Pause video");
       centerPlay.classList.remove("visible");
       wrap.classList.add("cv-playing");
+      scheduleAmbientLoop();
       if (!hasShownInitial) {
         hasShownInitial = true;
         hideControls();
@@ -788,6 +921,7 @@
       centerPlay.setAttribute("aria-label", "Play video");
       centerPlay.classList.add("visible");
       wrap.classList.remove("cv-playing");
+      stopAmbientLoop();
       clearTimeout(hideTimer);
       wrap.classList.add("cv-ui-visible");
     });
@@ -810,7 +944,14 @@
       centerPlay.classList.add("visible");
       wrap.classList.add("cv-ui-visible");
       wrap.classList.add("cv-ended");
+      stopAmbientLoop();
       clearTimeout(hideTimer);
+    });
+    video.addEventListener("loadeddata", () => drawAmbientSample(true));
+    video.addEventListener("seeked", () => drawAmbientSample(true));
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) stopAmbientLoop();
+      else scheduleAmbientLoop();
     });
 
     const jump = delta => {
@@ -908,6 +1049,7 @@
           screen.orientation?.unlock?.();
         } catch {}
       }
+      applyAmbientState();
     });
 
     $(".cv-pip").addEventListener("click", async () => {
@@ -1065,6 +1207,9 @@
         if (tEl) tEl.textContent = opts.title;
       }
       if (opts.historyMeta) currentMeta = { ...opts.historyMeta };
+      ambientHasVideoFrame = false;
+      ambientCorsTainted = false;
+      syncAmbientPoster();
       quality.innerHTML =
         '<option value="auto">Auto</option>' +
         ordered.map(x => '<option value="' + esc(x.quality) + '">' + esc(x.quality) + "</option>").join("");
@@ -1126,6 +1271,38 @@
       }
     }
 
+    function setAmbientMode(enabled, opts = {}) {
+      ambientMode = Boolean(enabled);
+      try {
+        localStorage.setItem(AMBIENT_KEY, ambientMode ? "1" : "0");
+      } catch {}
+      applyAmbientState();
+      if (!opts.silent) {
+        showOsd("✦", "Ambient Mode", ambientMode ? 100 : 0, 0, 100, ambientMode ? "#f87171" : "#64748b");
+      }
+      emitState();
+      return ambientMode;
+    }
+
+    function toggleAmbientMode() {
+      return setAmbientMode(!ambientMode);
+    }
+
+    function setAmbientLevel(level) {
+      const next = ["soft", "cinema", "vivid"].includes(level) ? level : "cinema";
+      ambientLevel = next;
+      try {
+        localStorage.setItem(AMBIENT_LEVEL_KEY, next);
+      } catch {}
+      if (!ambientMode) {
+        ambientMode = true;
+        try { localStorage.setItem(AMBIENT_KEY, "1"); } catch {}
+      }
+      applyAmbientState();
+      emitState();
+      return ambientLevel;
+    }
+
     function getState() {
       const hlsAudioTracks = activeHls && Array.isArray(activeHls.audioTracks)
         ? activeHls.audioTracks.map((t, i) => ({
@@ -1140,6 +1317,8 @@
         activeQuality: activeSource?.quality || initial?.quality || "Auto",
         soundBoost: soundBoostPct,
         brightness: brightnessPct,
+        ambientMode,
+        ambientLevel,
         subtitles: subtitleItems,
         activeSubtitleIdx,
         audioTracks: hlsAudioTracks,
@@ -1166,6 +1345,9 @@
         showOsd("☀", "Brightness", brightnessPct, 30, 180, "#eab308");
         emitState();
       },
+      setAmbientMode,
+      toggleAmbientMode,
+      setAmbientLevel,
       setActiveSubtitle: applyTrackSelection,
       setAudioTrack,
       toggleBanglaSubtitle,

@@ -195,6 +195,7 @@
     const boostChip = $("#cvUtilBoost");
     const subChip = $("#cvUtilSub");
     const qualChip = $("#cvUtilQual");
+    const ambientChip = $("#cvUtilAmbient");
     if (boostChip) {
       boostChip.classList.toggle("boosted", st.soundBoost > 100);
       boostChip.innerHTML = `<span aria-hidden="true">🔊</span> Sound Boost: ${st.soundBoost}%`;
@@ -207,6 +208,12 @@
     if (qualChip) {
       const qualText = st.preferredQuality === "auto" ? `Auto (${st.activeQuality})` : st.activeQuality;
       qualChip.textContent = qualText;
+    }
+    if (ambientChip) {
+      ambientChip.classList.toggle("active", Boolean(st.ambientMode));
+      ambientChip.setAttribute("aria-pressed", st.ambientMode ? "true" : "false");
+      const labelEl = ambientChip.querySelector("span");
+      if (labelEl) labelEl.textContent = st.ambientMode ? "Ambient: ON" : "Ambient: OFF";
     }
 
     // Update Settings modal if open
@@ -241,6 +248,19 @@
     const brightRange = $("#cvModalBrightRange");
     if (brightVal) brightVal.textContent = `${st.brightness}%`;
     if (brightRange && Number(brightRange.value) !== st.brightness) brightRange.value = String(st.brightness);
+
+    const ambientVal = $("#cvModalAmbientVal");
+    const ambientLevels = $("#cvModalAmbientLevels");
+    if (ambientVal) {
+      ambientVal.textContent = st.ambientMode ? "ON ✓" : "OFF";
+      ambientVal.classList.toggle("on", Boolean(st.ambientMode));
+    }
+    if (ambientLevels) {
+      ambientLevels.hidden = !st.ambientMode;
+      ambientLevels.querySelectorAll("[data-ambient-level]").forEach(btn => {
+        btn.classList.toggle("active", btn.dataset.ambientLevel === st.ambientLevel);
+      });
+    }
 
     const bnToggleVal = $("#cvModalBnSubVal");
     if (bnToggleVal) {
@@ -341,6 +361,16 @@
           </div>
         </div>
 
+        <button type="button" id="cvModalAmbientBtn" class="cv-ps-action-row">
+          <span>Ambient Mode (সিনেমা গ্লো লাইট)</span>
+          <b id="cvModalAmbientVal" class="on">ON ✓</b>
+        </button>
+        <div id="cvModalAmbientLevels" class="cv-sub-pill-strip">
+          <button type="button" class="cv-sub-pill" data-ambient-level="soft">Soft</button>
+          <button type="button" class="cv-sub-pill" data-ambient-level="cinema">Cinema</button>
+          <button type="button" class="cv-sub-pill" data-ambient-level="vivid">Vivid</button>
+        </div>
+
         <button type="button" id="cvModalBnSubBtn" class="cv-ps-action-row">
           <span>বাংলা Subtitle</span>
           <b id="cvModalBnSubVal">OFF</b>
@@ -391,6 +421,17 @@
         playerApi.setScreenMode(modeBtn.dataset.screenMode);
         modal.hidden = true;
         $("#cvWatchTopSettings")?.classList.remove("active");
+        return;
+      }
+      if (e.target.closest("#cvModalAmbientBtn") && playerApi) {
+        playerApi.toggleAmbientMode?.();
+        syncPlayerUiState();
+        return;
+      }
+      const ambLevelBtn = e.target.closest("[data-ambient-level]");
+      if (ambLevelBtn && playerApi) {
+        playerApi.setAmbientLevel?.(ambLevelBtn.dataset.ambientLevel);
+        syncPlayerUiState();
         return;
       }
       if (e.target.closest("#cvModalBnSubBtn") && playerApi) {
@@ -913,8 +954,9 @@
                 </div>
               </div>
 
-              <div class="cv-utility-strip" aria-label="Player sound boost, subtitles, quality and actions">
+              <div class="cv-utility-strip" aria-label="Player sound boost, subtitles, ambient mode, quality and actions">
                 <button type="button" id="cvUtilBoost" class="cv-util-pill"><span aria-hidden="true">🔊</span> Sound Boost: 100%</button>
+                <button type="button" id="cvUtilAmbient" class="cv-util-pill active" aria-pressed="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="6" width="16" height="12" rx="2.5"/><path d="M8 2v2M16 2v2M8 20v2M16 20v2M1 12h1.5M21.5 12H23"/></svg><span>Ambient: ON</span></button>
                 <button type="button" id="cvUtilSub" class="cv-util-pill">Subtitles (CC)</button>
                 <button type="button" id="cvUtilQual" class="cv-util-pill">Auto</button>
                 <button type="button" id="cvWatchActionList" class="cv-util-pill"></button>
@@ -997,6 +1039,12 @@
       $("#cvWatchTopShare")?.addEventListener("click", shareCurrentTitle);
       $("#cvWatchTopSettings")?.addEventListener("click", openSettingsModal);
       $("#cvUtilBoost")?.addEventListener("click", openSettingsModal);
+      $("#cvUtilAmbient")?.addEventListener("click", () => {
+        if (!playerApi?.toggleAmbientMode) return;
+        const next = playerApi.toggleAmbientMode();
+        syncPlayerUiState();
+        showToast(next ? "Ambient Mode ON" : "Ambient Mode OFF");
+      });
       $("#cvUtilSub")?.addEventListener("click", openSettingsModal);
       $("#cvUtilQual")?.addEventListener("click", openSettingsModal);
 

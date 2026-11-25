@@ -772,3 +772,134 @@
 .ms-server-button:hover{transform:translateY(-1px);border-color:#42cfff88}
 .ms-server-button.active{border-color:#25c8ff;background:linear-gradient(145deg,#123b55,#10243a);box-shadow:0 0 0 1px #25c8ff24,0 8px 24px #0004}
 @media(max-width:600px){.ms-server-buttons{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.ms-server-button{min-width:0;padding:9px}.ms-server-button b{font-size:12px}}
+
+/* Cinema Ambient Mode around video player */
+.cv-watch-shell {
+  overflow-x: clip;
+}
+
+.cv-watch-primary-col {
+  position: relative;
+}
+
+.cv-ambient-stage-wrap {
+  position: relative;
+  isolation: isolate;
+}
+
+.cv-ambient-stage-wrap .cv-player-stage {
+  position: relative;
+  z-index: 2;
+}
+
+.cv-ambient-backdrop {
+  position: absolute;
+  inset: -24px -18px -42px;
+  z-index: 0;
+  pointer-events: none;
+  border-radius: 32px;
+  overflow: visible;
+  opacity: 0;
+  --cv-ambient-alpha: 0.78;
+  --cv-ambient-sat: 1.65;
+  transition: opacity 420ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.cv-ambient-backdrop[data-ambient-level="soft"] {
+  --cv-ambient-alpha: 0.48;
+  --cv-ambient-sat: 1.35;
+}
+
+.cv-ambient-backdrop[data-ambient-level="cinema"] {
+  --cv-ambient-alpha: 0.78;
+  --cv-ambient-sat: 1.65;
+}
+
+.cv-ambient-backdrop[data-ambient-level="vivid"] {
+  --cv-ambient-alpha: 0.96;
+  --cv-ambient-sat: 1.95;
+}
+
+.cv-ambient-backdrop.is-active {
+  opacity: var(--cv-ambient-alpha);
+}
+
+.cv-ambient-backdrop::after {
+  content: "";
+  position: absolute;
+  inset: -14px;
+  border-radius: inherit;
+  background: radial-gradient(ellipse 76% 72% at 50% 48%, transparent 48%, rgba(6, 7, 12, 0.86) 100%);
+  pointer-events: none;
+}
+
+.cv-ambient-poster-fallback,
+.cv-ambient-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  border-radius: inherit;
+  transform: scale(1.06);
+  transform-origin: center;
+}
+
+.cv-ambient-poster-fallback {
+  background-size: cover;
+  background-position: center;
+  filter: blur(52px) saturate(var(--cv-ambient-sat)) brightness(0.92);
+  opacity: 0;
+  transition: opacity 320ms ease;
+}
+
+.cv-ambient-backdrop.use-poster .cv-ambient-poster-fallback {
+  opacity: 1;
+}
+
+.cv-ambient-canvas {
+  filter: blur(50px) saturate(var(--cv-ambient-sat)) brightness(0.96);
+  will-change: transform, opacity;
+  transition: opacity 280ms ease;
+}
+
+.cv-ambient-backdrop.use-poster .cv-ambient-canvas {
+  opacity: 0;
+}
+
+.ms-watch-player .cv-player .cv-top-right .cv-ambient-top-btn {
+  width: 28px !important;
+  min-width: 28px !important;
+  padding: 0 !important;
+  display: inline-grid !important;
+  place-items: center !important;
+}
+
+.ms-watch-player .cv-player .cv-top-right .cv-ambient-top-btn.active {
+  border-color: rgba(252, 165, 165, 0.78) !important;
+  background: rgba(220, 38, 38, 0.34) !important;
+  color: #fecaca !important;
+}
+
+@media (max-width: 1023px) {
+  .cv-ambient-backdrop {
+    inset: -14px -4px -32px;
+  }
+}
+
+@media (max-width: 640px) {
+  .ms-watch-player .cv-player .cv-top-right .cv-ambient-top-btn {
+    width: 24px !important;
+    min-width: 24px !important;
+    height: 23px !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cv-ambient-backdrop,
+  .cv-ambient-poster-fallback,
+  .cv-ambient-canvas {
+    transition: none;
+  }
+}
+

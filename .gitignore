@@ -8,3 +8,8 @@ tmp/
 backups/
 .backup-*/
 *.backup
+.htaccess
+error_log
+stderr.log
+*.log
+nodevenv/
