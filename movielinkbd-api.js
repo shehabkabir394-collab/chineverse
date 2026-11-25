@@ -209,6 +209,31 @@ async function fetchMirrorOnce(baseUrl, pathWithQuery, extraHeaders = {}, timeou
   return { res, text, finalUrl: res.url || target, finalOrigin, cookies };
 }
 
+function isPortalLandingHtml(html) {
+  const s = String(html || "");
+  if (!s) return true;
+  if (/cf-mitigated|Just a moment\.\.\./i.test(s)) return true;
+  const hasContentMarkers = /movie-card|rail-section|mlbdHdFrame|__PD2|mlbdInlinePlayerData/i.test(s);
+  if (hasContentMarkers) return false;
+  return /MovieLinkBD\.com\s*[—-]\s*Official/i.test(s) || /<meta[^>]+name="generator"[^>]*>/i.test(s) || s.length < 1200;
+}
+
+function extractMirrorOriginsFromPortal(html) {
+  const out = [];
+  const seen = new Set();
+  const re = /https:\/\/([a-z0-9.-]*movielinkbd\.[a-z]{2,10})/gi;
+  let m;
+  while ((m = re.exec(String(html || "")))) {
+    const origin = `https://${m[1].toLowerCase()}`;
+    if (origin === "https://movielinkbd.com" || origin === "https://www.movielinkbd.com" || origin === "https://movielinkbd.at") continue;
+    if (!seen.has(origin)) {
+      seen.add(origin);
+      out.push(origin);
+    }
+  }
+  return out;
+}
+
 export async function mlbdFetchPage(upstreamPath = "/", options = {}) {
   const cleanPath = normalizeUpstreamPath(upstreamPath);
   const cacheKey = `page:${cleanPath}`;
@@ -225,15 +250,29 @@ export async function mlbdFetchPage(upstreamPath = "/", options = {}) {
   const job = (async () => {
     const candidateBases = [...new Set([
       activeResolvedOrigin,
-      ...MLBD_MIRRORS.map(m => m.baseUrl)
+      ...MLBD_MIRRORS.map(m => m.baseUrl),
+      "https://movielinkbd.tv"
     ])];
+    const tried = new Set();
 
     let lastErr = null;
-    for (const base of candidateBases) {
+    for (let i = 0; i < candidateBases.length; i++) {
+      const base = candidateBases[i];
+      if (!base || tried.has(base)) continue;
+      tried.add(base);
       try {
         const extra = options.headers || {};
         const out = await fetchMirrorOnce(base, cleanPath, extra, options.timeoutMs || 14000);
         if (out.res.ok && out.text && out.text.length > 400) {
+          if (isPortalLandingHtml(out.text)) {
+            for (const discovered of extractMirrorOriginsFromPortal(out.text)) {
+              if (!tried.has(discovered) && !candidateBases.includes(discovered)) {
+                candidateBases.push(discovered);
+              }
+            }
+            lastErr = new Error(`Portal landing or challenge page from ${base}`);
+            continue;
+          }
           activeResolvedOrigin = out.finalOrigin || base;
           const result = {
             html: out.text,

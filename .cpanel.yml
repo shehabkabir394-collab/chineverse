@@ -6,4 +6,5 @@
 deployment:
   tasks:
     - /bin/echo "MovieStream BD: triggering Node.js restart..."
-    - /bin/mkdir -p tmp && /bin/touch tmp/restart.txt
+    - /bin/mkdir -p tmp
+    - /bin/touch tmp/restart.txt
