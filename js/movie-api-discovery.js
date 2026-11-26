@@ -22,6 +22,17 @@
     return /\b(?:adult|erotic|18\+|xxx|porn|softcore|vivamax)\b/i.test(hay) || /^(?:hot|midnight)$/i.test(String(item.genre || "").trim());
   }
 
+  function isNigerianItem(item) {
+    if (!item || typeof item !== "object") return false;
+    const country = String(item.country || item.countryName || "").trim();
+    if (/\b(?:nigeria|nollywood|ghana)\b/i.test(country)) return true;
+    const title = String(item.title || "").trim();
+    const hay = `${title} ${item.language || ""} ${item.genre || ""} ${item.platform || ""} ${country} ${item.description || item.storyline || ""}`;
+    if (/\b(?:nollywood|nigeria|nigerian|yoruba|igbo|hausa|naija|lagos|abuja|odunlade|funke\s+akindele|iyabo\s+ojo|osita\s+iheme|pete\s+edochie|ramsey\s+nouah|genevieve\s+nnaji|omoni\s+oboli|akotagiri|jagun\s+jagun|anik[uo]lapo|omo\s+ghetto|king\s+of\s+boys)\b/i.test(hay)) return true;
+    if (/^(?:akotagiri|save\s+my\s+life\s*2|the\s+wrong\s+boyfriend|love\s+is\s+blind|husband\s+on\s+lease)$/i.test(title) && !/\b(?:india|korean|japan|china|bangla|hindi|united\s+states|uk|turkey)\b/i.test(`${country} ${item.language || ""}`)) return true;
+    return false;
+  }
+
   function normalizeEntry(raw) {
     if (typeof raw === "string") {
       const q = raw.trim();
@@ -155,10 +166,10 @@
       const r = await fetch(`/api/movie-api/hot-search${safe ? "?safe=1" : ""}`);
       const d = await r.json();
       hotLoadedSafeState = safe;
-      hotCache = Array.isArray(d?.items) ? d.items.filter(x => typeof x === "string" || x?.title).slice(0, 14) : [];
-      hotSubjectsCache = Array.isArray(d?.subjects) ? d.subjects.filter(x => !safe || !isAdultItem(x)).slice(0, 12) : [];
+      hotCache = Array.isArray(d?.items) ? d.items.filter(x => typeof x === "string" || (x?.title && !isNigerianItem(x))).slice(0, 14) : [];
+      hotSubjectsCache = Array.isArray(d?.subjects) ? d.subjects.filter(x => !isNigerianItem(x) && (!safe || !isAdultItem(x))).slice(0, 12) : [];
       const rk = d?.rankings || {};
-      const cleanList = list => (Array.isArray(list) ? list : []).filter(x => !safe || !isAdultItem(x)).slice(0, 12);
+      const cleanList = list => (Array.isArray(list) ? list : []).filter(x => !isNigerianItem(x) && (!safe || !isAdultItem(x))).slice(0, 12);
       rankingsCache = {
         movie: cleanList(rk.movie?.length ? rk.movie : hotSubjectsCache),
         series: cleanList(rk.series),
@@ -295,12 +306,26 @@
     `;
   }
 
-  function renderResults(body, items, query) {
+  function renderResults(body, items, query, suggestions = []) {
     const resultsTabs = $("#cvSearchResultsTabs");
     if (resultsTabs) resultsTabs.hidden = false;
 
     const safe = isFamilySafe();
-    const visibleItems = (Array.isArray(items) ? items : []).filter(it => !safe || !isAdultItem(it));
+    const visibleItems = (Array.isArray(items) ? items : []).filter(it => !isNigerianItem(it) && (!safe || !isAdultItem(it)));
+
+    const suggTitles = [...new Set([
+      ...(Array.isArray(suggestions) ? suggestions : []),
+      ...visibleItems.map(it => it.title)
+    ].map(s => String(s || "").trim()).filter(s => s && s.toLowerCase() !== String(query || "").trim().toLowerCase()))].slice(0, 8);
+
+    const suggStrip = suggTitles.length
+      ? `<div class="cv-search-sugg-wrap">
+          <div class="cv-search-sugg-label">Suggestions</div>
+          <div class="cv-search-sugg-list">
+            ${suggTitles.map(title => `<button type="button" class="cv-search-sugg-btn" data-pick-query="${esc(title)}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><span>${esc(title)}</span></button>`).join("")}
+          </div>
+        </div>`
+      : "";
 
     const historyMatches = loadHistory()
       .filter(h => h.q.toLowerCase().includes(query.toLowerCase()) && h.q.toLowerCase() !== query.toLowerCase())
@@ -314,15 +339,17 @@
 
     if (!visibleItems.length) {
       body.innerHTML = `
+        ${suggStrip}
         ${historyStrip}
         <div class="cv-status-banner">
-          ${safe ? `No Family-Safe results found for “${esc(query)}”.` : `No results found for “${esc(query)}” in this tab. Try switching to <b>All</b> or searching another keyword.`}
+          ${safe ? `No Family-Safe results found for “${esc(query)}”.` : `No results found for “${esc(query)}” in this tab. Try tapping a suggestion above or switching to <b>All</b>.`}
         </div>
       `;
       return;
     }
 
     body.innerHTML = `
+      ${suggStrip}
       ${historyStrip}
       <div class="cv-recent-head">
         <h3>Search Results (${visibleItems.length})</h3>
@@ -408,30 +435,41 @@
 
     const safeQs = isFamilySafe() ? "&safe=1" : "";
     const typeQs = `&subjectType=${encodeURIComponent(activeType)}`;
-    const candidates = [
-      `/api/movie-api/search?q=${encodeURIComponent(q)}${typeQs}${safeQs}`,
-      `/api/suggest?q=${encodeURIComponent(q)}${typeQs}${safeQs}`,
-      `/api/catalog?path=%2Fsearch&q=${encodeURIComponent(q)}`
-    ];
 
     try {
-      let data = null;
-      let lastErr = null;
-      for (const endpoint of candidates) {
-        try {
-          const d = await fetchSearchJson(endpoint, ctrl?.signal);
-          if (id !== reqSeq) return;
-          data = d;
-          if (Array.isArray(d?.items) && d.items.length > 0) break;
-        } catch (err) {
-          if (err?.name === "AbortError" || id !== reqSeq) return;
-          lastErr = err;
-        }
-      }
+      const [suggRes, searchRes] = await Promise.allSettled([
+        fetchSearchJson(`/api/suggest?q=${encodeURIComponent(q)}${typeQs}${safeQs}`, ctrl?.signal),
+        fetchSearchJson(`/api/movie-api/search?q=${encodeURIComponent(q)}${typeQs}${safeQs}`, ctrl?.signal)
+      ]);
       if (id !== reqSeq) return;
-      if (!data) throw lastErr || new Error("Search failed");
-      const items = Array.isArray(data?.items) ? data.items : [];
-      renderResults(body, items, q);
+
+      const mergedMap = new Map();
+      const addAll = list => {
+        for (const it of Array.isArray(list) ? list : []) {
+          if (!it || isNigerianItem(it)) continue;
+          const k = it.path || it.subjectId || String(it.title || "").toLowerCase();
+          if (k && !mergedMap.has(k)) mergedMap.set(k, it);
+        }
+      };
+
+      const searchData = searchRes.status === "fulfilled" ? searchRes.value : null;
+      const suggData = suggRes.status === "fulfilled" ? suggRes.value : null;
+      addAll(searchData?.items);
+      addAll(suggData?.items);
+
+      let items = [...mergedMap.values()];
+      const suggestions = [
+        ...(Array.isArray(suggData?.suggestions) ? suggData.suggestions : []),
+        ...(Array.isArray(searchData?.suggestions) ? searchData.suggestions : [])
+      ];
+
+      if (!items.length && !searchData && !suggData) {
+        const catData = await fetchSearchJson(`/api/catalog?path=%2Fsearch&q=${encodeURIComponent(q)}`, ctrl?.signal);
+        if (id !== reqSeq) return;
+        addAll(catData?.items);
+        items = [...mergedMap.values()];
+      }
+      renderResults(body, items, q, suggestions);
     } catch (err) {
       if (err?.name === "AbortError" || id !== reqSeq) return;
       body.innerHTML = `<div class="cv-status-banner">Search could not complete right now. Please try again.</div>`;

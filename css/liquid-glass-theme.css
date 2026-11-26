@@ -979,6 +979,21 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   color: #fff !important;
 }
 
+.cv-action-btn.cv-action-btn-trailer {
+  background: linear-gradient(135deg, #10b981, #059669) !important;
+  border-color: rgba(110, 231, 183, 0.88) !important;
+  color: #ffffff !important;
+  font-weight: 700 !important;
+  box-shadow: 0 6px 18px rgba(16, 185, 129, 0.34) !important;
+}
+
+.cv-action-btn.cv-action-btn-retry {
+  background: var(--cv-accent-grad) !important;
+  border-color: rgba(254, 202, 202, 0.72) !important;
+  color: #ffffff !important;
+  font-weight: 700 !important;
+}
+
 .cv-watch-tab-btn.active::after {
   background: var(--cv-accent-grad) !important;
 }

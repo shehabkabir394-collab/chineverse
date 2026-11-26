@@ -789,8 +789,8 @@
             "position:absolute;inset:0;z-index:20;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:20px;text-align:center;background:rgba(11,13,16,.9);color:#f3f4f6;";
           box.innerHTML = `<div style="max-width:460px;font-size:14px;line-height:1.5">${esc(errText)}</div>
             <div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:center">
-              ${safeYtId ? `<button type="button" data-play-trailer class="cv-action-btn" style="background:#00c882;border-color:#00c882;color:#051610;cursor:pointer">▶ Watch Official Trailer</button>` : ""}
-              <button type="button" data-retry-stream class="cv-action-btn" style="background:var(--cv-red,#f87171);border-color:var(--cv-red,#f87171);color:#fff;cursor:pointer">↻ Retry Stream</button>
+              ${safeYtId ? `<button type="button" data-play-trailer class="cv-action-btn cv-action-btn-trailer" style="cursor:pointer">▶ Watch Official Trailer</button>` : ""}
+              <button type="button" data-retry-stream class="cv-action-btn cv-action-btn-retry" style="cursor:pointer">↻ Retry Stream</button>
               ${altDub ? `<button type="button" data-switch-alt-dub class="cv-action-btn" style="cursor:pointer">Switch to ${esc(altDub.language || altDub.lanName || "Original Audio")}</button>` : ""}
             </div>`;
           box.querySelector("[data-play-trailer]")?.addEventListener("click", () => {

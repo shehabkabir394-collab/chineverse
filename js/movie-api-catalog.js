@@ -17,7 +17,29 @@
  const allCatsPanel=$("#catalogAllCatsPanel"),allCatsToggle=$("#catalogAllCatsToggle");
  const pageSize=24;
  let data=null,all=[],apiCatalogMode=false,apiMeta=null,allApiCategories=[];
- const isNigerian=()=>false;
+ const isNigerian=(item,sectionTitle="")=>{
+  const sec=String(sectionTitle||"").trim();
+  if(sec&&/\b(?:nollywood|must-watch\s*black\s*shows?|black\s*cinema|black\s*shows?|nigeria|nigerian|ghana)\b|bet\+/i.test(sec))return true;
+  if(!item||typeof item!=="object")return false;
+  const country=String(item.country||item.countryName||"").trim();
+  if(/\b(?:nigeria|nollywood|ghana)\b/i.test(country))return true;
+  const title=String(item.title||"").trim();
+  const hay=`${title} ${item.language||""} ${item.genre||""} ${item.platform||""} ${country} ${item.description||item.storyline||""}`;
+  if(/\b(?:nollywood|nigeria|nigerian|yoruba|igbo|hausa|naija|lagos|abuja|ekiti|enugu|anambra|ibadan|ogun|kano|odunlade|funke\s+akindele|iyabo\s+ojo|osita\s+iheme|chinedu\s+ikedieze|pete\s+edochie|ramsey\s+nouah|genevieve\s+nnaji|omoni\s+oboli|destiny\s+etiko|yul\s+edochie|zubby\s+michael|frederick\s+leonard|maurice\s+sam|ruth\s+kadiri|akotagiri|jagun\s+jagun|anik[uo]lapo|omo\s+ghetto|king\s+of\s+boys)\b/i.test(hay))return true;
+  if(/^(?:akotagiri|save\s+my\s+life\s*2|the\s+wrong\s+boyfriend|love\s+is\s+blind|husband\s+on\s+lease|his\s+unloved\s+wife|unbreakable\s+bonds)$/i.test(title)&&!/\b(?:india|korean|japan|china|bangla|hindi|united\s+states|uk|turkey)\b/i.test(`${country} ${item.language||""}`))return true;
+  return false;
+ };
+ const isUpcomingUnreleased=item=>{
+  if(!item||typeof item!=="object")return false;
+  if(item.hasResource===false||item.isUpcoming===true)return true;
+  const endToday=getEndOfTodayMs();
+  const rawDate=String(item.releaseDate||item.appointmentDate||"").trim();
+  if(/^\d{4}-\d{2}-\d{2}/.test(rawDate)){
+   const ts=Date.parse(rawDate);
+   if(Number.isFinite(ts)&&ts>endToday+2*86400*1000)return true;
+  }
+  return false;
+ };
  const stripCatBrand=s=>String(s||"").replace(/\bmovie\s*(?:stream|link)\s*bd\b(?:\.com|\.at)?/gi,"").replace(/\s*[—–\-|:]+\s*$/g,"").replace(/^\s*[—–\-|:]+\s*/g,"").replace(/\s+/g," ").trim();
  const getEndOfTodayMs=()=>{const bdt=new Date(Date.now()+6*3600*1000);return Date.UTC(bdt.getUTCFullYear(),bdt.getUTCMonth(),bdt.getUTCDate(),23,59,59,999)-6*3600*1000;};
  const dateValue=value=>{
@@ -250,6 +272,9 @@
  function card(item){
   const image=posterOf(item),p=/^(?:https?:\/\/|\/\/|\/api\/)/i.test(image)?image:"";
   const title=text(item.title)||"Untitled",path=pathOf(item),b=badge(item);
+  if(selected==="/upcoming"||isUpcomingUnreleased(item)){
+   return '<article class="movie-card movie-api-card cv-card-upcoming" aria-label="'+esc(title)+' (Coming Soon)" title="'+esc(title)+' — Coming Soon"><div class="movie-api-poster">'+(p?'<img loading="lazy" decoding="async" src="'+esc(p)+'" alt="'+esc(title)+' poster">':'<span class="movie-api-placeholder">MOVIESTREAM BD</span>')+'</div></article>';
+  }
   return '<article class="movie-card movie-api-card"><button class="movie-api-poster" type="button" data-path="'+esc(path)+'" data-title="'+esc(title)+'" '+(!path?"disabled":"")+' aria-label="Open '+esc(title)+'">'+(p?'<img loading="lazy" decoding="async" src="'+esc(p)+'" alt="'+esc(title)+' poster">':'<span class="movie-api-placeholder">MOVIESTREAM BD</span>')+'<span class="quality">'+esc(item.quality||item.typeBadge||"HD")+'</span>'+(b?'<span class="movie-api-language-badge">'+b+'</span>':"")+'<span class="overlay">▶<small>View details &amp; watch</small></span></button><div class="movie-info"><h3>'+esc(title)+'</h3><p>'+esc(item.language||item.country||item.typeBadge||"")+'</p></div></article>';
  }
  function link(extra){const p=new URLSearchParams();if(selected)p.set("category",selected);if(letter)p.set("letter",letter);if(search?.value.trim())p.set("q",search.value.trim());Object.entries(extra||{}).forEach(([k,v])=>{if(v)p.set(k,String(v));else p.delete(k)});return "catalog.html?"+p.toString();}

@@ -11,7 +11,29 @@
   };
   const posterOf = item => imageValue(item?.poster || item?.posterUrl || item?.poster_url || item?.previewImage || item?.preview_image || item?.bannerImage || item?.banner_image || item?.cover || item?.coverUrl || item?.coverImage || item?.image || item?.imageUrl || item?.image_url || item?.thumbnail || item?.thumbnailUrl || item?.thumbnail_url || item?.pic || item?.img);
   const safeImg = u => (/^(?:https?:\/\/|\/\/|\/api\/)/i.test(String(u || "")) ? String(u) : "");
-  const isNigerian = () => false;
+  const isNigerian = (item, sectionTitle = "") => {
+    const sec = String(sectionTitle || "").trim();
+    if (sec && (/\b(?:nollywood|must-watch\s*black\s*shows?|black\s*cinema|black\s*shows?|nigeria|nigerian|ghana)\b|bet\+/i.test(sec))) return true;
+    if (!item || typeof item !== "object") return false;
+    const country = String(item.country || item.countryName || "").trim();
+    if (/\b(?:nigeria|nollywood|ghana)\b/i.test(country)) return true;
+    const title = String(item.title || "").trim();
+    const hay = `${title} ${item.language || ""} ${item.genre || ""} ${item.platform || ""} ${country} ${item.description || item.storyline || ""}`;
+    if (/\b(?:nollywood|nigeria|nigerian|yoruba|igbo|hausa|naija|lagos|abuja|ekiti|enugu|anambra|ibadan|ogun|kano|odunlade|funke\s+akindele|iyabo\s+ojo|osita\s+iheme|chinedu\s+ikedieze|pete\s+edochie|ramsey\s+nouah|genevieve\s+nnaji|omoni\s+oboli|destiny\s+etiko|yul\s+edochie|zubby\s+michael|frederick\s+leonard|maurice\s+sam|ruth\s+kadiri|akotagiri|jagun\s+jagun|anik[uo]lapo|omo\s+ghetto|king\s+of\s+boys)\b/i.test(hay)) return true;
+    if (/^(?:akotagiri|save\s+my\s+life\s*2|the\s+wrong\s+boyfriend|love\s+is\s+blind|husband\s+on\s+lease|his\s+unloved\s+wife|unbreakable\s+bonds)$/i.test(title) && !/\b(?:india|korean|japan|china|bangla|hindi|united\s+states|uk|turkey)\b/i.test(`${country} ${item.language || ""}`)) return true;
+    return false;
+  };
+  const isUpcomingUnreleased = item => {
+    if (!item || typeof item !== "object") return false;
+    if (item.hasResource === false || item.isUpcoming === true) return true;
+    const endToday = getEndOfTodayMs();
+    const rawDate = String(item.releaseDate || item.appointmentDate || "").trim();
+    if (/^\d{4}-\d{2}-\d{2}/.test(rawDate)) {
+      const ts = Date.parse(rawDate);
+      if (Number.isFinite(ts) && ts > endToday + 2 * 86400 * 1000) return true;
+    }
+    return false;
+  };
 
   const heroEl = $("#cvHeroSpotlight");
   const catSection = $("#cvCategorySection");
@@ -663,6 +685,20 @@
     `;
   }
 
+  function upcomingPosterCardMarkup(item) {
+    const title = String(item?.title || "Upcoming Release").trim();
+    const poster = safeImg(posterOf(item));
+    return `
+      <div class="cv-card cv-card-upcoming" aria-label="${esc(title)} (Coming Soon)" title="${esc(title)} — Coming Soon">
+        <div class="cv-card-thumb">
+          ${poster
+            ? `<img loading="lazy" decoding="async" referrerpolicy="no-referrer" src="${esc(poster)}" alt="${esc(title)}" onerror="this.style.display='none';this.nextElementSibling.hidden=false"><div class="cv-card-fallback" hidden>${esc(title)}</div>`
+            : `<div class="cv-card-fallback">${esc(title)}</div>`}
+        </div>
+      </div>
+    `;
+  }
+
   function cardTop10Markup(item, rank) {
     const title = String(item.title || "Untitled").trim();
     const poster = safeImg(posterOf(item));
@@ -703,7 +739,8 @@
       const item = slides[activeIdx];
       const img = safeImg(posterOf(item));
       const title = String(item.title || "Featured");
-      const year = item.year ? ` (${item.year})` : "";
+      const rawYear = String(item.year || "").trim();
+      const year = rawYear && !new RegExp(`\\b${rawYear.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(title) ? ` (${rawYear})` : "";
       const watchHref = itemHref(item);
       const lang = String(item.language || "International").split("·")[0].trim();
       const ratingHtml = item.rating ? `<span class="cv-star">★ ${esc(item.rating)}</span><span aria-hidden="true">·</span>` : "";
@@ -898,6 +935,7 @@
     };
 
     const mlbdSectionShelves = mlbdSections
+      .filter(sec => !isNigerian(null, sec?.title))
       .map(sec => {
         const cleanTitle = stripCatBrand(String(sec?.title || "").trim());
         const catPath = String(sec?.categoryPath || "/new").trim();
@@ -912,9 +950,20 @@
       })
       .filter(Boolean);
 
-    const minFreshThreshold = Date.UTC(new Date(Date.now() + 6 * 3600 * 1000).getUTCFullYear() - 1, 0, 1);
+    const indiaBdItems = dedupeList([
+      ...(curated.indiaBangladeshTrending || []),
+      ...(Array.isArray(homeData.mlbdBangla) ? homeData.mlbdBangla : []),
+      ...(curated.bengali || []),
+      ...(curated.southIndian || []).slice(0, 10),
+      ...(curated.hindiMovies || []).slice(0, 10)
+    ]);
 
     const orderedShelves = [
+      {
+        title: "🔥 Trending in India & Bangladesh",
+        items: indiaBdItems,
+        moreHref: "catalog.html?category=%2FsouthIndian"
+      },
       {
         title: "🔥 Trending Now",
         items: sortNewestFirst(dedupeList(curated.trending?.length ? curated.trending : homeData.trending)),
@@ -997,13 +1046,6 @@
             : sortNewestFirst(allPool).sort((a, b) => Number(b.rating || 0) - Number(a.rating || 0))
         ),
         moreHref: "catalog.html?category=%2Ftop-rated"
-      },
-      {
-        title: "⏳ Upcoming Movies",
-        items: dedupeList(curated.upcoming?.length ? curated.upcoming : homeData.upcoming).filter(
-          x => releaseTime(x) >= Date.now() - 14 * 86400 * 1000
-        ),
-        moreHref: "catalog.html?category=%2Fupcoming"
       }
     ];
 
@@ -1023,11 +1065,12 @@
     const extraLiveSections = (Array.isArray(homeData.sections) ? homeData.sections : [])
       .map(sec => {
         const cleanTitle = stripCatBrand(String(sec?.title || "").trim());
+        if (!cleanTitle || isNigerian(null, cleanTitle) || /upcoming/i.test(cleanTitle)) return null;
         const items = sortNewestFirst(dedupeList(sec?.items || []));
-        if (!cleanTitle || !items.length) return null;
-        if (releaseTime(items[0]) < minFreshThreshold) return null;
+        if (!items.length) return null;
         const nTitle = normShelfTitle(cleanTitle);
         const catPath = String(sec?.categoryPath || "").trim();
+        if (catPath.toLowerCase() === "/upcoming") return null;
         if (usedShelfTitles.has(nTitle)) return null;
         if (catPath && usedCategoryPaths.has(catPath.toLowerCase())) return null;
         usedShelfTitles.add(nTitle);
@@ -1040,24 +1083,35 @@
       })
       .filter(Boolean);
 
-    const allShelves = [...orderedShelves, ...extraLiveSections];
+    const upcomingItems = dedupeList(curated.upcoming?.length ? curated.upcoming : homeData.upcoming)
+      .filter(x => isUpcomingUnreleased(x) && safeImg(posterOf(x)));
+    const upcomingShelf = {
+      title: "⏳ Upcoming Movies",
+      isUpcomingShelf: true,
+      items: upcomingItems,
+      moreHref: ""
+    };
+
+    const allShelves = [...orderedShelves, ...extraLiveSections, upcomingShelf];
 
     const html = allShelves
       .filter(s => s.items.length > 0)
       .map(s => {
-        const visible = s.items.slice(0, s.top10 ? 10 : 24);
+        const visible = s.items.slice(0, s.top10 ? 10 : 36);
         const rowClass = s.top10 ? "cv-shelf-row cv-shelf-top10" : "cv-shelf-row";
         const cardsHtml = s.top10
           ? visible.map((item, idx) => cardTop10Markup(item, idx + 1)).join("")
-          : visible.map(cardMarkup).join("");
+          : s.isUpcomingShelf
+            ? visible.map(upcomingPosterCardMarkup).join("")
+            : visible.map(cardMarkup).join("");
 
         return `
-          <section class="cv-section">
+          <section class="cv-section${s.isUpcomingShelf ? " cv-section-upcoming" : ""}"${s.isUpcomingShelf ? ' data-section="upcoming"' : ""}>
             <div class="cv-section-header">
               <div class="cv-section-title-group">
                 <h2 class="cv-section-title">${esc(s.title)}</h2>
               </div>
-              <a class="cv-more-link" href="${esc(s.moreHref)}">View All ›</a>
+              ${s.moreHref ? `<a class="cv-more-link" href="${esc(s.moreHref)}">View All ›</a>` : `<span class="cv-section-sub">Coming Soon · Opens After Release</span>`}
             </div>
             <div class="${rowClass}">
               ${cardsHtml}

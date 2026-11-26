@@ -26,6 +26,7 @@ import {
   validateExternalHttpUrl
 } from "./movielinkbd-api.js";
 import { buildPosterSvg, handleMockMovieApi } from "./mock-catalog.js";
+import { isNigerianContent, scoreSearchMatch, collectTitleSuggestions } from "./lib/catalog-rules.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -848,36 +849,52 @@ function matchesSearchType(item, rawTypeParam) {
   return false;
 }
 
+async function fetchImdbSuggestTitles(q) {
+  const clean = String(q || "").trim();
+  const firstMatch = clean.toLowerCase().match(/[a-z0-9]/);
+  if (clean.length < 2 || !firstMatch) return [];
+  try {
+    const res = await fetch(
+      `https://v3.sg.media-imdb.com/suggestion/${encodeURIComponent(firstMatch[0])}/${encodeURIComponent(clean.toLowerCase())}.json`,
+      {
+        headers: { "User-Agent": MOVIEBOX_UA },
+        signal: AbortSignal.timeout(2200)
+      }
+    );
+    if (!res.ok) return [];
+    const data = await res.json();
+    const list = Array.isArray(data?.d) ? data.d : [];
+    const validQid = new Set(["movie", "tvSeries", "tvMiniSeries", "tvMovie", "video"]);
+    return list
+      .filter(e => e?.l && (!e.qid || validQid.has(e.qid)))
+      .map(e => String(e.l).trim())
+      .slice(0, 10);
+  } catch {
+    return [];
+  }
+}
+
+function isCategorySearchQuery(q) {
+  return /\b(hindi|dubbed|bollywood|bangla|bengali|natok|korean|k-?drama|chinese|c-?drama|turkish|japanese|pakistani|urdu|hollywood|english|south\s*indian|tamil|telugu|malayalam|punjabi|anime|action|comedy|horror|thriller|romance|fantasy|adventure|crime|mystery|sci-?fi|netflix|prime\s*video|disney|hoichoi|zee5|adult|erotic|18\+|vivamax)\b/i.test(String(q || ""));
+}
+
 function scoreMergedSearchItem(item, q) {
+  if (!item || isNigerianContent(item)) return 0;
   const lower = String(q || "").trim().toLowerCase();
   if (!lower) return 10;
-  const title = String(item?.title || "").toLowerCase();
-  const hay = `${title} ${item?.genre || ""} ${item?.language || ""} ${item?.country || ""} ${item?.typeBadge || ""} ${item?.platform || ""}`.toLowerCase();
-  const stop = new Set(["movie", "movies", "film", "films", "video", "videos", "full", "hd", "watch", "online", "download", "free", "new", "latest"]);
-  const rawTokens = lower.split(/\s+/).filter(Boolean);
-  const tokens = rawTokens.filter(t => !stop.has(t));
-  const useTokens = tokens.length ? tokens : rawTokens;
-  let score = 0;
-  if (title === lower) score = 200;
-  else if (title.startsWith(lower)) score = 170;
-  else if (title.includes(lower)) score = 145;
-  else if (useTokens.length && useTokens.every(t => title.includes(t))) score = 125;
-  else if (useTokens.length && useTokens.every(t => hay.includes(t))) score = 105;
-  else if (useTokens.some(t => t.length >= 3 && title.includes(t))) score = 80;
-  else if (useTokens.some(t => t.length >= 3 && hay.includes(t))) score = 60;
-  else score = 25;
+  const hay = `${item?.title || ""} ${item?.genre || ""} ${item?.language || ""} ${item?.country || ""} ${item?.typeBadge || ""} ${item?.platform || ""}`.toLowerCase();
+  let score = scoreSearchMatch(item, lower, { allowBroadMatch: isCategorySearchQuery(lower) });
+  if (score <= 0) return 0;
 
   // Regional & format relevance boosts
   if (/\bsouth\b/i.test(lower) && !/south\s*(africa|korea|park)/i.test(lower)) {
     if (/south\s*indian|tamil|telugu|malayalam|kannada|tollywood|kollywood/i.test(hay)) score += 75;
     if (/india/i.test(String(item?.country || ""))) score += 35;
-    if (/\bvs\b/i.test(title)) score -= 60;
+    if (/\bvs\b/i.test(String(item?.title || ""))) score -= 60;
   }
   if (/\bmovie|movies|film\b/i.test(lower) && item?.isMovie) score += 12;
   if (/\bseries|drama\b/i.test(lower) && item?.isSeries) score += 12;
 
-  if (item?.hasResource !== false) score += 10;
-  if (item?.poster || item?.previewImage) score += 8;
   if (item?.source === "movielinkbd" || String(item?.path || "").startsWith("/mlbd/")) score += 4;
   return score;
 }
@@ -890,31 +907,43 @@ app.get("/api/suggest", async (req, res) => {
   try {
     const mbParams = new URLSearchParams({ q, page: "1", subjectType });
     if (safeMode) mbParams.set("safe", "1");
-    const [mlbdRes, mbRes] = await Promise.allSettled([
+    const [mlbdRes, mbRes, imdbRes] = await Promise.allSettled([
       getMlbdSuggest(q),
-      handleMovieBoxRoute("search", mbParams)
+      handleMovieBoxRoute("search", mbParams),
+      fetchImdbSuggestTitles(q)
     ]);
     const mlbdItems = mlbdRes.status === "fulfilled" && Array.isArray(mlbdRes.value?.items) ? mlbdRes.value.items : [];
     const mbItems = mbRes.status === "fulfilled" && Array.isArray(mbRes.value?.items) ? mbRes.value.items : [];
+    const mlbdSugg = mlbdRes.status === "fulfilled" && Array.isArray(mlbdRes.value?.suggestions) ? mlbdRes.value.suggestions : [];
+    const mbSugg = mbRes.status === "fulfilled" && Array.isArray(mbRes.value?.suggestions) ? mbRes.value.suggestions : [];
+    const imdbSugg = imdbRes.status === "fulfilled" && Array.isArray(imdbRes.value) ? imdbRes.value : [];
+
     const seen = new Set();
     const candidates = [];
     for (const item of [...mbItems, ...mlbdItems]) {
-      if (!item) continue;
+      if (!item || isNigerianContent(item)) continue;
       if (safeMode && isAdultCatalogItem(item)) continue;
       if (!matchesSearchType(item, subjectType)) continue;
+      if (scoreMergedSearchItem(item, q) <= 0) continue;
       const key = item?.path || String(item?.title || "").toLowerCase();
       if (!key || seen.has(key)) continue;
       seen.add(key);
       candidates.push(item);
     }
     candidates.sort((a, b) => scoreMergedSearchItem(b, q) - scoreMergedSearchItem(a, q) || (Number(b.views) || 0) - (Number(a.views) || 0));
-    const merged = candidates.slice(0, 32);
+    const merged = candidates.slice(0, 40);
+    const suggestions = collectTitleSuggestions(q, {
+      suggestWords: mbSugg,
+      items: merged,
+      extraTitles: [...mlbdSugg, ...imdbSugg],
+      limit: 15
+    });
     res.setHeader("Cache-Control", "public, max-age=60");
     return res.json({
       ok: true,
       query: q,
       items: merged,
-      suggestions: merged.map(it => it.title)
+      suggestions
     });
   } catch (err) {
     return res.status(502).json({ ok: false, error: err?.message || "Suggestions unavailable" });
@@ -1127,23 +1156,52 @@ app.all("/api/movie-api/*", async (req, res) => {
         : { ok: true, sections: [], trending: [], banners: [], categories: [], curated: {} };
       if (mlbdRes.status === "fulfilled" && mlbdRes.value?.ok) {
         const mlbd = mlbdRes.value;
-        payload.mlbdSections = mlbd.sections || [];
-        payload.mlbdTrending = mlbd.trending || [];
+        const cleanMlbdSecs = (mlbd.sections || [])
+          .filter(s => !isNigerianContent(null, s?.title))
+          .map(s => ({ ...s, items: (s.items || []).filter(x => !isNigerianContent(x, s?.title)) }))
+          .filter(s => s.items.length > 0);
+        payload.mlbdSections = cleanMlbdSecs;
+        payload.mlbdTrending = (mlbd.trending || []).filter(x => !isNigerianContent(x));
         payload.mlbdCategories = mlbd.categories || [];
         const existingCats = new Set((payload.categories || []).map(c => c?.path));
         payload.categories = [
           ...(payload.categories || []),
           ...(mlbd.categories || []).filter(c => c?.path && !existingCats.has(c.path))
         ];
-        payload.banners = [
-          ...(mlbd.banners || []).slice(0, 6),
-          ...(payload.banners || []).filter(b => (b?.path || b?.title) && !(mlbd.banners || []).some(mb => (mb?.path || mb?.title) === (b?.path || b?.title)))
+        const mbBanners = (payload.banners || []).filter(x => !isNigerianContent(x));
+        const mlbdBanners = (mlbd.banners || []).filter(x => !isNigerianContent(x));
+        const playableMlbdBanners = mlbdBanners.filter(b => Boolean(b?.mbSubjectId));
+        const seenBannerKeys = new Set();
+        payload.banners = [...mbBanners, ...playableMlbdBanners]
+          .filter(b => {
+            const k = String(b?.mbSubjectId || b?.subjectId || b?.path || b?.title || "").toLowerCase();
+            if (!k || seenBannerKeys.has(k)) return false;
+            seenBannerKeys.add(k);
+            return true;
+          })
+          .slice(0, 10);
+        payload.sections = [
+          ...cleanMlbdSecs,
+          ...(payload.sections || []).filter(s => !isNigerianContent(null, s?.title))
         ];
-        payload.sections = [...(mlbd.sections || []), ...(payload.sections || [])];
         payload.activeMlbdMirror = mlbd.activeMirror;
       }
       if (mlbdBanglaRes.status === "fulfilled" && Array.isArray(mlbdBanglaRes.value?.items)) {
-        payload.mlbdBangla = mlbdBanglaRes.value.items;
+        payload.mlbdBangla = mlbdBanglaRes.value.items.filter(x => !isNigerianContent(x));
+      }
+      if (Array.isArray(payload.trending)) {
+        payload.trending = payload.trending.filter(x => !isNigerianContent(x));
+      }
+      if (payload.curated && Array.isArray(payload.mlbdBangla) && payload.mlbdBangla.length) {
+        const existingIb = Array.isArray(payload.curated.indiaBangladeshTrending) ? payload.curated.indiaBangladeshTrending : [];
+        const seen = new Set();
+        payload.curated.indiaBangladeshTrending = [...payload.mlbdBangla.slice(0, 8), ...existingIb].filter(x => {
+          if (!x || isNigerianContent(x)) return false;
+          const k = x.path || x.subjectId || x.title;
+          if (!k || seen.has(k)) return false;
+          seen.add(k);
+          return true;
+        });
       }
       res.setHeader("Cache-Control", "public, max-age=60");
       return res.status(200).json(payload);
@@ -1171,31 +1229,49 @@ app.all("/api/movie-api/*", async (req, res) => {
       const page = Math.max(1, Number(query.get("page")) || 1);
       const safeMode = query.get("safe") === "1";
       const subjectType = String(query.get("subjectType") || "0");
-      const [mbRes, mlbdRes] = await Promise.allSettled([
+      const [mbRes, mlbdRes, imdbRes] = await Promise.allSettled([
         handleMovieBoxRoute("search", query),
-        q ? getMlbdCatalog({ path: "/search", q, page }) : Promise.resolve({ items: [] })
+        q ? getMlbdCatalog({ path: "/search", q, page }) : Promise.resolve({ items: [] }),
+        q && page === 1 ? fetchImdbSuggestTitles(q) : Promise.resolve([])
       ]);
       const mbItems = mbRes.status === "fulfilled" && Array.isArray(mbRes.value?.items) ? mbRes.value.items : [];
       const mlbdItems = mlbdRes.status === "fulfilled" && Array.isArray(mlbdRes.value?.items) ? mlbdRes.value.items : [];
+      const mbSugg = mbRes.status === "fulfilled" && Array.isArray(mbRes.value?.suggestions) ? mbRes.value.suggestions : [];
+      const imdbSugg = imdbRes.status === "fulfilled" && Array.isArray(imdbRes.value) ? imdbRes.value : [];
       const candidates = [];
       const seen = new Set();
       for (const candidate of [...mbItems, ...mlbdItems]) {
-        if (!candidate) continue;
+        if (!candidate || isNigerianContent(candidate)) continue;
         if (safeMode && isAdultCatalogItem(candidate)) continue;
         if (!matchesSearchType(candidate, subjectType)) continue;
+        if (q && scoreMergedSearchItem(candidate, q) <= 0) continue;
         const key = candidate.path || String(candidate.title || "").toLowerCase();
         if (!key || seen.has(key)) continue;
         seen.add(key);
         candidates.push(candidate);
       }
       candidates.sort((a, b) => scoreMergedSearchItem(b, q) - scoreMergedSearchItem(a, q) || (Number(b.views) || 0) - (Number(a.views) || 0));
-      const merged = candidates.slice(0, 60);
+      const merged = candidates.slice(0, 100);
+      const suggestions = q
+        ? collectTitleSuggestions(q, { suggestWords: mbSugg, items: merged, extraTitles: imdbSugg, limit: 15 })
+        : [];
+      const searchHasMore = Boolean(mbRes.value?.hasMore || mlbdRes.value?.hasMore || candidates.length >= 30);
+      const searchMaxPage = Math.max(
+        page,
+        Number(mbRes.value?.totalPages || page),
+        Number(mlbdRes.value?.maxPage || page),
+        searchHasMore ? page + 1 : page
+      );
       res.setHeader("Cache-Control", "public, max-age=60");
       return res.json({
         ok: true,
         items: merged,
+        suggestions,
         totalCount: merged.length,
-        hasMore: Boolean(mbRes.value?.hasMore || mlbdRes.value?.hasMore)
+        page,
+        totalPages: searchMaxPage,
+        maxPage: searchMaxPage,
+        hasMore: searchHasMore
       });
     }
 
@@ -1208,7 +1284,7 @@ app.all("/api/movie-api/*", async (req, res) => {
           const mlbdCat = await getMlbdCatalog({ path: category, page });
           if (Array.isArray(mlbdCat?.items) && mlbdCat.items.length > 0) {
             res.setHeader("Cache-Control", "public, max-age=60");
-            return res.json({ ...mlbdCat, items: sortByReleaseNewest(mlbdCat.items) });
+            return res.json({ ...mlbdCat, items: sortByReleaseNewest(mlbdCat.items.filter(x => !isNigerianContent(x))) });
           }
         } catch (err) {
           console.warn(`[MLBD catalog error] ${category}:`, err?.message || err);
@@ -1217,7 +1293,7 @@ app.all("/api/movie-api/*", async (req, res) => {
           const mbFallback = await handleMovieBoxRoute("catalog", query);
           if (mbFallback?.ok && Array.isArray(mbFallback.items)) {
             res.setHeader("Cache-Control", "public, max-age=60");
-            return res.json({ ...mbFallback, items: sortByReleaseNewest(mbFallback.items) });
+            return res.json({ ...mbFallback, items: sortByReleaseNewest(mbFallback.items.filter(x => !isNigerianContent(x))) });
           }
         } catch {}
         res.setHeader("Cache-Control", "no-store");
@@ -1234,21 +1310,25 @@ app.all("/api/movie-api/*", async (req, res) => {
       const merged = [];
       const seen = new Set();
       for (const item of ordered) {
+        if (!item || isNigerianContent(item)) continue;
         const key = item?.path || String(item?.title || "").trim().toLowerCase();
         if (!key || seen.has(key)) continue;
         seen.add(key);
         merged.push(item);
       }
       const sortedMerged = sortByReleaseNewest(merged);
+      const maxPage = Math.max(
+        Number(mbPayload?.maxPage || mbPayload?.totalPages || 1),
+        Number(mlbdRes.status === "fulfilled" ? (mlbdRes.value?.maxPage || mlbdRes.value?.totalPages || 1) : 1)
+      );
       res.setHeader("Cache-Control", "public, max-age=60");
       return res.json({
         ...mbPayload,
         ok: true,
         items: sortedMerged,
-        maxPage: Math.max(
-          Number(mbPayload?.maxPage || 1),
-          Number(mlbdRes.status === "fulfilled" ? mlbdRes.value?.maxPage || 1 : 1)
-        )
+        totalPages: maxPage,
+        maxPage,
+        hasMore: page < maxPage
       });
     }
 

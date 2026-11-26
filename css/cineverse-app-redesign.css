@@ -748,6 +748,15 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   border-color: rgba(255, 255, 255, 0.24);
 }
 
+.cv-card-upcoming {
+  cursor: default !important;
+}
+
+.cv-card-upcoming:hover .cv-card-thumb {
+  transform: none;
+  border-color: var(--cv-border);
+}
+
 .cv-card-thumb img {
   display: block;
   width: 100%;
@@ -1590,6 +1599,55 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   background: #202530;
   border-color: rgba(255, 255, 255, 0.16);
   color: #fff;
+}
+
+.cv-search-sugg-wrap {
+  margin: 4px 0 16px;
+}
+
+.cv-search-sugg-label {
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #8b95a7;
+  margin-bottom: 8px;
+}
+
+.cv-search-sugg-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cv-search-sugg-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(16, 185, 129, 0.34);
+  background: rgba(16, 185, 129, 0.12);
+  color: #e2fbe8;
+  font-size: 13px;
+  font-weight: 600;
+  max-width: 100%;
+  cursor: pointer;
+  transition: background 150ms var(--cv-ease), border-color 150ms var(--cv-ease), transform 150ms var(--cv-ease);
+}
+
+.cv-search-sugg-btn span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cv-search-sugg-btn:hover {
+  background: rgba(16, 185, 129, 0.24);
+  border-color: rgba(110, 231, 183, 0.72);
+  color: #ffffff;
+  transform: translateY(-1px);
 }
 
 /* Search Idle Ranking Header & Horizontal Cards */
