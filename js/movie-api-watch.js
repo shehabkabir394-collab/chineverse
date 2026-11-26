@@ -1089,14 +1089,16 @@
 
     grid.innerHTML = usable
       .map(x => {
-        const poster = safeImg(posterOf(x));
+        const poster = safeImg(posterOf(x) || x?.rawPoster);
+        const rawFb = /^(?:https?:\/\/|\/\/)/i.test(String(x?.rawPoster || "")) ? String(x.rawPoster) : "";
+        const fbAttr = rawFb && rawFb !== poster ? ` data-fallback-src="${esc(rawFb)}"` : "";
         const lang = x._hindiCatalog || x.isHindiDubbed ? "Hindi Dubbed" : String(x.language || x.typeBadge || "").split("·")[0].trim();
         const rate = x.rating && Number(x.rating) > 0 ? `★ ${esc(x.rating)}` : "";
         return `
           <a class="cv-card" href="watch.html?path=${encodeURIComponent(x.path)}&title=${encodeURIComponent(x.title || "")}">
             <div class="cv-card-thumb">
               ${poster
-                ? `<img loading="lazy" referrerpolicy="no-referrer" src="${esc(poster)}" alt="${esc(x.title || "")}" onerror="this.style.display='none';this.nextElementSibling.hidden=false"><div class="cv-card-fallback" hidden>${esc(x.title || "")}</div>`
+                ? `<img loading="lazy" decoding="async" referrerpolicy="no-referrer" src="${esc(poster)}"${fbAttr} data-poster-img="1" alt="${esc(x.title || "")}"><div class="cv-card-fallback" hidden>${esc(x.title || "")}</div>`
                 : `<div class="cv-card-fallback">${esc(x.title || "")}</div>`}
               <div class="cv-card-top">
                 ${lang ? `<span class="cv-card-lang">${esc(lang)}</span>` : ""}
@@ -1326,11 +1328,25 @@
       const dubSelectHtml =
         dubChoices.length > 1
           ? `<select id="cvDubSelect" class="cv-select" aria-label="Select audio language">
-              ${dubChoices.map(x => `<option value="${esc(x.path)}" ${x.path === path ? "selected" : ""}>${esc(x.language || x.lanName || "Audio")}</option>`).join("")}
+              ${dubChoices.map(x => `<option value="${esc(x.path)}" ${x.path === path ? "selected" : ""}>${esc(x.language || x.lanName || x.label || "Audio")}</option>`).join("")}
             </select>`
           : `<select id="cvDubSelect" class="cv-select" aria-label="Audio language">
               <option value="${esc(path)}">${esc(d.language || "Original Audio")}</option>
             </select>`;
+
+      const relatedSeasonsHtml =
+        Array.isArray(d.relatedSeasons) && d.relatedSeasons.length > 0
+          ? `<div class="cv-related-seasons" style="margin-top:14px;padding-top:12px;border-top:1px solid rgba(255,255,255,.08)">
+              <div style="font-size:12px;font-weight:700;color:#cbd5e1;margin-bottom:8px">Seasons &amp; Editions</div>
+              <div style="display:flex;flex-wrap:wrap;gap:6px">
+                ${d.relatedSeasons
+                  .filter(rs => rs?.path && rs.path !== path)
+                  .slice(0, 10)
+                  .map(rs => `<a class="cv-util-pill" style="padding:5px 10px;font-size:12px" href="watch.html?path=${encodeURIComponent(rs.path)}&title=${encodeURIComponent(rs.title || "")}">${esc(rs.title || rs.language || "Edition")}</a>`)
+                  .join("")}
+              </div>
+            </div>`
+          : "";
 
       const seasonSelectHtml =
         seasonKeys.length > 1 || (seasonKeys.length === 1 && seasonKeys[0] > 0)
@@ -1367,7 +1383,13 @@
               <div id="cvSynopsisBox" class="cv-watch-synopsis" hidden>
                 <p style="margin:0 0 8px">${esc(d.storyline || d.description || "No synopsis available for this title.")}</p>
                 <div style="font-size:12px;color:#98a2b3">
-                  ${[d.country ? `Country: ${d.country}` : "", d.genre ? `Genre: ${d.genre}` : "", d.releaseDate ? `Released: ${d.releaseDate}` : ""].filter(Boolean).join(" · ")}
+                  ${[
+                    d.country ? `Country: ${d.country}` : "",
+                    d.genre ? `Genre: ${d.genre}` : "",
+                    d.releaseDate ? `Released: ${d.releaseDate}` : "",
+                    d.qualityNote ? `Quality: ${d.qualityNote}` : "",
+                    d.communityScore ? `Score: ${d.communityScore}` : ""
+                  ].filter(Boolean).map(esc).join(" · ")}
                 </div>
               </div>
 
@@ -1415,6 +1437,7 @@
               ${seasonSelectHtml}
             </div>
             <div id="cvEpisodeStrip" class="cv-ep-strip"></div>
+            ${relatedSeasonsHtml}
           </aside>
         </div>
 
@@ -1576,6 +1599,41 @@
         load();
       });
     }
+  }
+
+  if (!window.__cvPosterRecoveryInstalled) {
+    window.__cvPosterRecoveryInstalled = true;
+    document.addEventListener("error", e => {
+      const img = e.target;
+      if (!(img instanceof HTMLImageElement) || !img.dataset.posterImg) return;
+      const fb = img.dataset.fallbackSrc || "";
+      if (fb && !img.dataset.triedFb) {
+        img.dataset.triedFb = "1";
+        img.src = fb;
+        return;
+      }
+      const curSrc = img.getAttribute("src") || "";
+      if (!img.dataset.retried && curSrc.startsWith("/api/moviebox-image/")) {
+        img.dataset.retried = "1";
+        setTimeout(() => {
+          if (!img.isConnected) return;
+          img.src = curSrc + (curSrc.includes("?") ? "&" : "?") + "r=1";
+        }, 450);
+        return;
+      }
+      if (!img.dataset.svgFb && img.alt) {
+        img.dataset.svgFb = "1";
+        img.src = `/api/poster/${encodeURIComponent(img.alt.slice(0, 80))}.svg`;
+        return;
+      }
+      const sib = img.nextElementSibling;
+      if (sib && (sib.classList?.contains("cv-card-fallback") || sib.classList?.contains("cv-rank-thumb-fallback"))) {
+        img.style.display = "none";
+        sib.hidden = false;
+      } else {
+        img.style.visibility = "hidden";
+      }
+    }, true);
   }
 
   load();

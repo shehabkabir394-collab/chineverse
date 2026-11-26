@@ -3,6 +3,10 @@
   const $ = s => document.querySelector(s);
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const safeImg = u => (/^(?:https?:\/\/|\/api\/|favicon\.svg)/i.test(String(u || "")) ? String(u) : "");
+  const rawPosterOf = item => {
+    const u = String(item?.rawPoster || "");
+    return /^(?:https?:\/\/|\/\/)/i.test(u) ? u : "";
+  };
   const RECENT_KEY = "cv_recent_searches_v1";
   const FAMILY_SAFE_KEY = "cv_family_safe_v1";
   const MAX_HISTORY = 15;
@@ -204,7 +208,9 @@
                 .map((item, idxInGroup) => {
                   const rank = groupIdx * 3 + idxInGroup + 1;
                   const rankClass = rank === 1 ? "r1" : rank === 2 ? "r2" : rank === 3 ? "r3" : "rn";
-                  const img = safeImg(item.poster || item.previewImage || item.cover);
+                  const img = safeImg(item.poster || item.previewImage || item.cover || item.rawPoster);
+                  const rawFb = rawPosterOf(item);
+                  const fbAttr = rawFb && rawFb !== img ? ` data-fallback-src="${esc(rawFb)}"` : "";
                   const path = item.path || "";
                   const href = path
                     ? `watch.html?path=${encodeURIComponent(path)}&title=${encodeURIComponent(item.title || "")}`
@@ -223,7 +229,7 @@
                     <a class="cv-rank-row" href="${esc(href)}">
                       <div class="cv-rank-thumb-wrap">
                         ${img
-                          ? `<img loading="lazy" referrerpolicy="no-referrer" src="${esc(img)}" alt="${esc(item.title || "")}" onerror="this.style.visibility='hidden'">`
+                          ? `<img loading="lazy" decoding="async" referrerpolicy="no-referrer" src="${esc(img)}"${fbAttr} data-poster-img="1" alt="${esc(item.title || "")}"><div class="cv-rank-thumb-fallback" hidden>▶</div>`
                           : `<div class="cv-rank-thumb-fallback">▶</div>`}
                         <span class="cv-rank-badge ${rankClass}">${rank}</span>
                         <span class="cv-rank-thumb-lang">${esc(langLabel)}</span>
@@ -359,7 +365,9 @@
         ${visibleItems
           .slice(0, 50)
           .map(item => {
-            const img = safeImg(item.poster || item.previewImage || item.cover);
+            const img = safeImg(item.poster || item.previewImage || item.cover || item.rawPoster);
+            const rawFb = rawPosterOf(item);
+            const fbAttr = rawFb && rawFb !== img ? ` data-fallback-src="${esc(rawFb)}"` : "";
             const path = item.path || "";
             const href = path
               ? `watch.html?path=${encodeURIComponent(path)}&title=${encodeURIComponent(item.title || "")}`
@@ -373,7 +381,7 @@
             return `
               <a class="cv-search-result-row" href="${esc(href)}">
                 ${img
-                  ? `<img class="cv-search-result-thumb" loading="lazy" referrerpolicy="no-referrer" src="${esc(img)}" alt="${esc(item.title || "Poster")}" onerror="this.style.visibility='hidden'">`
+                  ? `<img class="cv-search-result-thumb" loading="lazy" decoding="async" referrerpolicy="no-referrer" src="${esc(img)}"${fbAttr} data-poster-img="1" alt="${esc(item.title || "Poster")}">`
                   : `<div class="cv-search-result-thumb"></div>`}
                 <div class="cv-search-result-copy">
                   <b>${esc(item.title || "Untitled")}</b>
@@ -664,5 +672,40 @@
     clearHistory: clearRecent,
     isFamilySafe
   };
+  if (!window.__cvPosterRecoveryInstalled) {
+    window.__cvPosterRecoveryInstalled = true;
+    document.addEventListener("error", e => {
+      const img = e.target;
+      if (!(img instanceof HTMLImageElement) || !img.dataset.posterImg) return;
+      const fb = img.dataset.fallbackSrc || "";
+      if (fb && !img.dataset.triedFb) {
+        img.dataset.triedFb = "1";
+        img.src = fb;
+        return;
+      }
+      const curSrc = img.getAttribute("src") || "";
+      if (!img.dataset.retried && curSrc.startsWith("/api/moviebox-image/")) {
+        img.dataset.retried = "1";
+        setTimeout(() => {
+          if (!img.isConnected) return;
+          img.src = curSrc + (curSrc.includes("?") ? "&" : "?") + "r=1";
+        }, 450);
+        return;
+      }
+      if (!img.dataset.svgFb && img.alt) {
+        img.dataset.svgFb = "1";
+        img.src = `/api/poster/${encodeURIComponent(img.alt.slice(0, 80))}.svg`;
+        return;
+      }
+      const sib = img.nextElementSibling;
+      if (sib && (sib.classList?.contains("cv-card-fallback") || sib.classList?.contains("cv-rank-thumb-fallback"))) {
+        img.style.display = "none";
+        sib.hidden = false;
+      } else {
+        img.style.visibility = "hidden";
+      }
+    }, true);
+  }
+
   bindTriggers();
 })();

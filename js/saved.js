@@ -75,7 +75,9 @@
 
     const cards = offlineItems
       .map(item => {
-        const poster = safeImg(item.posterDataUrl);
+        const poster = safeImg(item.posterDataUrl || item.rawPoster);
+        const rawFb = /^(?:https?:\/\/|\/\/)/i.test(String(item.rawPoster || "")) ? String(item.rawPoster) : "";
+        const fbAttr = rawFb && rawFb !== poster ? ` data-fallback-src="${esc(rawFb)}"` : "";
         const isComplete = item.status === "complete";
         const isDownloading = item.status === "downloading" || Boolean(window.CineVerseOffline?.isActive?.(item.id));
         const total = Number(item.totalBytes || 0);
@@ -102,7 +104,7 @@
               <div class="cv-card-thumb">
                 ${
                   poster
-                    ? `<img loading="lazy" src="${esc(poster)}" alt="${esc(item.title || "")}" onerror="this.style.display='none';this.nextElementSibling.hidden=false"><div class="cv-card-fallback" hidden>${esc(item.title || "")}</div>`
+                    ? `<img loading="lazy" decoding="async" src="${esc(poster)}"${fbAttr} data-poster-img="1" alt="${esc(item.title || "")}"><div class="cv-card-fallback" hidden>${esc(item.title || "")}</div>`
                     : `<div class="cv-card-fallback">${esc(item.title || "")}</div>`
                 }
                 <div class="cv-card-top">
@@ -203,7 +205,9 @@
       ? `<div class="cv-poster-grid">
           ${visible
             .map(item => {
-              const poster = safeImg(item.poster);
+              const poster = safeImg(item.poster || item.rawPoster);
+              const rawFb = /^(?:https?:\/\/|\/\/)/i.test(String(item.rawPoster || "")) ? String(item.rawPoster) : "";
+              const fbAttr = rawFb && rawFb !== poster ? ` data-fallback-src="${esc(rawFb)}"` : "";
               const href = item.path
                 ? `watch.html?path=${encodeURIComponent(item.path)}&title=${encodeURIComponent(item.title || "")}`
                 : "./";
@@ -214,7 +218,7 @@
                     <div class="cv-card-thumb">
                       ${
                         poster
-                          ? `<img loading="lazy" referrerpolicy="no-referrer" src="${esc(poster)}" alt="${esc(item.title || "")}" onerror="this.style.display='none';this.nextElementSibling.hidden=false"><div class="cv-card-fallback" hidden>${esc(item.title || "")}</div>`
+                          ? `<img loading="lazy" decoding="async" referrerpolicy="no-referrer" src="${esc(poster)}"${fbAttr} data-poster-img="1" alt="${esc(item.title || "")}"><div class="cv-card-fallback" hidden>${esc(item.title || "")}</div>`
                           : `<div class="cv-card-fallback">${esc(item.title || "")}</div>`
                       }
                       <div class="cv-card-top">
@@ -378,6 +382,41 @@
       e.target.value = "";
     }
   });
+
+  if (!window.__cvPosterRecoveryInstalled) {
+    window.__cvPosterRecoveryInstalled = true;
+    document.addEventListener("error", e => {
+      const img = e.target;
+      if (!(img instanceof HTMLImageElement) || !img.dataset.posterImg) return;
+      const fb = img.dataset.fallbackSrc || "";
+      if (fb && !img.dataset.triedFb) {
+        img.dataset.triedFb = "1";
+        img.src = fb;
+        return;
+      }
+      const curSrc = img.getAttribute("src") || "";
+      if (!img.dataset.retried && curSrc.startsWith("/api/moviebox-image/")) {
+        img.dataset.retried = "1";
+        setTimeout(() => {
+          if (!img.isConnected) return;
+          img.src = curSrc + (curSrc.includes("?") ? "&" : "?") + "r=1";
+        }, 450);
+        return;
+      }
+      if (!img.dataset.svgFb && img.alt) {
+        img.dataset.svgFb = "1";
+        img.src = `/api/poster/${encodeURIComponent(img.alt.slice(0, 80))}.svg`;
+        return;
+      }
+      const sib = img.nextElementSibling;
+      if (sib && (sib.classList?.contains("cv-card-fallback") || sib.classList?.contains("cv-rank-thumb-fallback"))) {
+        img.style.display = "none";
+        sib.hidden = false;
+      } else {
+        img.style.visibility = "hidden";
+      }
+    }, true);
+  }
 
   render();
 })();

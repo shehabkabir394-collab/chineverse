@@ -70,9 +70,9 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   scroll-behavior: auto !important;
 }
 
+/* Keep all shelves painted & decoded cleanly when scrolling in WebView */
 .cv-section {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 340px;
+  contain: layout style;
 }
 
 .cv-card,

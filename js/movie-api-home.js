@@ -9,8 +9,17 @@
     if (value && typeof value === "object") return imageValue(value.url || value.src || value.imageUrl || value.image_url || value.original || value.large || value.medium || value.path);
     return "";
   };
-  const posterOf = item => imageValue(item?.poster || item?.posterUrl || item?.poster_url || item?.previewImage || item?.preview_image || item?.bannerImage || item?.banner_image || item?.cover || item?.coverUrl || item?.coverImage || item?.image || item?.imageUrl || item?.image_url || item?.thumbnail || item?.thumbnailUrl || item?.thumbnail_url || item?.pic || item?.img);
+  const posterOf = item => imageValue(item?.poster || item?.posterUrl || item?.poster_url || item?.previewImage || item?.preview_image || item?.bannerImage || item?.banner_image || item?.cover || item?.coverUrl || item?.coverImage || item?.image || item?.imageUrl || item?.image_url || item?.thumbnail || item?.thumbnailUrl || item?.thumbnail_url || item?.pic || item?.img || item?.rawPoster);
+  const rawPosterOf = item => {
+    const u = imageValue(item?.rawPoster);
+    return /^(?:https?:\/\/|\/\/)/i.test(String(u || "")) ? String(u) : "";
+  };
   const safeImg = u => (/^(?:https?:\/\/|\/\/|\/api\/)/i.test(String(u || "")) ? String(u) : "");
+  const posterImgAttrs = (poster, rawPoster, alt, eager = false) => {
+    const fbAttr = rawPoster && rawPoster !== poster ? ` data-fallback-src="${esc(rawPoster)}"` : "";
+    const loadAttr = eager ? `loading="eager"` : `loading="lazy"`;
+    return `${loadAttr} decoding="async" referrerpolicy="no-referrer" src="${esc(poster)}"${fbAttr} alt="${esc(alt)}" data-poster-img="1"`;
+  };
   const isNigerian = (item, sectionTitle = "") => {
     const sec = String(sectionTitle || "").trim();
     if (sec && (/\b(?:nollywood|must-watch\s*black\s*shows?|black\s*cinema|black\s*shows?|nigeria|nigerian|ghana)\b|bet\+/i.test(sec))) return true;
@@ -565,7 +574,7 @@
     bodyEl.innerHTML = `
       <div class="cv-details-hero">
         <div class="cv-details-poster">
-          ${poster ? `<img referrerpolicy="no-referrer" src="${esc(poster)}" alt="${esc(title)}">` : `<div class="cv-card-fallback">${esc(title)}</div>`}
+          ${poster ? `<img referrerpolicy="no-referrer" src="${esc(poster)}"${rawPosterOf(d) || rawPosterOf(item) ? ` data-fallback-src="${esc(rawPosterOf(d) || rawPosterOf(item))}"` : ""} alt="${esc(title)}" data-poster-img="1"><div class="cv-card-fallback" hidden>${esc(title)}</div>` : `<div class="cv-card-fallback">${esc(title)}</div>`}
         </div>
         <div class="cv-details-head">
           <h2 id="cvDetailsTitle" class="cv-details-title">${esc(title)}</h2>
@@ -672,9 +681,10 @@
     }
   }
 
-  function cardMarkup(item) {
+  function cardMarkup(item, eager = false) {
     const title = String(item.title || "Untitled").trim();
     const poster = safeImg(posterOf(item));
+    const rawPoster = rawPosterOf(item);
     const href = itemHref(item);
     const langTag = String(item.language || item.country || item.typeBadge || "").split("·")[0].trim();
     const rating = item.rating && Number(item.rating) > 0 ? `★ ${esc(item.rating)}` : "";
@@ -684,7 +694,7 @@
       <a class="cv-card" href="${esc(href)}">
         <div class="cv-card-thumb">
           ${poster
-            ? `<img loading="lazy" decoding="async" referrerpolicy="no-referrer" src="${esc(poster)}" alt="${esc(title)}" onerror="this.style.display='none';this.nextElementSibling.hidden=false"><div class="cv-card-fallback" hidden>${esc(title)}</div>`
+            ? `<img ${posterImgAttrs(poster, rawPoster, title, eager)}><div class="cv-card-fallback" hidden>${esc(title)}</div>`
             : `<div class="cv-card-fallback">${esc(title)}</div>`}
           <div class="cv-card-hover-play" aria-hidden="true">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
@@ -700,11 +710,12 @@
   function upcomingPosterCardMarkup(item) {
     const title = String(item?.title || "Upcoming Release").trim();
     const poster = safeImg(posterOf(item));
+    const rawPoster = rawPosterOf(item);
     return `
       <div class="cv-card cv-card-upcoming" aria-label="${esc(title)} (Coming Soon)" title="${esc(title)} — Coming Soon">
         <div class="cv-card-thumb">
           ${poster
-            ? `<img loading="lazy" decoding="async" referrerpolicy="no-referrer" src="${esc(poster)}" alt="${esc(title)}" onerror="this.style.display='none';this.nextElementSibling.hidden=false"><div class="cv-card-fallback" hidden>${esc(title)}</div>`
+            ? `<img ${posterImgAttrs(poster, rawPoster, title, false)}><div class="cv-card-fallback" hidden>${esc(title)}</div>`
             : `<div class="cv-card-fallback">${esc(title)}</div>`}
         </div>
       </div>
@@ -714,6 +725,7 @@
   function cardTop10Markup(item, rank) {
     const title = String(item.title || "Untitled").trim();
     const poster = safeImg(posterOf(item));
+    const rawPoster = rawPosterOf(item);
     const href = itemHref(item);
     const rating = item.rating && Number(item.rating) > 0 ? `★ ${esc(item.rating)}` : "";
     const metaParts = [item.year, item.typeBadge, rating].filter(Boolean).join(" · ");
@@ -724,7 +736,7 @@
           <span class="cv-top10-rank tabular-nums" aria-hidden="true">${rank}</span>
           <div class="cv-card-thumb">
             ${poster
-              ? `<img loading="lazy" decoding="async" referrerpolicy="no-referrer" src="${esc(poster)}" alt="${esc(title)}" onerror="this.style.display='none';this.nextElementSibling.hidden=false"><div class="cv-card-fallback" hidden>${esc(title)}</div>`
+              ? `<img ${posterImgAttrs(poster, rawPoster, title, true)}><div class="cv-card-fallback" hidden>${esc(title)}</div>`
               : `<div class="cv-card-fallback">${esc(title)}</div>`}
             <div class="cv-card-hover-play" aria-hidden="true">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
@@ -757,9 +769,10 @@
       const lang = String(item.language || "International").split("·")[0].trim();
       const ratingHtml = item.rating ? `<span class="cv-star">★ ${esc(item.rating)}</span><span aria-hidden="true">·</span>` : "";
 
+      const rawImg = rawPosterOf(item);
       heroEl.innerHTML = `
         <div class="cv-spotlight-stage">
-          ${img ? `<img class="cv-spotlight-bg" decoding="async" referrerpolicy="no-referrer" src="${esc(img)}" alt="${esc(title)}">` : ""}
+          ${img ? `<img class="cv-spotlight-bg" decoding="async" referrerpolicy="no-referrer" src="${esc(img)}"${rawImg && rawImg !== img ? ` data-fallback-src="${esc(rawImg)}"` : ""} alt="${esc(title)}" data-poster-img="1">` : ""}
           <div class="cv-spotlight-scrim" aria-hidden="true"></div>
 
           <div class="cv-spotlight-top">
@@ -793,11 +806,12 @@
             ${slides
               .map((s, i) => {
                 const sImg = safeImg(posterOf(s));
+                const sRawImg = rawPosterOf(s);
                 const sHref = itemHref(s);
                 const sMeta = [s.year, String(s.genre || s.typeBadge || "").split(",")[0]].filter(Boolean).join(" · ");
                 return `
                   <div class="cv-spot-mini ${i === activeIdx ? "active" : ""}" data-spot-card="${i}" role="button" tabindex="0" aria-label="Select ${esc(s.title || "title")}">
-                    ${sImg ? `<img class="cv-spot-mini-thumb" decoding="async" referrerpolicy="no-referrer" src="${esc(sImg)}" alt="">` : `<div class="cv-spot-mini-thumb"></div>`}
+                    ${sImg ? `<img class="cv-spot-mini-thumb" decoding="async" referrerpolicy="no-referrer" src="${esc(sImg)}"${sRawImg && sRawImg !== sImg ? ` data-fallback-src="${esc(sRawImg)}"` : ""} alt="${esc(s.title || "Poster")}" data-poster-img="1">` : `<div class="cv-spot-mini-thumb"></div>`}
                     <div class="cv-spot-mini-info">
                       <b>${esc(s.title || "Featured")}</b>
                       <span>${esc(sMeta || lang)}</span>
@@ -1136,14 +1150,15 @@
 
     const html = allShelves
       .filter(s => s.items.length > 0)
-      .map(s => {
+      .map((s, shelfIdx) => {
         const visible = s.items.slice(0, s.top10 ? 10 : 36);
         const rowClass = s.top10 ? "cv-shelf-row cv-shelf-top10" : "cv-shelf-row";
+        const eagerShelf = shelfIdx < 4;
         const cardsHtml = s.top10
           ? visible.map((item, idx) => cardTop10Markup(item, idx + 1)).join("")
           : s.isUpcomingShelf
             ? visible.map(upcomingPosterCardMarkup).join("")
-            : visible.map(cardMarkup).join("");
+            : visible.map(item => cardMarkup(item, eagerShelf)).join("");
 
         return `
           <section class="cv-section${s.isUpcomingShelf ? " cv-section-upcoming" : ""}"${s.isUpcomingShelf ? ' data-section="upcoming"' : ""}>
@@ -1334,6 +1349,42 @@
     } catch (err) {
       statusEl.textContent = "Could not load catalog: " + (err?.message || "Network error");
     }
+  }
+
+  // Multi-stage poster recovery: direct rawPoster -> proxy retry -> SVG poster -> text fallback
+  if (!window.__cvPosterRecoveryInstalled) {
+    window.__cvPosterRecoveryInstalled = true;
+    document.addEventListener("error", e => {
+      const img = e.target;
+      if (!(img instanceof HTMLImageElement) || !img.dataset.posterImg) return;
+      const fb = img.dataset.fallbackSrc || "";
+      if (fb && !img.dataset.triedFb) {
+        img.dataset.triedFb = "1";
+        img.src = fb;
+        return;
+      }
+      const curSrc = img.getAttribute("src") || "";
+      if (!img.dataset.retried && curSrc.startsWith("/api/moviebox-image/")) {
+        img.dataset.retried = "1";
+        setTimeout(() => {
+          if (!img.isConnected) return;
+          img.src = curSrc + (curSrc.includes("?") ? "&" : "?") + "r=1";
+        }, 450);
+        return;
+      }
+      if (!img.dataset.svgFb && img.alt) {
+        img.dataset.svgFb = "1";
+        img.src = `/api/poster/${encodeURIComponent(img.alt.slice(0, 80))}.svg`;
+        return;
+      }
+      const sib = img.nextElementSibling;
+      if (sib && (sib.classList?.contains("cv-card-fallback") || sib.classList?.contains("cv-rank-thumb-fallback"))) {
+        img.style.display = "none";
+        sib.hidden = false;
+      } else {
+        img.style.visibility = "hidden";
+      }
+    }, true);
   }
 
   init();

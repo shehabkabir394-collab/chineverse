@@ -12,6 +12,7 @@ import {
   verifyMediaToken
 } from "./moviebox-api.js";
 import {
+  findExactTitleMlbdBackup,
   getActiveMlbdReferer,
   getMlbdCatalog,
   getMlbdCategories,
@@ -77,6 +78,9 @@ app.use((req, res, next) => {
     p === "/supabase" ||
     p.startsWith("/lib/") ||
     p === "/lib" ||
+    p.startsWith("/data/") ||
+    p === "/data" ||
+    p === "/.cinepulse-catalog-archive.json" ||
     p.startsWith("/node_modules/") ||
     p.startsWith("/.git") ||
     p.startsWith("/.env") ||
@@ -152,12 +156,57 @@ function convertSrtToVtt(rawText) {
   return `WEBVTT\n\n${cues.join("\n\n")}\n`;
 }
 
-// Image proxy for MovieBox posters, avatars & sports logos (bypasses ISP/hotlink blocks)
+const IMAGE_CACHE_MAX_ENTRIES = 600;
+const IMAGE_CACHE_MAX_BYTES = 1.5 * 1024 * 1024;
+const IMAGE_CACHE_TTL_MS = 6 * 3600 * 1000;
+const imageCache = new Map();
+const imageInFlight = new Map();
+
+function getCachedImageEntry(url) {
+  const entry = imageCache.get(url);
+  if (!entry) return null;
+  if (entry.expiresAt <= Date.now()) {
+    imageCache.delete(url);
+    return null;
+  }
+  imageCache.delete(url);
+  imageCache.set(url, entry);
+  return entry;
+}
+
+function setCachedImageEntry(url, contentType, bodyBuffer) {
+  if (!bodyBuffer || !bodyBuffer.length || bodyBuffer.length > IMAGE_CACHE_MAX_BYTES) return;
+  if (imageCache.size >= IMAGE_CACHE_MAX_ENTRIES) {
+    const oldestKey = imageCache.keys().next().value;
+    if (oldestKey) imageCache.delete(oldestKey);
+  }
+  imageCache.set(url, {
+    contentType,
+    body: bodyBuffer,
+    expiresAt: Date.now() + IMAGE_CACHE_TTL_MS
+  });
+}
+
+function isPublicImageCdn(url) {
+  return /\b(?:image\.tmdb\.org|media-amazon\.com|r2\.dev|ibb\.co(?:\.com)?|postimg\.cc|ytimg\.com|mzstatic\.com|tvmaze\.com|wikimedia\.org|wikipedia\.org|imageflix\.cam|img\.movielinkapp\.com)\b/i.test(String(url || ""));
+}
+
+// Image proxy for MovieBox/MLBD posters, avatars & sports logos (RAM cached, coalesced & hotlink-safe)
 app.get("/api/moviebox-image/:file", async (req, res) => {
   const targetUrl = verifyMediaToken(req.query.t);
   if (!targetUrl) {
     return res.status(400).send("Invalid or missing image token");
   }
+
+  const cached = getCachedImageEntry(targetUrl);
+  if (cached) {
+    res.setHeader("Content-Type", cached.contentType);
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Image-Cache", "HIT");
+    return res.end(cached.body);
+  }
+
   const referer = /aisports/i.test(targetUrl)
     ? "https://aisports.mobi/"
     : /movielinkbd\.com/i.test(targetUrl)
@@ -165,42 +214,58 @@ app.get("/api/moviebox-image/:file", async (req, res) => {
       : /movielink/i.test(targetUrl)
         ? getActiveMlbdReferer()
         : MOVIEBOX_REFERER;
+
   try {
-    const imgHeaders = {
-      "User-Agent": MOVIEBOX_UA,
-      Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8"
-    };
-    if (!/(?:image\.tmdb\.org|media-amazon\.com|ytimg\.com|mzstatic\.com|tvmaze\.com|wikimedia\.org|wikipedia\.org)/i.test(targetUrl)) {
-      imgHeaders.Referer = referer;
+    let job = imageInFlight.get(targetUrl);
+    if (!job) {
+      job = (async () => {
+        const baseHeaders = {
+          "User-Agent": MOVIEBOX_UA,
+          Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8"
+        };
+        const useReferer = !isPublicImageCdn(targetUrl);
+        let upstream = await fetchMediaWithRetry(
+          targetUrl,
+          "GET",
+          useReferer ? { ...baseHeaders, Referer: referer } : baseHeaders,
+          null,
+          2,
+          12000
+        );
+        if ((upstream.status === 403 || upstream.status === 401) && useReferer) {
+          try { await upstream.body?.cancel(); } catch {}
+          upstream = await fetchMediaWithRetry(targetUrl, "GET", baseHeaders, null, 1, 10000);
+        }
+        if (!upstream.ok) {
+          try { await upstream.body?.cancel(); } catch {}
+          return { ok: false, status: upstream.status };
+        }
+        const rawCt = String(upstream.headers.get("content-type") || "").toLowerCase();
+        if (rawCt && !rawCt.startsWith("image/") && !rawCt.includes("octet-stream")) {
+          try { await upstream.body?.cancel(); } catch {}
+          return { ok: false, status: 415 };
+        }
+        const ct = rawCt.startsWith("image/") ? rawCt : "image/jpeg";
+        const buf = Buffer.from(await upstream.arrayBuffer());
+        if (!buf.length) {
+          return { ok: false, status: 502 };
+        }
+        setCachedImageEntry(targetUrl, ct, buf);
+        return { ok: true, contentType: ct, body: buf };
+      })().finally(() => {
+        imageInFlight.delete(targetUrl);
+      });
+      imageInFlight.set(targetUrl, job);
     }
-    const upstream = await fetchMediaWithRetry(
-      targetUrl,
-      "GET",
-      imgHeaders,
-      null,
-      1
-    );
-    if (!upstream.ok) {
-      return res.status(upstream.status).send("Image unavailable");
+
+    const result = await job;
+    if (!result?.ok) {
+      return res.status(result?.status || 502).send("Image unavailable");
     }
-    const ct = upstream.headers.get("content-type") || "image/jpeg";
-    res.setHeader("Content-Type", ct);
+    res.setHeader("Content-Type", result.contentType);
     res.setHeader("Cache-Control", "public, max-age=86400");
     res.setHeader("X-Content-Type-Options", "nosniff");
-    if (!upstream.body) return res.end();
-    const nodeStream = Readable.fromWeb(upstream.body);
-    res.on("close", () => {
-      if (!res.writableFinished) {
-        try {
-          nodeStream.destroy();
-        } catch {}
-      }
-    });
-    nodeStream.on("error", () => {
-      if (!res.headersSent) res.status(502).end();
-      else res.end();
-    });
-    nodeStream.pipe(res);
+    return res.end(result.body);
   } catch {
     return res.status(502).send("Image upstream unavailable");
   }
@@ -347,22 +412,27 @@ app.get("/api/sports-hls/:file", async (req, res) => {
   }
 });
 
-const MAX_STREAM_CHUNK = 8 * 1024 * 1024; // 8 MiB keeps moov atoms fast while staying safely under Cloud Run's response & timeout limits
+const MAX_STREAM_CHUNK = 4 * 1024 * 1024;
+const INITIAL_STREAM_CHUNK = Math.floor(1.5 * 1024 * 1024);
 
-function buildBoundedRangeHeader(rawRange) {
+function buildBoundedRangeHeader(rawRange, preserveUnbounded = false) {
+  if (preserveUnbounded) {
+    return rawRange ? String(rawRange).trim() : null;
+  }
   if (!rawRange) {
-    return `bytes=0-${MAX_STREAM_CHUNK - 1}`;
+    return `bytes=0-${INITIAL_STREAM_CHUNK - 1}`;
   }
   const match = /^bytes=(\d+)-(\d*)$/i.exec(String(rawRange).trim());
   if (!match) return rawRange;
   const start = Number(match[1]);
   const requestedEnd = match[2] ? Number(match[2]) : null;
+  const maxSpan = start === 0 ? INITIAL_STREAM_CHUNK : MAX_STREAM_CHUNK;
   if (!Number.isFinite(start) || start < 0) return rawRange;
   if (requestedEnd == null || !Number.isFinite(requestedEnd)) {
-    return `bytes=${start}-${start + MAX_STREAM_CHUNK - 1}`;
+    return `bytes=${start}-${start + maxSpan - 1}`;
   }
-  if (requestedEnd - start + 1 > MAX_STREAM_CHUNK) {
-    return `bytes=${start}-${start + MAX_STREAM_CHUNK - 1}`;
+  if (requestedEnd - start + 1 > maxSpan) {
+    return `bytes=${start}-${start + maxSpan - 1}`;
   }
   return `bytes=${start}-${requestedEnd}`;
 }
@@ -498,8 +568,9 @@ async function readChunkWithTimeout(reader, timeoutMs, abortSignal) {
   }
 }
 
-// Direct MP4 media proxy with Range support, MovieBox Referer header & mid-stream auto-resume
-async function proxyMediaStream(req, res, targetUrl, extraHeaders = {}, forceDownload = false, customFilename = "") {
+// Direct MP4 media proxy with Range support, Referer header & mid-stream auto-resume
+async function proxyMediaStream(req, res, targetUrl, extraHeaders = {}, forceDownload = false, customFilename = "", streamOpts = {}) {
+  const isHlsSegment = Boolean(streamOpts?.isHlsSegment);
   if (forceDownload) {
     try {
       req.setTimeout?.(0);
@@ -514,7 +585,9 @@ async function proxyMediaStream(req, res, targetUrl, extraHeaders = {}, forceDow
   });
   const clientRange = req.get("range");
   if (req.method === "GET") {
-    if (clientRange) {
+    if (isHlsSegment) {
+      if (clientRange) headers.set("range", clientRange);
+    } else if (clientRange) {
       headers.set("range", buildBoundedRangeHeader(clientRange));
     } else if (!forceDownload) {
       headers.set("range", buildBoundedRangeHeader(null));
@@ -610,8 +683,15 @@ async function proxyMediaStream(req, res, targetUrl, extraHeaders = {}, forceDow
     if (value) res.setHeader(name, value);
   }
   const ct = (upstream.headers.get("content-type") || "").toLowerCase();
-  if (!ct || ct.includes("octet-stream") || (ct.startsWith("image/") && /movielink/i.test(targetUrl))) {
-    res.setHeader("content-type", /\/vsub\//i.test(targetUrl) ? "text/vtt; charset=utf-8" : "video/mp4");
+  if (!ct || ct.includes("octet-stream") || (ct.startsWith("image/") && (/movielink/i.test(targetUrl) || isHlsSegment))) {
+    res.setHeader(
+      "content-type",
+      /\/vsub\//i.test(targetUrl)
+        ? "text/vtt; charset=utf-8"
+        : isHlsSegment
+          ? (clientRange ? "video/mp4" : "video/mp2t")
+          : "video/mp4"
+    );
   }
   if (!upstream.headers.get("accept-ranges")) {
     res.setHeader("accept-ranges", "bytes");
@@ -1059,15 +1139,36 @@ app.get("/api/details", async (req, res) => {
   }
 });
 
-app.get("/api/go", (req, res) => {
+app.get("/api/go", async (req, res) => {
   const token = String(req.query.t || "").trim();
   const targetUrl = resolveSafeMlbdToken(token);
   if (!targetUrl) {
     return res.status(400).type("text/plain").send("Invalid or expired download redirect token");
   }
+  let redirectTarget = targetUrl;
+  if (/fifadekho\.com\/[a-z0-9]+/i.test(targetUrl) && !targetUrl.includes("view=links")) {
+    const linksPageUrl = `${targetUrl.replace(/\/+$/, "")}?view=links`;
+    try {
+      const r = await fetch(linksPageUrl, {
+        headers: { "User-Agent": MOVIEBOX_UA, Referer: "https://fifadekho.com/" },
+        signal: AbortSignal.timeout(8000)
+      });
+      if (r.ok) {
+        const html = await r.text();
+        const directMatch =
+          html.match(/<a\s[^>]*href="(https?:\/\/(?:hubcloud|new\d*\.xcloud|gdflix)[^"]+)"[^>]*class="[^"]*nl-link-btn/i) ||
+          html.match(/<a\s[^>]*class="[^"]*nl-link-btn[^"]*"[^>]*href="(https?:\/\/[^"]+)"/i);
+        redirectTarget = directMatch?.[1] || linksPageUrl;
+      } else {
+        redirectTarget = linksPageUrl;
+      }
+    } catch {
+      redirectTarget = linksPageUrl;
+    }
+  }
   res.setHeader("Referrer-Policy", "no-referrer");
   res.setHeader("Cache-Control", "no-store");
-  return res.redirect(302, targetUrl);
+  return res.redirect(302, redirectTarget);
 });
 
 app.get("/api/mlbd-hls.m3u8", async (req, res) => {
@@ -1115,6 +1216,7 @@ app.all("/api/mlbd-stream.mp4", async (req, res) => {
   }
   const forceDownload = req.query.download === "1";
   const customFilename = String(req.query.filename || "");
+  const isHlsSegment = /\/(?:s|vseg)\//i.test(targetUrl);
   try {
     return await proxyMediaStream(
       req,
@@ -1122,7 +1224,8 @@ app.all("/api/mlbd-stream.mp4", async (req, res) => {
       targetUrl,
       { Referer: getActiveMlbdReferer() },
       forceDownload,
-      customFilename
+      customFilename,
+      { isHlsSegment }
     );
   } catch (err) {
     return res.status(502).type("text/plain").send(
@@ -1224,10 +1327,11 @@ app.all("/api/movie-api/*", async (req, res) => {
         getMlbdCatalog({ path: "/language/bangla", page: 1 })
       ]);
       const mlbdDirectOk = isMlbdDirectPlaybackAvailable();
-      const hasPlayableStream = x => Boolean(x && x.hasResource !== false && (mlbdDirectOk || x.source !== "movielinkbd" || x.mbSubjectId));
+      const isDirectlyStreamable = x => Boolean(x && x.hasResource !== false && (mlbdDirectOk || x.source !== "movielinkbd" || x.mbSubjectId));
+      const hasPlayableStream = x => Boolean(x && x.hasResource !== false);
       const rankHomeItems = list =>
         [...(Array.isArray(list) ? list : [])].sort((a, b) => {
-          const score = x => (hasPlayableStream(x) ? 4 : 0) + (hasCardPoster(x) ? 2 : 0);
+          const score = x => (isDirectlyStreamable(x) ? 4 : 0) + (hasCardPoster(x) ? 2 : 0);
           return score(b) - score(a);
         });
 
@@ -1254,10 +1358,10 @@ app.all("/api/movie-api/*", async (req, res) => {
           ...(mlbd.categories || []).filter(c => c?.path && !existingCats.has(c.path))
         ];
         const mbBanners = (payload.banners || []).filter(x => !isNigerianContent(x) && x?.hasResource !== false);
-        const mlbdBanners = (mlbd.banners || []).filter(x => !isNigerianContent(x) && hasPlayableStream(x));
-        const playableMlbdBanners = mlbdBanners.filter(b => Boolean(b?.mbSubjectId) && hasCardPoster(b));
+        const mlbdBanners = (mlbd.banners || []).filter(x => !isNigerianContent(x) && hasPlayableStream(x) && hasCardPoster(x));
+        const playableMlbdBanners = mlbdBanners.filter(b => Boolean(b?.mbSubjectId));
         const seenBannerKeys = new Set();
-        payload.banners = [...mbBanners, ...playableMlbdBanners]
+        payload.banners = [...mbBanners, ...playableMlbdBanners, ...mlbdBanners]
           .filter(b => {
             const k = String(b?.mbSubjectId || b?.subjectId || b?.path || b?.title || "").toLowerCase();
             if (!k || seenBannerKeys.has(k)) return false;
@@ -1288,13 +1392,13 @@ app.all("/api/movie-api/*", async (req, res) => {
         }
         const existingIb = Array.isArray(payload.curated.indiaBangladeshTrending) ? payload.curated.indiaBangladeshTrending : [];
         const banglaPool = Array.isArray(payload.mlbdBangla) ? payload.mlbdBangla : [];
-        const playablePosteredBangla = banglaPool.filter(x => hasPlayableStream(x) && hasCardPoster(x));
-        const posteredBangla = playablePosteredBangla;
+        const playablePosteredBangla = banglaPool.filter(x => isDirectlyStreamable(x) && hasCardPoster(x));
+        const posteredBangla = banglaPool.filter(hasCardPoster);
         const seen = new Set();
         const prioritized = [
           ...playablePosteredBangla.slice(0, 8),
           ...existingIb.filter(x => hasCardPoster(x) && !isMusicOrClipSubject(x)),
-          ...posteredBangla.slice(0, 8),
+          ...posteredBangla.slice(0, 10),
           ...existingIb.filter(x => !isMusicOrClipSubject(x))
         ];
         payload.curated.indiaBangladeshTrending = prioritized.filter(x => {
@@ -1356,9 +1460,13 @@ app.all("/api/movie-api/*", async (req, res) => {
         seen.add(key);
         candidates.push(candidate);
       }
-      const playableCandidates = candidates.filter(isPlayableCandidate);
-      const finalPool = playableCandidates.length ? playableCandidates : candidates;
-      finalPool.sort((a, b) => scoreMergedSearchItem(b, q) - scoreMergedSearchItem(a, q) || (Number(b.views) || 0) - (Number(a.views) || 0));
+      const hasRes = candidates.filter(x => x && x.hasResource !== false);
+      const finalPool = hasRes.length ? hasRes : candidates;
+      finalPool.sort((a, b) =>
+        scoreMergedSearchItem(b, q) - scoreMergedSearchItem(a, q) ||
+        (isPlayableCandidate(b) ? 1 : 0) - (isPlayableCandidate(a) ? 1 : 0) ||
+        (Number(b.views) || 0) - (Number(a.views) || 0)
+      );
       const merged = finalPool.slice(0, 100);
       const suggestions = q
         ? collectTitleSuggestions(q, { suggestWords: mbSugg, items: merged, extraTitles: imdbSugg, limit: 15 })
@@ -1402,10 +1510,9 @@ app.all("/api/movie-api/*", async (req, res) => {
         let mlbdMeta = {};
         try {
           const mlbdCat = await getMlbdCatalog({ path: category, page });
-          const mlbdDirectOk = isMlbdDirectPlaybackAvailable();
           mlbdMeta = mlbdCat || {};
           if (Array.isArray(mlbdCat?.items)) {
-            mlbdPlayable = mlbdCat.items.filter(x => x && !isNigerianContent(x) && x.hasResource !== false && (mlbdDirectOk || x.source !== "movielinkbd" || x.mbSubjectId));
+            mlbdPlayable = mlbdCat.items.filter(x => x && !isNigerianContent(x) && x.hasResource !== false);
           }
         } catch (err) {
           console.warn(`[MLBD catalog error] ${category}:`, err?.message || err);
@@ -1448,10 +1555,10 @@ app.all("/api/movie-api/*", async (req, res) => {
       const mbRaw = sortByReleaseNewest((Array.isArray(mbPayload?.items) ? mbPayload.items : []).filter(x => x && !isNigerianContent(x) && x.hasResource !== false));
       const mlbdRaw = sortByReleaseNewest(
         (mlbdRes.status === "fulfilled" && Array.isArray(mlbdRes.value?.items) ? mlbdRes.value.items : [])
-          .filter(x => x && !isNigerianContent(x) && x.hasResource !== false && (mlbdDirectOk || x.source !== "movielinkbd" || x.mbSubjectId))
+          .filter(x => x && !isNigerianContent(x) && x.hasResource !== false)
       );
       const mlbdOrdered = [...mlbdRaw].sort((a, b) => {
-        const s = x => (x?.mbSubjectId ? 4 : 0) + (x?.poster ? 2 : 0);
+        const s = x => ((mlbdDirectOk || x?.mbSubjectId) ? 4 : 0) + (x?.poster ? 2 : 0);
         return s(b) - s(a);
       });
       const interleaved = [];
@@ -1483,36 +1590,62 @@ app.all("/api/movie-api/*", async (req, res) => {
       });
     }
 
-    const payload = await handleMovieBoxRoute(legacy, query);
+    let payload = await handleMovieBoxRoute(legacy, query);
     if (payload && payload.ok === false && /^Unknown MovieBox API endpoint/i.test(payload.error || "")) {
       return res.status(404).json(payload);
     }
-    if (legacy === "status" && payload && typeof payload === "object") {
-      payload.recentStreamEvents = recentStreamEvents.slice(0, 15);
-      payload.cinepulseConfigured = isCinePulseConfigured();
-      payload.activeMlbdMirror = getActiveMlbdReferer();
-    }
-    const statusCode = payload?.ok === false ? 502 : 200;
     if (legacy === "stream") {
-      const sourceCount = Array.isArray(payload?.sources)
+      let sourceCount = Array.isArray(payload?.sources)
         ? payload.sources.length
         : Array.isArray(payload?.stream?.sources)
           ? payload.stream.sources.length
           : 0;
+      const reqTitle = String(query.get("title") || "").trim();
+      if (sourceCount === 0 && reqTitle) {
+        try {
+          const wantMovie = (Number(query.get("se") || 0) || 0) === 0;
+          const mlbdBackup = findExactTitleMlbdBackup(reqTitle, wantMovie);
+          if (mlbdBackup?.path) {
+            const bStream = await getMlbdStream({
+              path: mlbdBackup.path,
+              se: query.get("se") || 0,
+              ep: query.get("ep") || 1,
+              title: reqTitle
+            });
+            const bSources = Array.isArray(bStream?.sources) ? bStream.sources : [];
+            if (bSources.length) {
+              payload = {
+                ...(payload && typeof payload === "object" ? payload : { ok: true }),
+                ok: true,
+                sources: bSources,
+                subtitles: Array.isArray(bStream.subtitles) && bStream.subtitles.length ? bStream.subtitles : (payload?.subtitles || []),
+                backupFrom: "moviestreambd"
+              };
+              sourceCount = bSources.length;
+            }
+          }
+        } catch {}
+      }
       const evt = {
-        title: query.get("title") || "",
+        title: reqTitle,
         subjectId: query.get("subjectId") || "",
         se: query.get("se") || "0",
         ep: query.get("ep") || "0",
-        status: statusCode,
+        status: payload?.ok === false && sourceCount === 0 ? 502 : 200,
         sourceCount,
         message: payload?.message || payload?.error || "",
         durationMs: Date.now() - startedAt
       };
       recordStreamEvent(evt);
-      if (sourceCount === 0 || statusCode >= 400) {
+      if (sourceCount === 0 || evt.status >= 400) {
         console.warn("[MovieBox stream empty/error]", JSON.stringify(evt));
       }
+    }
+    const statusCode = payload?.ok === false && !(Array.isArray(payload?.sources) && payload.sources.length) ? 502 : 200;
+    if (legacy === "status" && payload && typeof payload === "object") {
+      payload.recentStreamEvents = recentStreamEvents.slice(0, 15);
+      payload.cinepulseConfigured = isCinePulseConfigured();
+      payload.activeMlbdMirror = getActiveMlbdReferer();
     }
     res.setHeader("Cache-Control", legacy === "stream" ? "no-store" : "public, max-age=60");
     return res.status(statusCode).json(payload);
