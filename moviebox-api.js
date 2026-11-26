@@ -5,6 +5,7 @@ import {
   isMusicOrClipSubject,
   strictTitleMatchScore,
   splitSearchTitleVariants,
+  expandSearchQueryVariants,
   scoreSearchMatch,
   collectTitleSuggestions
 } from "./lib/catalog-rules.js";
@@ -1271,11 +1272,16 @@ export async function handleMovieBoxRoute(legacy, query) {
       };
 
       const lower = keyword.toLowerCase().replace(/\s+/g, " ").trim();
+      const allowMusicSearch = /\b(?:song|songs|music|ost|pop|lyric|lyrical|remix|album|naat|bhajan|track|audio)\b/i.test(lower);
       const isAdultIntent = /\b(sex|sexual|sexy|porn|porno|pornography|xxx|18\+|adult|erotic|hot|nude|nudity|nsfw|bf|blue\s*film|vivamax|softcore|romance\s*18)\b/i.test(lower);
       const uniq = new Map();
 
       const dynamicFilters = [];
-      const searchTerms = new Set([keyword, ...splitSearchTitleVariants(keyword).slice(0, 3)]);
+      const searchTerms = new Set([
+        keyword,
+        ...expandSearchQueryVariants(keyword),
+        ...splitSearchTitleVariants(keyword).slice(0, 3)
+      ]);
       if (isAdultIntent && !safeMode) {
         dynamicFilters.push(
           { body: { page, perPage: 24, channelId: 1, genre: "Adult", sort: "Latest" }, extra: { isAdult: true } },
@@ -1371,9 +1377,12 @@ export async function handleMovieBoxRoute(legacy, query) {
 
       const isCategoryIntent = Boolean(isAdultIntent || dynamicFilters.length || rawTypes.includes(6) || rawTypes.includes(7));
 
+      const hasYearInQuery = /\b(?:19|20)\d\d\b/.test(lower);
+
       const addCandidate = (item, bonus = 0, opts = {}) => {
         if (!item || (!item.subjectId && !item.path)) return;
         if (isNigerianContent(item)) return;
+        if (!allowMusicSearch && isMusicOrClipSubject(item)) return;
         if (!matchesType(item)) return;
 
         let sc = scoreSearchMatch(item, keyword, { allowBroadMatch: Boolean(opts.fromDirectSearch || isCategoryIntent) });
@@ -1386,6 +1395,11 @@ export async function handleMovieBoxRoute(legacy, query) {
           if (sc <= 0) return;
         }
         sc += bonus;
+        if (!hasYearInQuery) {
+          const yrNum = Number(item.year) || 0;
+          if (yrNum >= 2000) sc += Math.min(18, Math.floor((yrNum - 1995) / 2));
+          else if (yrNum > 0 && yrNum < 1990 && item.hasResource === false) sc -= 15;
+        }
         if (isAdultIntent && item.isAdult) sc += 45;
         if (sc <= 0) return;
         const key = item.subjectId || item.path;
@@ -2352,46 +2366,58 @@ export async function handleMovieBoxRoute(legacy, query) {
         return [];
       };
 
-      let subtitles = await fetchCaptionsForStreams(streamSubjectId, streamDetailPath, rawStreams, streamReferer);
+      const loadSubtitlesSafe = async () => {
+        if (isTrailer || !rawStreams.length) return [];
+        let found = await fetchCaptionsForStreams(streamSubjectId, streamDetailPath, rawStreams, streamReferer);
 
-      // Many MovieBox dubbed versions omit subtitles on the dub entry while keeping them on Original Audio / sub entries
-      if (!subtitles.length && rawStreams.length && lastUpstreamCode !== 429) {
-        try {
-          const detail = await loadDetail();
-          const cachedItem = subjectIndex.get(subjectId);
-          let dubs = Array.isArray(detail?.data?.dubs)
-            ? detail.data.dubs
-            : Array.isArray(detail?.data?.subject?.dubs)
-              ? detail.data.subject.dubs
-              : Array.isArray(cachedItem?.dubs)
-                ? cachedItem.dubs
-                : [];
-          const fallbackDubs = dubs
-            .filter(d => d?.subjectId && String(d.subjectId) !== streamSubjectId)
-            .sort((a, b) => {
-              const score = x =>
-                (x.original || /original/i.test(x.lanName || "") ? 0 : /english sub/i.test(x.lanName || "") ? 1 : 2);
-              return score(a) - score(b);
-            })
-            .slice(0, 2);
+        // Many MovieBox dubbed versions omit subtitles on the dub entry while keeping them on Original Audio / sub entries
+        if (!found.length && lastUpstreamCode !== 429) {
+          try {
+            const detail = await loadDetail();
+            const cachedItem = subjectIndex.get(subjectId);
+            const dubs = Array.isArray(detail?.data?.dubs)
+              ? detail.data.dubs
+              : Array.isArray(detail?.data?.subject?.dubs)
+                ? detail.data.subject.dubs
+                : Array.isArray(cachedItem?.dubs)
+                  ? cachedItem.dubs
+                  : [];
+            const fallbackDubs = dubs
+              .filter(d => d?.subjectId && String(d.subjectId) !== streamSubjectId)
+              .sort((a, b) => {
+                const score = x =>
+                  (x.original || /original/i.test(x.lanName || "") ? 0 : /english sub/i.test(x.lanName || "") ? 1 : 2);
+                return score(a) - score(b);
+              })
+              .slice(0, 2);
 
-          for (const altDub of fallbackDubs) {
-            const altSid = String(altDub.subjectId);
-            const altDp = String(altDub.detailPath || altSid);
-            const altRef = `${MOVIEBOX_PLAYER_REFERER}movies/${altDp}?id=${altSid}`;
-            const altPlayJson = await fetchPlay(altSid, altDp, se, ep, altRef, false);
-            const altStreams = Array.isArray(altPlayJson?.data?.streams) ? altPlayJson.data.streams : [];
-            if (altStreams.length) {
-              subtitles = await fetchCaptionsForStreams(altSid, altDp, altStreams, altRef);
-              if (subtitles.length) break;
+            for (const altDub of fallbackDubs) {
+              const altSid = String(altDub.subjectId);
+              const altDp = String(altDub.detailPath || altSid);
+              const altRef = `${MOVIEBOX_PLAYER_REFERER}movies/${altDp}?id=${altSid}`;
+              const altPlayJson = await fetchPlay(altSid, altDp, se, ep, altRef, false);
+              const altStreams = Array.isArray(altPlayJson?.data?.streams) ? altPlayJson.data.streams : [];
+              if (altStreams.length) {
+                found = await fetchCaptionsForStreams(altSid, altDp, altStreams, altRef);
+                if (found.length) break;
+              }
             }
-          }
-        } catch {}
-      }
+          } catch {}
+        }
+        return found;
+      };
+
+      const subtitles = sources.length
+        ? await Promise.race([
+            loadSubtitlesSafe(),
+            new Promise(resolve => setTimeout(() => resolve([]), 1800))
+          ])
+        : [];
 
       const hasRes = playJson?.code === 0
         ? Boolean(playJson?.data?.hasResource ?? (!isTrailer && sources.length > 0))
         : (!isTrailer && sources.length > 0);
+      const isTrulyUpcoming = isUpcomingUnreleased(resolvedMeta || detJson?.data?.subject || { title: rawRecoveryTitle });
       const rateLimited = !sources.length && lastUpstreamCode === 429;
       return {
         ok: true,
@@ -2406,11 +2432,15 @@ export async function handleMovieBoxRoute(legacy, query) {
         sources,
         subtitles,
         message: isTrailer
-          ? "Full video not yet released — playing official trailer."
+          ? (isTrulyUpcoming
+            ? "Full video not yet released — playing official trailer."
+            : "Full video unavailable on server right now — playing official trailer.")
           : rateLimited
             ? "Video server is temporarily busy (rate limit). Please tap Retry in a moment."
             : !sources.length && !hasRes
-              ? "This title is marked Upcoming / Unreleased and does not have a playable video yet."
+              ? (isTrulyUpcoming
+                ? "This title is marked Upcoming / Unreleased and does not have a playable video yet."
+                : "No playable video stream is available for this title right now.")
               : !sources.length
                 ? "No playable stream URL is available for this episode right now."
                 : ""

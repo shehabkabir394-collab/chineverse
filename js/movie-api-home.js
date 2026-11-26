@@ -25,13 +25,25 @@
   };
   const isUpcomingUnreleased = item => {
     if (!item || typeof item !== "object") return false;
-    if (item.hasResource === false || item.isUpcoming === true) return true;
     const endToday = getEndOfTodayMs();
+    const currentYear = new Date(Date.now() + 6 * 3600 * 1000).getUTCFullYear();
     const rawDate = String(item.releaseDate || item.appointmentDate || "").trim();
-    if (/^\d{4}-\d{2}-\d{2}/.test(rawDate)) {
+    let hasPastReleaseDate = false;
+    if (rawDate) {
       const ts = Date.parse(rawDate);
-      if (Number.isFinite(ts) && ts > endToday + 2 * 86400 * 1000) return true;
+      if (Number.isFinite(ts) && ts > 0) {
+        if (ts > endToday + 2 * 86400 * 1000) return true;
+        if (ts > endToday && item.hasResource !== true) return true;
+        if (ts <= endToday) hasPastReleaseDate = true;
+      }
     }
+    if (hasPastReleaseDate) return false;
+    const yearNum = Number(String(item.year || "").match(/\b(19\d\d|20\d\d)\b/)?.[1] || 0);
+    if (yearNum > currentYear) return true;
+    if (yearNum > 0 && yearNum < currentYear && item.isUpcoming !== true) return false;
+    if (item.isUpcoming === true) return true;
+    const titleBadge = `${item.title || ""} ${item.typeBadge || ""}`;
+    if (/\b(?:upcoming|coming\s*soon|unreleased)\b/i.test(titleBadge) && item.hasResource !== true) return true;
     return false;
   };
 
@@ -143,8 +155,8 @@
     return [...(Array.isArray(list) ? list : [])].sort((a, b) => {
       const ta = releaseTime(a);
       const tb = releaseTime(b);
-      const aFuture = (a?.hasResource === false || a?.isUpcoming === true || ta > futureCutoff) && ta > futureCutoff;
-      const bFuture = (b?.hasResource === false || b?.isUpcoming === true || tb > futureCutoff) && tb > futureCutoff;
+      const aFuture = ta > futureCutoff;
+      const bFuture = tb > futureCutoff;
       if (aFuture !== bFuture) return aFuture ? 1 : -1;
       if (aFuture && bFuture) return ta - tb;
       if (tb !== ta) return tb - ta;
@@ -871,12 +883,24 @@
 
   function dedupeList(list) {
     const seen = new Set();
+    const seenTitles = new Set();
     const out = [];
     for (const item of Array.isArray(list) ? list : []) {
       if (!item || isNigerian(item)) continue;
+      if (item.subjectType === 6 && !/anime|animation/i.test(String(item.genre || item.typeBadge || item.title || ""))) continue;
+      if (/\b(?:official\s+video|video\s+song|lyrical(?:\s+video)?|full\s+song|audio\s+song)\b/i.test(String(item.title || ""))) continue;
       const key = item.path || item.subjectId || item.title;
       if (!key || seen.has(key)) continue;
+      const coreTitle = String(item.title || "")
+        .replace(/\[[^\]]*\]/g, " ")
+        .replace(/\((?:19|20)\d{2}[^)]*\)/g, " ")
+        .toLowerCase()
+        .replace(/[^a-z0-9\u0980-\u09ff]+/g, " ")
+        .trim();
+      const titleYearKey = coreTitle ? `${coreTitle}|${String(item.year || "").slice(0, 4)}` : "";
+      if (titleYearKey && seenTitles.has(titleYearKey)) continue;
       seen.add(key);
+      if (titleYearKey) seenTitles.add(titleYearKey);
       out.push(item);
     }
     return out;
@@ -934,29 +958,40 @@
       "/genre/thriller": matchAny(x => /thriller|horror|mystery|crime/i.test(`${x.genre || ""}`))
     };
 
+    const isPlayableCard = x => Boolean(x && (x.source !== "movielinkbd" || x.mbSubjectId));
+    const prioritizePlayablePostered = list => {
+      const arr = Array.isArray(list) ? list : [];
+      const postered = arr.filter(x => safeImg(posterOf(x)));
+      const pool = postered.length >= 6 ? postered : arr;
+      return [...pool].sort((a, b) => {
+        const score = x => (isPlayableCard(x) ? 4 : 0) + (safeImg(posterOf(x)) ? 2 : 0);
+        return score(b) - score(a);
+      });
+    };
+
     const mlbdSectionShelves = mlbdSections
       .filter(sec => !isNigerian(null, sec?.title))
       .map(sec => {
         const cleanTitle = stripCatBrand(String(sec?.title || "").trim());
         const catPath = String(sec?.categoryPath || "/new").trim();
         const extraCurated = curatedPoolsForCat[catPath.toLowerCase()] || [];
-        const items = dedupeList([...(sec?.items || []), ...extraCurated]);
+        const items = prioritizePlayablePostered(sortNewestFirst(dedupeList([...extraCurated, ...(sec?.items || [])])));
         if (!cleanTitle || !items.length) return null;
         return {
           title: cleanTitle,
-          items: sortNewestFirst(items),
+          items,
           moreHref: `catalog.html?category=${encodeURIComponent(catPath)}`
         };
       })
       .filter(Boolean);
 
-    const indiaBdItems = dedupeList([
+    const indiaBdItems = prioritizePlayablePostered(dedupeList([
       ...(curated.indiaBangladeshTrending || []),
-      ...(Array.isArray(homeData.mlbdBangla) ? homeData.mlbdBangla : []),
       ...(curated.bengali || []),
       ...(curated.southIndian || []).slice(0, 10),
-      ...(curated.hindiMovies || []).slice(0, 10)
-    ]);
+      ...(curated.hindiMovies || []).slice(0, 10),
+      ...(Array.isArray(homeData.mlbdBangla) ? homeData.mlbdBangla : [])
+    ]));
 
     const orderedShelves = [
       {
@@ -969,14 +1004,13 @@
         items: sortNewestFirst(dedupeList(curated.trending?.length ? curated.trending : homeData.trending)),
         moreHref: "catalog.html?category=%2Fmostwatch%2F7d"
       },
-      ...(mlbdItems.length
+      ...(mlbdItems.length || (curated.bengali || []).length
         ? [{
             title: "🟢 Latest & Bangla",
-            items: sortNewestFirst(dedupeList([...mlbdItems, ...(curated.bengali || [])])),
+            items: prioritizePlayablePostered(sortNewestFirst(dedupeList([...(curated.bengali || []), ...mlbdItems]))),
             moreHref: "catalog.html?category=%2Flanguage%2Fbangla"
           }]
         : []),
-      ...mlbdSectionShelves,
       {
         title: "🏆 Top 10 This Week",
         top10: true,
@@ -1003,6 +1037,7 @@
         ),
         moreHref: "catalog.html?category=%2Flanguage%2Fhindi-dubbed-series"
       },
+      ...mlbdSectionShelves,
       {
         title: "🇰🇷 Popular K-Dramas",
         items: sortNewestFirst(dedupeList([...(curated.kDramas || []), ...matchAny(x => hasLang(x, /korea/i))])),

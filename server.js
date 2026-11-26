@@ -26,7 +26,13 @@ import {
   validateExternalHttpUrl
 } from "./movielinkbd-api.js";
 import { buildPosterSvg, handleMockMovieApi } from "./mock-catalog.js";
-import { isNigerianContent, scoreSearchMatch, collectTitleSuggestions } from "./lib/catalog-rules.js";
+import {
+  isNigerianContent,
+  isMusicOrClipSubject,
+  expandSearchQueryVariants,
+  scoreSearchMatch,
+  collectTitleSuggestions
+} from "./lib/catalog-rules.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -883,7 +889,9 @@ function scoreMergedSearchItem(item, q) {
   const lower = String(q || "").trim().toLowerCase();
   if (!lower) return 10;
   const hay = `${item?.title || ""} ${item?.genre || ""} ${item?.language || ""} ${item?.country || ""} ${item?.typeBadge || ""} ${item?.platform || ""}`.toLowerCase();
-  let score = scoreSearchMatch(item, lower, { allowBroadMatch: isCategorySearchQuery(lower) });
+  const qVariants = expandSearchQueryVariants(lower);
+  const allowBroad = isCategorySearchQuery(lower);
+  let score = Math.max(...qVariants.map(qv => scoreSearchMatch(item, qv, { allowBroadMatch: allowBroad })));
   if (score <= 0) return 0;
 
   // Regional & format relevance boosts
@@ -895,7 +903,12 @@ function scoreMergedSearchItem(item, q) {
   if (/\bmovie|movies|film\b/i.test(lower) && item?.isMovie) score += 12;
   if (/\bseries|drama\b/i.test(lower) && item?.isSeries) score += 12;
 
-  if (item?.source === "movielinkbd" || String(item?.path || "").startsWith("/mlbd/")) score += 4;
+  if (item?.source !== "movielinkbd" || item?.mbSubjectId) score += 10;
+  if (item?.poster || item?.previewImage) score += 6;
+  const yr = Number(String(item?.year || "").match(/\b(19\d\d|20\d\d)\b/)?.[1] || 0);
+  if (yr >= 2024) score += 38;
+  else if (yr >= 2018) score += 28;
+  else if (yr >= 2005) score += 15;
   return score;
 }
 
@@ -905,6 +918,7 @@ app.get("/api/suggest", async (req, res) => {
   const subjectType = String(req.query.subjectType || "0");
   if (!q) return res.json({ ok: true, query: "", items: [], suggestions: [] });
   try {
+    const allowMusicSearch = /\b(?:song|songs|music|ost|pop|lyric|lyrical|remix|album|naat|bhajan|track|audio)\b/i.test(q);
     const mbParams = new URLSearchParams({ q, page: "1", subjectType });
     if (safeMode) mbParams.set("safe", "1");
     const [mlbdRes, mbRes, imdbRes] = await Promise.allSettled([
@@ -922,6 +936,7 @@ app.get("/api/suggest", async (req, res) => {
     const candidates = [];
     for (const item of [...mbItems, ...mlbdItems]) {
       if (!item || isNigerianContent(item)) continue;
+      if (!allowMusicSearch && isMusicOrClipSubject(item)) continue;
       if (safeMode && isAdultCatalogItem(item)) continue;
       if (!matchesSearchType(item, subjectType)) continue;
       if (scoreMergedSearchItem(item, q) <= 0) continue;
@@ -1146,6 +1161,14 @@ app.all("/api/movie-api/*", async (req, res) => {
     }
 
     if (legacy === "home") {
+      const hasPlayableStream = x => Boolean(x && (x.source !== "movielinkbd" || x.mbSubjectId));
+      const hasCardPoster = x => Boolean(x?.poster || x?.previewImage);
+      const rankHomeItems = list =>
+        [...(Array.isArray(list) ? list : [])].sort((a, b) => {
+          const score = x => (hasPlayableStream(x) ? 4 : 0) + (hasCardPoster(x) ? 2 : 0);
+          return score(b) - score(a);
+        });
+
       const [mbRes, mlbdRes, mlbdBanglaRes] = await Promise.allSettled([
         handleMovieBoxRoute("home", query),
         getMlbdHomeFeed(),
@@ -1158,10 +1181,15 @@ app.all("/api/movie-api/*", async (req, res) => {
         const mlbd = mlbdRes.value;
         const cleanMlbdSecs = (mlbd.sections || [])
           .filter(s => !isNigerianContent(null, s?.title))
-          .map(s => ({ ...s, items: (s.items || []).filter(x => !isNigerianContent(x, s?.title)) }))
+          .map(s => {
+            const validItems = (s.items || []).filter(x => !isNigerianContent(x, s?.title));
+            const postered = validItems.filter(hasCardPoster);
+            const curatedItems = postered.length >= 6 ? rankHomeItems(postered) : rankHomeItems(validItems);
+            return { ...s, items: curatedItems };
+          })
           .filter(s => s.items.length > 0);
         payload.mlbdSections = cleanMlbdSecs;
-        payload.mlbdTrending = (mlbd.trending || []).filter(x => !isNigerianContent(x));
+        payload.mlbdTrending = rankHomeItems((mlbd.trending || []).filter(x => !isNigerianContent(x)));
         payload.mlbdCategories = mlbd.categories || [];
         const existingCats = new Set((payload.categories || []).map(c => c?.path));
         payload.categories = [
@@ -1170,7 +1198,7 @@ app.all("/api/movie-api/*", async (req, res) => {
         ];
         const mbBanners = (payload.banners || []).filter(x => !isNigerianContent(x));
         const mlbdBanners = (mlbd.banners || []).filter(x => !isNigerianContent(x));
-        const playableMlbdBanners = mlbdBanners.filter(b => Boolean(b?.mbSubjectId));
+        const playableMlbdBanners = mlbdBanners.filter(b => Boolean(b?.mbSubjectId) && hasCardPoster(b));
         const seenBannerKeys = new Set();
         payload.banners = [...mbBanners, ...playableMlbdBanners]
           .filter(b => {
@@ -1181,22 +1209,37 @@ app.all("/api/movie-api/*", async (req, res) => {
           })
           .slice(0, 10);
         payload.sections = [
-          ...cleanMlbdSecs,
-          ...(payload.sections || []).filter(s => !isNigerianContent(null, s?.title))
+          ...(payload.sections || []).filter(s => !isNigerianContent(null, s?.title)),
+          ...cleanMlbdSecs
         ];
         payload.activeMlbdMirror = mlbd.activeMirror;
       }
       if (mlbdBanglaRes.status === "fulfilled" && Array.isArray(mlbdBanglaRes.value?.items)) {
-        payload.mlbdBangla = mlbdBanglaRes.value.items.filter(x => !isNigerianContent(x));
+        payload.mlbdBangla = rankHomeItems(mlbdBanglaRes.value.items.filter(x => !isNigerianContent(x)));
       }
       if (Array.isArray(payload.trending)) {
-        payload.trending = payload.trending.filter(x => !isNigerianContent(x));
+        payload.trending = payload.trending.filter(x => !isNigerianContent(x) && !isMusicOrClipSubject(x));
       }
-      if (payload.curated && Array.isArray(payload.mlbdBangla) && payload.mlbdBangla.length) {
+      if (payload.curated) {
+        if (Array.isArray(payload.curated.trending)) {
+          payload.curated.trending = payload.curated.trending.filter(x => !isNigerianContent(x) && !isMusicOrClipSubject(x));
+        }
+        if (Array.isArray(payload.curated.bengali)) {
+          payload.curated.bengali = payload.curated.bengali.filter(x => !isNigerianContent(x) && !isMusicOrClipSubject(x));
+        }
         const existingIb = Array.isArray(payload.curated.indiaBangladeshTrending) ? payload.curated.indiaBangladeshTrending : [];
+        const banglaPool = Array.isArray(payload.mlbdBangla) ? payload.mlbdBangla : [];
+        const playablePosteredBangla = banglaPool.filter(x => hasPlayableStream(x) && hasCardPoster(x));
+        const posteredBangla = banglaPool.filter(x => hasCardPoster(x));
         const seen = new Set();
-        payload.curated.indiaBangladeshTrending = [...payload.mlbdBangla.slice(0, 8), ...existingIb].filter(x => {
-          if (!x || isNigerianContent(x)) return false;
+        const prioritized = [
+          ...playablePosteredBangla.slice(0, 8),
+          ...existingIb.filter(x => hasCardPoster(x) && !isMusicOrClipSubject(x)),
+          ...posteredBangla.slice(0, 8),
+          ...existingIb.filter(x => !isMusicOrClipSubject(x))
+        ];
+        payload.curated.indiaBangladeshTrending = prioritized.filter(x => {
+          if (!x || isNigerianContent(x) || isMusicOrClipSubject(x)) return false;
           const k = x.path || x.subjectId || x.title;
           if (!k || seen.has(k)) return false;
           seen.add(k);
@@ -1229,6 +1272,7 @@ app.all("/api/movie-api/*", async (req, res) => {
       const page = Math.max(1, Number(query.get("page")) || 1);
       const safeMode = query.get("safe") === "1";
       const subjectType = String(query.get("subjectType") || "0");
+      const allowMusicSearch = /\b(?:song|songs|music|ost|pop|lyric|lyrical|remix|album|naat|bhajan|track|audio)\b/i.test(q);
       const [mbRes, mlbdRes, imdbRes] = await Promise.allSettled([
         handleMovieBoxRoute("search", query),
         q ? getMlbdCatalog({ path: "/search", q, page }) : Promise.resolve({ items: [] }),
@@ -1242,6 +1286,7 @@ app.all("/api/movie-api/*", async (req, res) => {
       const seen = new Set();
       for (const candidate of [...mbItems, ...mlbdItems]) {
         if (!candidate || isNigerianContent(candidate)) continue;
+        if (!allowMusicSearch && isMusicOrClipSubject(candidate)) continue;
         if (safeMode && isAdultCatalogItem(candidate)) continue;
         if (!matchesSearchType(candidate, subjectType)) continue;
         if (q && scoreMergedSearchItem(candidate, q) <= 0) continue;

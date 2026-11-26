@@ -11,12 +11,13 @@
  };
  const posterOf=item=>imageValue(item?.poster||item?.posterUrl||item?.poster_url||item?.previewImage||item?.preview_image||item?.bannerImage||item?.banner_image||item?.cover||item?.coverUrl||item?.coverImage||item?.image||item?.imageUrl||item?.image_url||item?.thumbnail||item?.thumbnailUrl||item?.thumbnail_url||item?.pic||item?.img);
  const norm=v=>text(v).toLowerCase().replace(/[_-]+/g," ").replace(/\s+/g," ").trim();
+ const compact=v=>norm(v).replace(/[^a-z0-9\u0980-\u09ff]/g,"");
  const params=new URLSearchParams(location.search);
  const selected=params.get("category")||"", letter=(params.get("letter")||"").toUpperCase(), page=Math.max(1,Number(params.get("page"))||1), viewAllCats=params.get("view")==="categories";
  const root=$("#catalogGrid"),status=$("#catalogStatus"),pager=$("#catalogPager"),nav=$("#catalogCategories"),az=$("#catalogAZ"),search=$("#catalogSearch"),heading=$("#catalogHeading");
  const allCatsPanel=$("#catalogAllCatsPanel"),allCatsToggle=$("#catalogAllCatsToggle");
  const pageSize=24;
- let data=null,all=[],apiCatalogMode=false,apiMeta=null,allApiCategories=[];
+ let data=null,all=[],apiCatalogMode=false,apiMeta=null,allApiCategories=[],apiSearchQuery="";
  const isNigerian=(item,sectionTitle="")=>{
   const sec=String(sectionTitle||"").trim();
   if(sec&&/\b(?:nollywood|must-watch\s*black\s*shows?|black\s*cinema|black\s*shows?|nigeria|nigerian|ghana)\b|bet\+/i.test(sec))return true;
@@ -31,13 +32,25 @@
  };
  const isUpcomingUnreleased=item=>{
   if(!item||typeof item!=="object")return false;
-  if(item.hasResource===false||item.isUpcoming===true)return true;
   const endToday=getEndOfTodayMs();
+  const currentYear=new Date(Date.now()+6*3600*1000).getUTCFullYear();
   const rawDate=String(item.releaseDate||item.appointmentDate||"").trim();
-  if(/^\d{4}-\d{2}-\d{2}/.test(rawDate)){
+  let hasPastReleaseDate=false;
+  if(rawDate){
    const ts=Date.parse(rawDate);
-   if(Number.isFinite(ts)&&ts>endToday+2*86400*1000)return true;
+   if(Number.isFinite(ts)&&ts>0){
+    if(ts>endToday+2*86400*1000)return true;
+    if(ts>endToday&&item.hasResource!==true)return true;
+    if(ts<=endToday)hasPastReleaseDate=true;
+   }
   }
+  if(hasPastReleaseDate)return false;
+  const yearNum=Number(String(item.year||"").match(/\b(19\d\d|20\d\d)\b/)?.[1]||0);
+  if(yearNum>currentYear)return true;
+  if(yearNum>0&&yearNum<currentYear&&item.isUpcoming!==true)return false;
+  if(item.isUpcoming===true)return true;
+  const titleBadge=`${item.title||""} ${item.typeBadge||""}`;
+  if(/\b(?:upcoming|coming\s*soon|unreleased)\b/i.test(titleBadge)&&item.hasResource!==true)return true;
   return false;
  };
  const stripCatBrand=s=>String(s||"").replace(/\bmovie\s*(?:stream|link)\s*bd\b(?:\.com|\.at)?/gi,"").replace(/\s*[—–\-|:]+\s*$/g,"").replace(/^\s*[—–\-|:]+\s*/g,"").replace(/\s+/g," ").trim();
@@ -79,8 +92,8 @@
  };
  const latestFirst=(a,b)=>{
   const futureCutoff=getEndOfTodayMs(),ta=releaseTime(a),tb=releaseTime(b);
-  const aFuture=(a?.hasResource===false||a?.isUpcoming===true||ta>futureCutoff)&&ta>futureCutoff;
-  const bFuture=(b?.hasResource===false||b?.isUpcoming===true||tb>futureCutoff)&&tb>futureCutoff;
+  const aFuture=ta>futureCutoff;
+  const bFuture=tb>futureCutoff;
   if(aFuture!==bFuture)return aFuture?1:-1;
   if(aFuture&&bFuture)return ta-tb;
   return tb-ta||popularity(b)-popularity(a);
@@ -266,7 +279,13 @@
   if(kind&&!norm([item.type,item.typeBadge,item.mediaType].join(" ")).includes(kind))return false;
   if(genre&&!norm([item.genre,item.genres,item.category,item.categoryName].join(" ")).includes(genre))return false;
   const q=norm(search?.value||"");
-  if(q&&!norm([item.title,item.description,item.language,item.country,item.sportGenre,item.genre,...vals(item),...(item._sections||[])].join(" ")).includes(q))return false;
+  const qCompact=compact(q);
+  const usingInitialSearch=Boolean(apiSearchQuery&&q&&q===apiSearchQuery);
+  if(q&&!usingInitialSearch){
+   const hayStr=norm([item.title,item.description,item.language,item.country,item.sportGenre,item.genre,...vals(item),...(item._sections||[])].join(" "));
+   const hayCompact=compact(hayStr);
+   if(!hayStr.includes(q)&&!(qCompact.length>=3&&hayCompact.includes(qCompact)))return false;
+  }
   return true;
  }
  function card(item){
@@ -280,7 +299,10 @@
  function link(extra){const p=new URLSearchParams();if(selected)p.set("category",selected);if(letter)p.set("letter",letter);if(search?.value.trim())p.set("q",search.value.trim());Object.entries(extra||{}).forEach(([k,v])=>{if(v)p.set(k,String(v));else p.delete(k)});return "catalog.html?"+p.toString();}
  function render(){
   if(!data)return;
-  const filtered=all.filter(item=>!isNigerian(item)&&matches(item)).sort(categoryPriority);
+  const q=norm(search?.value||"");
+  const keepSearchOrder=Boolean(apiSearchQuery&&q&&q===apiSearchQuery);
+  const matched=all.filter(item=>!isNigerian(item)&&matches(item));
+  const filtered=keepSearchOrder?matched:matched.sort(categoryPriority);
   const pages=apiCatalogMode
    ? Math.max(1,Number(apiMeta?.maxPage||apiMeta?.totalPages||apiMeta?.pages)||1)
    : Math.max(1,Math.ceil(filtered.length/pageSize));
@@ -395,6 +417,7 @@
      if(key&&!unique.has(key))unique.set(key,{...item,_sections:[],_sources:["search"],_hindiCatalog:isHindiDubbed(item)});
     });
     all=[...unique.values()];
+    apiSearchQuery=norm(q);
     if(!all.length)status.textContent="No matching movies or dramas found.";
    }else{
     status.textContent="Loading Movie API catalog…";

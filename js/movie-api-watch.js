@@ -16,6 +16,25 @@
     item?.thumbnail || item?.thumbnailUrl || item?.thumbnail_url || item?.pic || item?.img
   );
   const safeImg = u => (/^(?:https?:\/\/|\/\/|\/api\/)/i.test(String(u || "")) ? String(u) : "");
+  const isWatchUpcoming = detail => {
+    if (!detail || typeof detail !== "object") return false;
+    const bdt = new Date(Date.now() + 6 * 3600 * 1000);
+    const endToday = Date.UTC(bdt.getUTCFullYear(), bdt.getUTCMonth(), bdt.getUTCDate(), 23, 59, 59, 999) - 6 * 3600 * 1000;
+    const currentYear = bdt.getUTCFullYear();
+    const rawDate = String(detail.releaseDate || detail.appointmentDate || "").trim();
+    if (rawDate) {
+      const ts = Date.parse(rawDate);
+      if (Number.isFinite(ts) && ts > 0) {
+        if (ts > endToday + 2 * 86400 * 1000) return true;
+        if (ts > endToday && detail.hasResource !== true) return true;
+        if (ts <= endToday) return false;
+      }
+    }
+    const yearNum = Number(String(detail.year || "").match(/\b(19\d\d|20\d\d)\b/)?.[1] || 0);
+    if (yearNum > currentYear) return true;
+    if (yearNum > 0 && yearNum < currentYear && detail.isUpcoming !== true) return false;
+    return detail.isUpcoming === true;
+  };
   const WATCHLIST_KEY = "cv_watchlist_v1";
 
   const params = new URLSearchParams(location.search);
@@ -672,6 +691,24 @@
     }
     const streamMsg = $("#cvStreamStatusText");
     if (streamMsg) streamMsg.textContent = "Loading video stream…";
+    const stageEl = root.querySelector(".cv-player-stage");
+    if (stageEl) {
+      stageEl.querySelector(".cv-stage-fallback")?.remove();
+      stageEl.querySelector(".cv-stage-loading")?.remove();
+      const loadBox = document.createElement("div");
+      loadBox.className = "cv-stage-loading";
+      const bgPoster = safeImg(posterOf(watchDetail));
+      loadBox.style.cssText =
+        `position:absolute;inset:0;z-index:18;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:18px;text-align:center;color:#f3f4f6;border-radius:10px;${bgPoster ? `background:linear-gradient(rgba(8,10,16,.72),rgba(8,10,16,.84)),url('${bgPoster.replace(/'/g, "%27")}') center/cover no-repeat;` : "background:rgba(8,10,16,.92);"}`;
+      loadBox.innerHTML = `<div style="width:36px;height:36px;border-radius:50%;border:3px solid rgba(255,255,255,.18);border-top-color:#f87171;animation:spin .8s linear infinite"></div>
+        <div style="font-size:13px;font-weight:600;letter-spacing:.01em">Loading video stream…</div>`;
+      stageEl.appendChild(loadBox);
+    }
+    if (video) {
+      video.controls = false;
+      video.style.opacity = "0";
+      video.style.visibility = "hidden";
+    }
 
     root.querySelectorAll("[data-watch-ep]").forEach(b => b.classList.toggle("active", Number(b.dataset.watchEp) === idx));
     updateDownloadLink();
@@ -780,24 +817,50 @@
         const altDub = currentDubs.find(d => d?.path && d.path !== path);
         const trailerId = String(streamRoot?.trailerYoutubeId || payload?.trailerYoutubeId || watchDetail?.trailerYoutubeId || "").trim();
         const safeYtId = /^[A-Za-z0-9_-]{8,20}$/.test(trailerId) ? trailerId : "";
+        const upcomingTitle = isWatchUpcoming(watchDetail);
+        const rawMlbdPath = String(watchDetail?.mlbdOriginalPath || path || "").trim();
+        const mlbdSubPath = rawMlbdPath.replace(/^\/mlbd/i, "");
+        const mirrorUrl = !upcomingTitle && /^\/(?:mlbd\/)?(?:movie|series|drama|anime)\//i.test(rawMlbdPath)
+          ? `https://movielinkbd.tv${mlbdSubPath.startsWith("/") ? mlbdSubPath : `/${mlbdSubPath}`}`
+          : "";
         const stage = root.querySelector(".cv-player-stage");
+        if (video) {
+          video.controls = false;
+          video.style.opacity = "0";
+          video.style.visibility = "hidden";
+          if (!video.getAttribute("src") && !video.currentSrc) {
+            try { video.removeAttribute("src"); } catch {}
+          }
+        }
+        const displayMsg = safeYtId && /no direct video stream/i.test(String(errText || ""))
+          ? "Direct stream isn't available on this mirror yet — watch the official trailer or open on MovieLinkBD."
+          : errText;
+        if (streamMsg) streamMsg.textContent = displayMsg;
         if (stage) {
+          stage.querySelector(".cv-stage-loading")?.remove();
           stage.querySelector(".cv-stage-fallback")?.remove();
+          const bgPoster = safeImg(posterOf(watchDetail));
           const box = document.createElement("div");
           box.className = "cv-stage-fallback";
           box.style.cssText =
-            "position:absolute;inset:0;z-index:20;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:20px;text-align:center;background:rgba(11,13,16,.9);color:#f3f4f6;";
-          box.innerHTML = `<div style="max-width:460px;font-size:14px;line-height:1.5">${esc(errText)}</div>
+            `position:absolute;inset:0;z-index:20;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:20px;text-align:center;color:#f3f4f6;border-radius:10px;${bgPoster ? `background:linear-gradient(rgba(10,12,18,.78),rgba(10,12,18,.9)),url('${bgPoster.replace(/'/g, "%27")}') center/cover no-repeat;` : "background:rgba(11,13,16,.94);"}`;
+          box.innerHTML = `<div style="max-width:460px;font-size:14px;line-height:1.5">${esc(displayMsg)}</div>
             <div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:center">
               ${safeYtId ? `<button type="button" data-play-trailer class="cv-action-btn cv-action-btn-trailer" style="cursor:pointer">▶ Watch Official Trailer</button>` : ""}
+              ${mirrorUrl ? `<a href="${esc(mirrorUrl)}" target="_blank" rel="noopener noreferrer" class="cv-action-btn" style="cursor:pointer;text-decoration:none">🌐 Open on MovieLinkBD ↗</a>` : ""}
               <button type="button" data-retry-stream class="cv-action-btn cv-action-btn-retry" style="cursor:pointer">↻ Retry Stream</button>
               ${altDub ? `<button type="button" data-switch-alt-dub class="cv-action-btn" style="cursor:pointer">Switch to ${esc(altDub.language || altDub.lanName || "Original Audio")}</button>` : ""}
             </div>`;
           box.querySelector("[data-play-trailer]")?.addEventListener("click", () => {
             if (!safeYtId) return;
             box.style.padding = "0";
+            box.style.background = "#000";
             box.innerHTML = `<iframe title="Official Trailer" src="https://www.youtube.com/embed/${encodeURIComponent(safeYtId)}?autoplay=1&rel=0" style="width:100%;height:100%;border:0" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>`;
-            if (streamMsg) streamMsg.textContent = "Playing Official Trailer · Full stream releases soon";
+            if (streamMsg) {
+              streamMsg.textContent = upcomingTitle
+                ? "Playing Official Trailer · Full stream releases soon"
+                : "Playing Official Trailer";
+            }
           });
           box.querySelector("[data-retry-stream]")?.addEventListener("click", () => {
             box.remove();
@@ -822,29 +885,27 @@
           }, 1400);
           return;
         }
-        const diag = [
-          `HTTP ${r.status}`,
-          `raw=${Array.isArray(explicitList) ? explicitList.length : -1}`,
-          `keys=${Object.keys(payload || {}).slice(0, 6).join(",")}`
-        ].join(" · ");
+        const upcomingTitle = isWatchUpcoming(watchDetail);
+        const rawSrvMsg = String(payload?.message || payload?.error || "").trim();
         const errText =
-          payload?.message ||
-          payload?.error ||
-          (watchDetail?.hasResource === false
+          (upcomingTitle ? rawSrvMsg : rawSrvMsg.replace(/Upcoming \/ Unreleased/gi, "currently unavailable")) ||
+          (upcomingTitle
             ? "This title is Upcoming / Coming Soon and does not have a playable video yet."
-            : `Stream unavailable right now (${diag}). Tap Retry or try another audio dub.`);
+            : "No direct video stream is available on this mirror right now. Tap Watch Official Trailer or Retry Stream.");
         renderStageRetry(errText);
         return;
       }
 
+      root.querySelector(".cv-stage-loading")?.remove();
       root.querySelector(".cv-stage-fallback")?.remove();
       currentPlayableSources = sources;
       currentSubtitles = subtitles;
       refreshOfflineBar();
       if (streamMsg) {
         const uniqueQ = [...new Set(sources.map(s => s.quality))];
+        const upcomingTitle = isWatchUpcoming(watchDetail);
         streamMsg.textContent = streamRoot?.isTrailer
-          ? "Upcoming title · Playing Official Trailer"
+          ? (upcomingTitle ? "Upcoming title · Playing Official Trailer" : "Full video unavailable on server · Playing Official Trailer")
           : `${uniqueQ.join(" · ")}${subtitles.length ? ` · ${subtitles.length} subtitles` : ""}`;
       }
 
@@ -858,6 +919,10 @@
       };
       const storageKey = `cv-mb-${watchDetail?.subjectId || path}-${se}-${epNum}`;
 
+      if (video) {
+        video.style.opacity = "";
+        video.style.visibility = "";
+      }
       if (playerApi) {
         playerApi.setSources(sources, {
           seekTo: opts.seekTo || 0,
@@ -866,7 +931,7 @@
           title: watchDetail?.title || "Now Playing",
           historyMeta
         });
-        await playerApi.setSubtitles(subtitles);
+        playerApi.setSubtitles(subtitles).catch(() => {});
         syncPlayerUiState();
       } else if (video && window.CineVersePlayer) {
         video.hidden = false;
@@ -883,6 +948,8 @@
           onRetryStream: () => playEpisode(selectedEpIdx, { seekTo: video.currentTime || 0, autoplay: true, retryCount: 0 })
         });
         syncPlayerUiState();
+      } else if (video) {
+        video.controls = true;
       }
     } catch (err) {
       if (reqId === streamReqId) {
@@ -898,11 +965,12 @@
         if (streamMsg) streamMsg.textContent = msg;
         const stage = root.querySelector(".cv-player-stage");
         if (stage) {
+          stage.querySelector(".cv-stage-loading")?.remove();
           stage.querySelector(".cv-stage-fallback")?.remove();
           const box = document.createElement("div");
           box.className = "cv-stage-fallback";
           box.style.cssText =
-            "position:absolute;inset:0;z-index:20;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:20px;text-align:center;background:rgba(11,13,16,.88);color:#f3f4f6;";
+            "position:absolute;inset:0;z-index:20;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:20px;text-align:center;background:rgba(11,13,16,.88);color:#f3f4f6;border-radius:10px;";
           box.innerHTML = `<div style="max-width:460px;font-size:14px;line-height:1.5">${esc(msg)}</div>
             <button type="button" data-retry-stream class="cv-action-btn" style="background:var(--cv-red,#f87171);border-color:var(--cv-red,#f87171);color:#fff;cursor:pointer">↻ Retry Stream</button>`;
           box.querySelector("[data-retry-stream]")?.addEventListener("click", () => {
@@ -1098,7 +1166,7 @@
         <div class="cv-watch-grid">
           <div class="cv-watch-primary-col">
             <div class="cv-player-stage ms-watch-player">
-              <video id="movieWatchVideo" class="movie-player" controls playsinline preload="metadata" ${media.posterUrl ? `poster="${esc(media.posterUrl)}"` : ""}></video>
+              <video id="movieWatchVideo" class="movie-player" playsinline preload="metadata" ${media.posterUrl ? `poster="${esc(media.posterUrl)}"` : ""}></video>
             </div>
             <div class="cv-watch-info-pad">
               <div class="cv-watch-title-row">
@@ -1244,7 +1312,7 @@
       const isSeries = seasonKeys.some(k => k > 0) || episodes.length > 1;
       const seasonsLabel = isSeries ? `${seasonKeys.filter(k => k > 0).length || 1} season${seasonKeys.length > 1 ? "s" : ""}` : "Feature Film";
       const metaItems = [
-        d.isUpcoming ? `<span style="color:#00c882;font-weight:700">Upcoming</span>` : "",
+        isWatchUpcoming(d) ? `<span style="color:#00c882;font-weight:700">Upcoming</span>` : "",
         d.rating ? `<span class="cv-star">★ ${esc(d.rating)}</span>` : "",
         d.year ? `<span>${esc(d.year)}</span>` : "",
         d.language ? `<span>${esc(String(d.language).split("·")[0].trim())}</span>` : "",
@@ -1280,7 +1348,7 @@
         <div class="cv-watch-grid">
           <div class="cv-watch-primary-col">
             <div class="cv-player-stage ms-watch-player">
-              <video id="movieWatchVideo" class="movie-player" controls playsinline preload="metadata" ${poster ? `poster="${esc(poster)}"` : ""}></video>
+              <video id="movieWatchVideo" class="movie-player" playsinline preload="metadata" ${poster ? `poster="${esc(poster)}"` : ""}></video>
             </div>
 
             <div class="cv-watch-info-pad">
