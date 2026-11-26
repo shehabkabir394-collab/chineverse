@@ -9,7 +9,7 @@
     "dev": "PORT=3000 node server.js",
     "start": "node server.js",
     "build": "node -e \"console.log('Static site build verified')\"",
-    "lint": "node --check moviebox-api.js && node --check server.js"
+    "lint": "node --check moviebox-api.js && node --check movielinkbd-api.js && node --check lib/cinepulse-api.js && node --check server.js && node --check js/movie-api-home.js && node --check js/movie-api-watch.js"
   },
   "dependencies": {
     "express": "^4.21.2"

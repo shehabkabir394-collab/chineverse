@@ -204,7 +204,9 @@ export async function onRequest({ request, env, params }) {
 
   try {
     if (legacy === "details" && isMlbdPath(reqPath)) {
-      const payload = await getMlbdDetails(reqPath);
+      const payload = await getMlbdDetails(reqPath, String(query.get("title") || ""), {
+        dubLock: query.get("dubLock") === "1"
+      });
       return json(payload, 200, "public, max-age=120");
     }
 
@@ -212,7 +214,9 @@ export async function onRequest({ request, env, params }) {
       const payload = await getMlbdStream({
         path: reqPath,
         se: query.get("se") || 0,
-        ep: query.get("ep") || 1
+        ep: query.get("ep") || 1,
+        title: String(query.get("title") || ""),
+        dubLock: query.get("dubLock") === "1"
       });
       return json(payload, 200, "no-store");
     }

@@ -818,11 +818,6 @@
         const trailerId = String(streamRoot?.trailerYoutubeId || payload?.trailerYoutubeId || watchDetail?.trailerYoutubeId || "").trim();
         const safeYtId = /^[A-Za-z0-9_-]{8,20}$/.test(trailerId) ? trailerId : "";
         const upcomingTitle = isWatchUpcoming(watchDetail);
-        const rawMlbdPath = String(watchDetail?.mlbdOriginalPath || path || "").trim();
-        const mlbdSubPath = rawMlbdPath.replace(/^\/mlbd/i, "");
-        const mirrorUrl = !upcomingTitle && /^\/(?:mlbd\/)?(?:movie|series|drama|anime)\//i.test(rawMlbdPath)
-          ? `https://movielinkbd.tv${mlbdSubPath.startsWith("/") ? mlbdSubPath : `/${mlbdSubPath}`}`
-          : "";
         const stage = root.querySelector(".cv-player-stage");
         if (video) {
           video.controls = false;
@@ -833,7 +828,7 @@
           }
         }
         const displayMsg = safeYtId && /no direct video stream/i.test(String(errText || ""))
-          ? "Direct stream isn't available on this mirror yet — watch the official trailer or open on MovieLinkBD."
+          ? "Direct stream isn't available on this server right now — watch the official trailer below."
           : errText;
         if (streamMsg) streamMsg.textContent = displayMsg;
         if (stage) {
@@ -847,7 +842,6 @@
           box.innerHTML = `<div style="max-width:460px;font-size:14px;line-height:1.5">${esc(displayMsg)}</div>
             <div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:center">
               ${safeYtId ? `<button type="button" data-play-trailer class="cv-action-btn cv-action-btn-trailer" style="cursor:pointer">▶ Watch Official Trailer</button>` : ""}
-              ${mirrorUrl ? `<a href="${esc(mirrorUrl)}" target="_blank" rel="noopener noreferrer" class="cv-action-btn" style="cursor:pointer;text-decoration:none">🌐 Open on MovieLinkBD ↗</a>` : ""}
               <button type="button" data-retry-stream class="cv-action-btn cv-action-btn-retry" style="cursor:pointer">↻ Retry Stream</button>
               ${altDub ? `<button type="button" data-switch-alt-dub class="cv-action-btn" style="cursor:pointer">Switch to ${esc(altDub.language || altDub.lanName || "Original Audio")}</button>` : ""}
             </div>`;
@@ -891,7 +885,7 @@
           (upcomingTitle ? rawSrvMsg : rawSrvMsg.replace(/Upcoming \/ Unreleased/gi, "currently unavailable")) ||
           (upcomingTitle
             ? "This title is Upcoming / Coming Soon and does not have a playable video yet."
-            : "No direct video stream is available on this mirror right now. Tap Watch Official Trailer or Retry Stream.");
+            : "No direct video stream is available on this server right now. Tap Watch Official Trailer or Retry Stream.");
         renderStageRetry(errText);
         return;
       }
@@ -1307,7 +1301,15 @@
         seasonGroups.get(sNum).push({ ep, idx });
       });
       const seasonKeys = [...seasonGroups.keys()].sort((a, b) => a - b);
-      selectedSeasonNum = seasonKeys[0] ?? 0;
+      const hasExplicitEpisodeParam = params.has("episode") && params.get("episode") !== "";
+      const initialEpIdx = hasExplicitEpisodeParam
+        ? (Number.isInteger(Number(params.get("episode"))) && Number(params.get("episode")) >= 0 && Number(params.get("episode")) < episodes.length
+          ? Number(params.get("episode"))
+          : 0)
+        : (Number.isInteger(Number(d.startEpisodeIndex)) && Number(d.startEpisodeIndex) >= 0 && Number(d.startEpisodeIndex) < episodes.length
+          ? Number(d.startEpisodeIndex)
+          : 0);
+      selectedSeasonNum = Number(episodes[initialEpIdx]?.seasonNumber ?? episodes[initialEpIdx]?.se ?? seasonKeys[0] ?? 0) || 0;
 
       const isSeries = seasonKeys.some(k => k > 0) || episodes.length > 1;
       const seasonsLabel = isSeries ? `${seasonKeys.filter(k => k > 0).length || 1} season${seasonKeys.length > 1 ? "s" : ""}` : "Feature Film";
@@ -1555,10 +1557,7 @@
         }
       });
 
-      const requestedEpIdx = Number(params.get("episode") || 0);
-      const startEpIdx = Number.isInteger(requestedEpIdx) && requestedEpIdx >= 0 && requestedEpIdx < episodes.length
-        ? requestedEpIdx
-        : 0;
+      const startEpIdx = initialEpIdx;
       playEpisode(startEpIdx);
       loadRelated(d);
       loadComments(d);

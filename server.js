@@ -20,6 +20,7 @@ import {
   getMlbdServerHealth,
   getMlbdStream,
   getMlbdSuggest,
+  isMlbdDirectPlaybackAvailable,
   isMlbdPath,
   resolveSafeMlbdToken,
   rewriteMlbdHlsPlaylist,
@@ -33,16 +34,24 @@ import {
   scoreSearchMatch,
   collectTitleSuggestions
 } from "./lib/catalog-rules.js";
+import {
+  CINEPULSE_UPSTREAM,
+  fetchCinePulseApi,
+  isCinePulseConfigured,
+  loadDotEnvIfPresent,
+  normalizeCinePulsePayload,
+  normalizeCinePulseRoute
+} from "./lib/cinepulse-api.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+loadDotEnvIfPresent(path.join(__dirname, ".env"));
 
 const app = express();
 const RAW_PORT = process.env.PORT;
 const IS_PORT_NUMBER = !RAW_PORT || /^\d+$/.test(String(RAW_PORT).trim());
 const PORT = IS_PORT_NUMBER ? Number(RAW_PORT || 3000) : String(RAW_PORT).trim();
 const HOST = "0.0.0.0";
-const CINEPULSE_UPSTREAM = "https://okay-891h.onrender.com";
 const recentStreamEvents = [];
 
 function recordStreamEvent(evt) {
@@ -66,6 +75,8 @@ app.use((req, res, next) => {
     p === "/functions" ||
     p.startsWith("/supabase/") ||
     p === "/supabase" ||
+    p.startsWith("/lib/") ||
+    p === "/lib" ||
     p.startsWith("/node_modules/") ||
     p.startsWith("/.git") ||
     p.startsWith("/.env") ||
@@ -823,6 +834,40 @@ app.get("/api/categories", async (_req, res) => {
   }
 });
 
+app.get("/api/health", (_req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  return res.json({
+    ok: true,
+    service: "MovieStream BD",
+    provider: "CinePulse",
+    apiKeyConfigured: isCinePulseConfigured(),
+    activeMlbdMirror: getActiveMlbdReferer(),
+    checkedAt: new Date().toISOString()
+  });
+});
+
+app.all("/api/cinepulse/v1/*", async (req, res) => {
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    return res.status(405).json({ ok: false, error: "Method not allowed" });
+  }
+  const rawRoute = String(req.params[0] || "").replace(/^\/+|\/+$/g, "");
+  const route = normalizeCinePulseRoute(rawRoute);
+  if (!route) {
+    return res.status(404).json({ ok: false, error: `Unknown CinePulse endpoint: /api/v1/${rawRoute}` });
+  }
+  const incomingUrl = new URL(req.originalUrl, getBaseUrl(req));
+  const cpRes = await fetchCinePulseApi(route, incomingUrl.searchParams, {
+    accept: req.get("accept") || "application/json",
+    timeoutMs: 18000
+  });
+  res.setHeader("Cache-Control", route === "stream" ? "no-store" : "public, max-age=60");
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  if (!cpRes.data) {
+    return res.status(cpRes.status || 502).json({ ok: false, error: cpRes.error || "CinePulse upstream error" });
+  }
+  return res.status(cpRes.status || 200).json(normalizeCinePulsePayload(route, cpRes.data));
+});
+
 app.get("/api/server-health", async (_req, res) => {
   try {
     const data = await getMlbdServerHealth();
@@ -1101,6 +1146,16 @@ app.get("/api/movie-api/download-file", async (req, res) => {
       return res.status(404).json({ ok: false, error: "No downloadable MP4 source found" });
     }
     const parsed = new URL(best.url, getBaseUrl(req));
+    const cpToken = parsed.pathname === "/api/cinepulse-media" ? parsed.searchParams.get("t") : "";
+    if (cpToken && /^cp1[A-Za-z0-9._~-]{8,2048}$/.test(cpToken) && process.env.CINEPULSE_API_KEY) {
+      return await proxyMediaStream(
+        req,
+        res,
+        `${CINEPULSE_UPSTREAM}/api/mb-stream.mp4?t=${encodeURIComponent(cpToken)}`,
+        { "x-api-key": process.env.CINEPULSE_API_KEY },
+        true
+      );
+    }
     const token = parsed.searchParams.get("mb") || parsed.searchParams.get("t");
     const targetUrl = validateExternalHttpUrl(verifyMediaToken(token));
     if (!targetUrl) {
@@ -1161,19 +1216,21 @@ app.all("/api/movie-api/*", async (req, res) => {
     }
 
     if (legacy === "home") {
-      const hasPlayableStream = x => Boolean(x && (x.source !== "movielinkbd" || x.mbSubjectId));
       const hasCardPoster = x => Boolean(x?.poster || x?.previewImage);
-      const rankHomeItems = list =>
-        [...(Array.isArray(list) ? list : [])].sort((a, b) => {
-          const score = x => (hasPlayableStream(x) ? 4 : 0) + (hasCardPoster(x) ? 2 : 0);
-          return score(b) - score(a);
-        });
 
       const [mbRes, mlbdRes, mlbdBanglaRes] = await Promise.allSettled([
         handleMovieBoxRoute("home", query),
         getMlbdHomeFeed(),
         getMlbdCatalog({ path: "/language/bangla", page: 1 })
       ]);
+      const mlbdDirectOk = isMlbdDirectPlaybackAvailable();
+      const hasPlayableStream = x => Boolean(x && x.hasResource !== false && (mlbdDirectOk || x.source !== "movielinkbd" || x.mbSubjectId));
+      const rankHomeItems = list =>
+        [...(Array.isArray(list) ? list : [])].sort((a, b) => {
+          const score = x => (hasPlayableStream(x) ? 4 : 0) + (hasCardPoster(x) ? 2 : 0);
+          return score(b) - score(a);
+        });
+
       const payload = mbRes.status === "fulfilled"
         ? mbRes.value
         : { ok: true, sections: [], trending: [], banners: [], categories: [], curated: {} };
@@ -1182,22 +1239,22 @@ app.all("/api/movie-api/*", async (req, res) => {
         const cleanMlbdSecs = (mlbd.sections || [])
           .filter(s => !isNigerianContent(null, s?.title))
           .map(s => {
-            const validItems = (s.items || []).filter(x => !isNigerianContent(x, s?.title));
+            const validItems = (s.items || []).filter(x => !isNigerianContent(x, s?.title) && hasPlayableStream(x));
             const postered = validItems.filter(hasCardPoster);
-            const curatedItems = postered.length >= 6 ? rankHomeItems(postered) : rankHomeItems(validItems);
+            const curatedItems = postered.length >= 4 ? rankHomeItems(postered) : rankHomeItems(validItems);
             return { ...s, items: curatedItems };
           })
           .filter(s => s.items.length > 0);
         payload.mlbdSections = cleanMlbdSecs;
-        payload.mlbdTrending = rankHomeItems((mlbd.trending || []).filter(x => !isNigerianContent(x)));
+        payload.mlbdTrending = rankHomeItems((mlbd.trending || []).filter(x => !isNigerianContent(x) && hasPlayableStream(x)));
         payload.mlbdCategories = mlbd.categories || [];
         const existingCats = new Set((payload.categories || []).map(c => c?.path));
         payload.categories = [
           ...(payload.categories || []),
           ...(mlbd.categories || []).filter(c => c?.path && !existingCats.has(c.path))
         ];
-        const mbBanners = (payload.banners || []).filter(x => !isNigerianContent(x));
-        const mlbdBanners = (mlbd.banners || []).filter(x => !isNigerianContent(x));
+        const mbBanners = (payload.banners || []).filter(x => !isNigerianContent(x) && x?.hasResource !== false);
+        const mlbdBanners = (mlbd.banners || []).filter(x => !isNigerianContent(x) && hasPlayableStream(x));
         const playableMlbdBanners = mlbdBanners.filter(b => Boolean(b?.mbSubjectId) && hasCardPoster(b));
         const seenBannerKeys = new Set();
         payload.banners = [...mbBanners, ...playableMlbdBanners]
@@ -1215,7 +1272,9 @@ app.all("/api/movie-api/*", async (req, res) => {
         payload.activeMlbdMirror = mlbd.activeMirror;
       }
       if (mlbdBanglaRes.status === "fulfilled" && Array.isArray(mlbdBanglaRes.value?.items)) {
-        payload.mlbdBangla = rankHomeItems(mlbdBanglaRes.value.items.filter(x => !isNigerianContent(x)));
+        payload.mlbdBangla = rankHomeItems(
+          mlbdBanglaRes.value.items.filter(x => !isNigerianContent(x) && hasPlayableStream(x))
+        );
       }
       if (Array.isArray(payload.trending)) {
         payload.trending = payload.trending.filter(x => !isNigerianContent(x) && !isMusicOrClipSubject(x));
@@ -1230,7 +1289,7 @@ app.all("/api/movie-api/*", async (req, res) => {
         const existingIb = Array.isArray(payload.curated.indiaBangladeshTrending) ? payload.curated.indiaBangladeshTrending : [];
         const banglaPool = Array.isArray(payload.mlbdBangla) ? payload.mlbdBangla : [];
         const playablePosteredBangla = banglaPool.filter(x => hasPlayableStream(x) && hasCardPoster(x));
-        const posteredBangla = banglaPool.filter(x => hasCardPoster(x));
+        const posteredBangla = playablePosteredBangla;
         const seen = new Set();
         const prioritized = [
           ...playablePosteredBangla.slice(0, 8),
@@ -1282,6 +1341,8 @@ app.all("/api/movie-api/*", async (req, res) => {
       const mlbdItems = mlbdRes.status === "fulfilled" && Array.isArray(mlbdRes.value?.items) ? mlbdRes.value.items : [];
       const mbSugg = mbRes.status === "fulfilled" && Array.isArray(mbRes.value?.suggestions) ? mbRes.value.suggestions : [];
       const imdbSugg = imdbRes.status === "fulfilled" && Array.isArray(imdbRes.value) ? imdbRes.value : [];
+      const mlbdDirectOk = isMlbdDirectPlaybackAvailable();
+      const isPlayableCandidate = x => Boolean(x && x.hasResource !== false && (mlbdDirectOk || x.source !== "movielinkbd" || x.mbSubjectId));
       const candidates = [];
       const seen = new Set();
       for (const candidate of [...mbItems, ...mlbdItems]) {
@@ -1295,12 +1356,14 @@ app.all("/api/movie-api/*", async (req, res) => {
         seen.add(key);
         candidates.push(candidate);
       }
-      candidates.sort((a, b) => scoreMergedSearchItem(b, q) - scoreMergedSearchItem(a, q) || (Number(b.views) || 0) - (Number(a.views) || 0));
-      const merged = candidates.slice(0, 100);
+      const playableCandidates = candidates.filter(isPlayableCandidate);
+      const finalPool = playableCandidates.length ? playableCandidates : candidates;
+      finalPool.sort((a, b) => scoreMergedSearchItem(b, q) - scoreMergedSearchItem(a, q) || (Number(b.views) || 0) - (Number(a.views) || 0));
+      const merged = finalPool.slice(0, 100);
       const suggestions = q
         ? collectTitleSuggestions(q, { suggestWords: mbSugg, items: merged, extraTitles: imdbSugg, limit: 15 })
         : [];
-      const searchHasMore = Boolean(mbRes.value?.hasMore || mlbdRes.value?.hasMore || candidates.length >= 30);
+      const searchHasMore = Boolean(mbRes.value?.hasMore || mlbdRes.value?.hasMore || finalPool.length >= 30);
       const searchMaxPage = Math.max(
         page,
         Number(mbRes.value?.totalPages || page),
@@ -1324,23 +1387,55 @@ app.all("/api/movie-api/*", async (req, res) => {
       const category = String(query.get("category") || "/");
       const page = Math.max(1, Number(query.get("page")) || 1);
       const isMlbdOnlyCategory = /^\/(?:language\/(?:dual-audio|gujrati|kannada|marathi|malaysian|vietnamese|german|italian|portuguese|others)|genre\/(?:biographical|historical|musical|sports|superhero|survival|suspense)|category\/|collection\/|collections)/i.test(category);
+      const catKeywordFallback = c => {
+        const low = String(c || "").toLowerCase();
+        if (low.includes("mcu") || low.includes("marvel")) return "Marvel";
+        if (low.includes("dc-universe") || low.includes("dceu")) return "Batman Superman";
+        if (low.includes("wwe")) return "WWE";
+        if (low.includes("dual-audio")) return "Hindi";
+        if (low.includes("bangla-dubbed") || low.includes("bangla")) return "Bangla";
+        const slug = low.replace(/^\/(?:language|genre|category|collection)\//, "").replace(/[-_]+/g, " ").trim();
+        return slug || "Movie";
+      };
       if (isMlbdOnlyCategory) {
+        let mlbdPlayable = [];
+        let mlbdMeta = {};
         try {
           const mlbdCat = await getMlbdCatalog({ path: category, page });
-          if (Array.isArray(mlbdCat?.items) && mlbdCat.items.length > 0) {
-            res.setHeader("Cache-Control", "public, max-age=60");
-            return res.json({ ...mlbdCat, items: sortByReleaseNewest(mlbdCat.items.filter(x => !isNigerianContent(x))) });
+          const mlbdDirectOk = isMlbdDirectPlaybackAvailable();
+          mlbdMeta = mlbdCat || {};
+          if (Array.isArray(mlbdCat?.items)) {
+            mlbdPlayable = mlbdCat.items.filter(x => x && !isNigerianContent(x) && x.hasResource !== false && (mlbdDirectOk || x.source !== "movielinkbd" || x.mbSubjectId));
           }
         } catch (err) {
           console.warn(`[MLBD catalog error] ${category}:`, err?.message || err);
         }
-        try {
-          const mbFallback = await handleMovieBoxRoute("catalog", query);
-          if (mbFallback?.ok && Array.isArray(mbFallback.items)) {
-            res.setHeader("Cache-Control", "public, max-age=60");
-            return res.json({ ...mbFallback, items: sortByReleaseNewest(mbFallback.items.filter(x => !isNigerianContent(x))) });
-          }
-        } catch {}
+        if (mlbdPlayable.length < 6) {
+          try {
+            let mbItems = [];
+            if (!/^(?:\/collection\/|\/category\/)/i.test(category)) {
+              const mbFallback = await handleMovieBoxRoute("catalog", query).catch(() => null);
+              if (mbFallback?.ok && Array.isArray(mbFallback.items)) mbItems = mbFallback.items;
+            }
+            if (mbItems.length < 6) {
+              const kw = catKeywordFallback(category);
+              const mbSearch = await handleMovieBoxRoute("search", new URLSearchParams({ q: kw, page: String(page) })).catch(() => null);
+              if (Array.isArray(mbSearch?.items)) mbItems = [...mbItems, ...mbSearch.items];
+            }
+            const seenKeys = new Set(mlbdPlayable.map(x => x?.mbSubjectId || x?.path || String(x?.title || "").toLowerCase()));
+            for (const item of mbItems) {
+              if (!item || isNigerianContent(item) || isMusicOrClipSubject(item) || item.hasResource === false) continue;
+              const k = item.subjectId || item.path || String(item.title || "").toLowerCase();
+              if (!k || seenKeys.has(k)) continue;
+              seenKeys.add(k);
+              mlbdPlayable.push(item);
+            }
+          } catch {}
+        }
+        if (mlbdPlayable.length > 0) {
+          res.setHeader("Cache-Control", "public, max-age=60");
+          return res.json({ ...mlbdMeta, ok: true, items: sortByReleaseNewest(mlbdPlayable), page, maxPage: Math.max(page, Number(mlbdMeta?.maxPage || 1)) });
+        }
         res.setHeader("Cache-Control", "no-store");
         return res.json({ ok: true, items: [], maxPage: 1, page });
       }
@@ -1348,20 +1443,31 @@ app.all("/api/movie-api/*", async (req, res) => {
         handleMovieBoxRoute("catalog", query),
         getMlbdCatalog({ path: category, page })
       ]);
+      const mlbdDirectOk = isMlbdDirectPlaybackAvailable();
       const mbPayload = mbRes.status === "fulfilled" && mbRes.value?.ok ? mbRes.value : { ok: true, items: [] };
-      const mbItems = Array.isArray(mbPayload?.items) ? mbPayload.items : [];
-      const mlbdItems = mlbdRes.status === "fulfilled" && Array.isArray(mlbdRes.value?.items) ? mlbdRes.value.items : [];
-      const ordered = [...mlbdItems, ...mbItems];
+      const mbRaw = sortByReleaseNewest((Array.isArray(mbPayload?.items) ? mbPayload.items : []).filter(x => x && !isNigerianContent(x) && x.hasResource !== false));
+      const mlbdRaw = sortByReleaseNewest(
+        (mlbdRes.status === "fulfilled" && Array.isArray(mlbdRes.value?.items) ? mlbdRes.value.items : [])
+          .filter(x => x && !isNigerianContent(x) && x.hasResource !== false && (mlbdDirectOk || x.source !== "movielinkbd" || x.mbSubjectId))
+      );
+      const mlbdOrdered = [...mlbdRaw].sort((a, b) => {
+        const s = x => (x?.mbSubjectId ? 4 : 0) + (x?.poster ? 2 : 0);
+        return s(b) - s(a);
+      });
+      const interleaved = [];
+      const maxLen = Math.max(mlbdOrdered.length, mbRaw.length);
+      for (let i = 0; i < maxLen; i++) {
+        if (mlbdOrdered[i]) interleaved.push(mlbdOrdered[i]);
+        if (mbRaw[i]) interleaved.push(mbRaw[i]);
+      }
       const merged = [];
       const seen = new Set();
-      for (const item of ordered) {
-        if (!item || isNigerianContent(item)) continue;
+      for (const item of interleaved) {
         const key = item?.path || String(item?.title || "").trim().toLowerCase();
         if (!key || seen.has(key)) continue;
         seen.add(key);
         merged.push(item);
       }
-      const sortedMerged = sortByReleaseNewest(merged);
       const maxPage = Math.max(
         Number(mbPayload?.maxPage || mbPayload?.totalPages || 1),
         Number(mlbdRes.status === "fulfilled" ? (mlbdRes.value?.maxPage || mlbdRes.value?.totalPages || 1) : 1)
@@ -1370,7 +1476,7 @@ app.all("/api/movie-api/*", async (req, res) => {
       return res.json({
         ...mbPayload,
         ok: true,
-        items: sortedMerged,
+        items: merged,
         totalPages: maxPage,
         maxPage,
         hasMore: page < maxPage
@@ -1383,6 +1489,8 @@ app.all("/api/movie-api/*", async (req, res) => {
     }
     if (legacy === "status" && payload && typeof payload === "object") {
       payload.recentStreamEvents = recentStreamEvents.slice(0, 15);
+      payload.cinepulseConfigured = isCinePulseConfigured();
+      payload.activeMlbdMirror = getActiveMlbdReferer();
     }
     const statusCode = payload?.ok === false ? 502 : 200;
     if (legacy === "stream") {
@@ -1410,6 +1518,27 @@ app.all("/api/movie-api/*", async (req, res) => {
     return res.status(statusCode).json(payload);
   } catch (error) {
     console.warn(`[MovieBox API fallback] ${legacy}:`, error?.message || error);
+    if (isCinePulseConfigured()) {
+      const cpRoute = legacy === "shorts" ? "reels" : legacy === "sports" ? "sports/matches" : legacy;
+      const cpQuery = new URLSearchParams(query);
+      if (legacy === "shorts" && !cpQuery.has("type")) cpQuery.set("type", "all");
+      if (legacy === "catalog" && cpQuery.has("path") && !cpQuery.has("category")) {
+        cpQuery.set("category", cpQuery.get("path"));
+        cpQuery.delete("path");
+      }
+      if (legacy === "platform" && cpQuery.has("name") && !cpQuery.has("platform")) {
+        cpQuery.set("platform", cpQuery.get("name"));
+        cpQuery.delete("name");
+      }
+      const cpRes = await fetchCinePulseApi(cpRoute, cpQuery, {
+        accept: req.get("accept") || "application/json",
+        timeoutMs: 15000
+      });
+      if (cpRes.ok && cpRes.data) {
+        res.setHeader("Cache-Control", "no-store");
+        return res.json(normalizeCinePulsePayload(cpRoute, cpRes.data));
+      }
+    }
     const fallback = handleMockMovieApi(legacy, query, getBaseUrl(req));
     if (legacy === "stream") {
       const sourceCount = Array.isArray(fallback?.stream?.sources) ? fallback.stream.sources.length : 0;

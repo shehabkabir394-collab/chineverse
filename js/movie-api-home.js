@@ -937,8 +937,7 @@
     const top10Keys = new Set((mlbdTop10Sec?.items || []).map(x => x?.path || x?.subjectId || x?.title).filter(Boolean));
     const mlbdBanglaRaw = dedupeList([
       ...(Array.isArray(homeData.mlbdBangla) ? homeData.mlbdBangla : []),
-      ...mlbdSections.flatMap(s => s.items || []).filter(x => /bangla|bengali/i.test(`${x?.language || ""} ${x?.title || ""}`)),
-      ...(Array.isArray(homeData.mlbdTrending) ? homeData.mlbdTrending : [])
+      ...mlbdSections.flatMap(s => s.items || []).filter(x => /bangla|bengali|bangladesh/i.test(`${x?.language || ""} ${x?.title || ""}`))
     ]);
     const mlbdBanglaDistinct = mlbdBanglaRaw.filter(x => !top10Keys.has(x?.path || x?.subjectId || x?.title));
     const mlbdItems = mlbdBanglaDistinct.length ? mlbdBanglaDistinct : mlbdBanglaRaw;
@@ -959,12 +958,12 @@
     };
 
     const isPlayableCard = x => Boolean(x && (x.source !== "movielinkbd" || x.mbSubjectId));
-    const prioritizePlayablePostered = list => {
+    const prioritizePostered = list => {
       const arr = Array.isArray(list) ? list : [];
       const postered = arr.filter(x => safeImg(posterOf(x)));
       const pool = postered.length >= 6 ? postered : arr;
       return [...pool].sort((a, b) => {
-        const score = x => (isPlayableCard(x) ? 4 : 0) + (safeImg(posterOf(x)) ? 2 : 0);
+        const score = x => (safeImg(posterOf(x)) ? 4 : 0) + (isPlayableCard(x) ? 2 : 0);
         return score(b) - score(a);
       });
     };
@@ -972,10 +971,16 @@
     const mlbdSectionShelves = mlbdSections
       .filter(sec => !isNigerian(null, sec?.title))
       .map(sec => {
-        const cleanTitle = stripCatBrand(String(sec?.title || "").trim());
+        let cleanTitle = stripCatBrand(String(sec?.title || "").trim());
+        if (/^latest movies$/i.test(cleanTitle.replace(/[^\p{L}\p{N}\s]+/gu, "").trim())) {
+          cleanTitle = "🎞️ Latest Archive Movies";
+        }
         const catPath = String(sec?.categoryPath || "/new").trim();
-        const extraCurated = curatedPoolsForCat[catPath.toLowerCase()] || [];
-        const items = prioritizePlayablePostered(sortNewestFirst(dedupeList([...extraCurated, ...(sec?.items || [])])));
+        const mlbdOnly = prioritizePostered(sortNewestFirst(dedupeList(sec?.items || [])));
+        const extraCurated = mlbdOnly.length < 12
+          ? (curatedPoolsForCat[catPath.toLowerCase()] || []).slice(0, 14 - mlbdOnly.length)
+          : [];
+        const items = dedupeList([...mlbdOnly, ...extraCurated]);
         if (!cleanTitle || !items.length) return null;
         return {
           title: cleanTitle,
@@ -985,12 +990,12 @@
       })
       .filter(Boolean);
 
-    const indiaBdItems = prioritizePlayablePostered(dedupeList([
+    const indiaBdItems = prioritizePostered(dedupeList([
       ...(curated.indiaBangladeshTrending || []),
       ...(curated.bengali || []),
+      ...(Array.isArray(homeData.mlbdBangla) ? homeData.mlbdBangla : []).slice(0, 12),
       ...(curated.southIndian || []).slice(0, 10),
-      ...(curated.hindiMovies || []).slice(0, 10),
-      ...(Array.isArray(homeData.mlbdBangla) ? homeData.mlbdBangla : [])
+      ...(curated.hindiMovies || []).slice(0, 10)
     ]));
 
     const orderedShelves = [
@@ -1007,7 +1012,7 @@
       ...(mlbdItems.length || (curated.bengali || []).length
         ? [{
             title: "🟢 Latest & Bangla",
-            items: prioritizePlayablePostered(sortNewestFirst(dedupeList([...(curated.bengali || []), ...mlbdItems]))),
+            items: prioritizePostered(sortNewestFirst(dedupeList([...mlbdItems, ...(curated.bengali || [])]))),
             moreHref: "catalog.html?category=%2Flanguage%2Fbangla"
           }]
         : []),

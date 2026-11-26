@@ -1,11 +1,18 @@
 import { MOVIEBOX_UA, handleMovieBoxRoute, signMediaToken, verifyMediaToken } from "./moviebox-api.js";
 import {
+  fetchCinePulseApi,
+  isCinePulseConfigured,
+  normalizeCinePulseDetail,
+  normalizeCinePulsePayload
+} from "./lib/cinepulse-api.js";
+import {
   isNigerianContent,
   isUpcomingUnreleased,
   isMusicOrClipSubject,
   strictTitleMatchScore,
   dedupeRepeatedTitleYear,
   parseEpisodeRangeFromTitle,
+  cleanSearchTitleText,
   splitSearchTitleVariants,
   expandSearchQueryVariants,
   cleanYoutubeTrailerTitle,
@@ -57,6 +64,12 @@ const posterRegistry = new Map();
 const posterInFlight = new Map();
 let activeResolvedOrigin = "https://ep2zyu.movielinkbd.at";
 let mirrorsBlockedUntil = 0;
+let mlbdDirectMirrorsBlocked = false;
+let mlbdCinePulseHasContent = false;
+
+export function isMlbdDirectPlaybackAvailable() {
+  return Boolean(!mlbdDirectMirrorsBlocked || mlbdCinePulseHasContent);
+}
 
 function normalizePosterKey(title = "") {
   return decodeHtmlEntities(String(title || ""))
@@ -124,15 +137,7 @@ function registerMlbdItem(item) {
 }
 
 function cleanMlbdSearchTitle(rawTitle) {
-  return decodeHtmlEntities(String(rawTitle || ""))
-    .replace(/\s*[—–-]\s*MovieLinkBD.*$/i, "")
-    .replace(/\[[^\]]*\]/g, " ")
-    .replace(/\((?:19|20)\d{2}[^)]*\)/g, " ")
-    .replace(/\((?:hindi|bangla|bengali|english|tamil|telugu|malayalam|korean|dual\s*audio|dubbed|org|hq|uncut)[^)]*\)/gi, " ")
-    .replace(/\b(?:S\d{1,2}(?:\s*[-–]\s*S?\d{1,2})?|Season\s*\d+|Ep(?:isode)?\s*\d+(?:\s*[-–]\s*\d+)?|Full\s*HD|HDRip|WEB-?DL|BluRay|HEVC|1080p|720p|480p|4K|ORG|HQ|Uncut|Added|Completed|Complete|Dual\s*Audio|Multi\s*Audio|(?:Hindi|Bangla|Bengali|Tamil|Telugu|Malayalam|Korean|English)\s*(?:HQ|ORG)?\s*Dubbed)\b/gi, " ")
-    .replace(/\s+(?:Hindi|Bangla|Bengali|Dubbed|ORG|HQ)+$/gi, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  return cleanSearchTitleText(decodeHtmlEntities(String(rawTitle || "")));
 }
 
 function slugifyMlbdTitle(rawTitle) {
@@ -472,7 +477,9 @@ export async function mlbdFetchPage(upstreamPath = "/", options = {}) {
   }
 
   const job = (async () => {
+    const discoveredOrigins = await discoverLiveMirrorOrigin(5000).catch(() => []);
     const candidateBases = [...new Set([
+      ...discoveredOrigins,
       activeResolvedOrigin,
       ...MLBD_MIRRORS.map(m => m.baseUrl)
     ])].filter(b => {
@@ -488,7 +495,7 @@ export async function mlbdFetchPage(upstreamPath = "/", options = {}) {
     )];
 
     let lastErr = null;
-    let portalChecked = false;
+    let portalChecked = discoveredOrigins.length > 0;
 
     for (let i = 0; i < candidateBases.length; i++) {
       const base = candidateBases[i];
@@ -515,7 +522,14 @@ export async function mlbdFetchPage(upstreamPath = "/", options = {}) {
           const out = await fetchMirrorOnce(base, reqVariant, extra, options.timeoutMs || 14000);
           if (out.blockedRedirect) {
             lastErr = new Error(`Blocked redirect (${out.blockedRedirect}) from ${base}`);
-            continue;
+            break;
+          }
+          const isCfChallenge =
+            out.res.status === 403 &&
+            (/challenge/i.test(out.res.headers.get("cf-mitigated") || "") || /Just a moment\.\.\./i.test(out.text || ""));
+          if (isCfChallenge) {
+            lastErr = new Error(`Cloudflare challenge (403) from ${base}`);
+            break;
           }
           if (out.res.ok && out.text && out.text.length > 400) {
             if (isPortalLandingHtml(out.text)) {
@@ -529,6 +543,7 @@ export async function mlbdFetchPage(upstreamPath = "/", options = {}) {
             }
             activeResolvedOrigin = out.finalOrigin || base;
             mirrorsBlockedUntil = 0;
+            mlbdDirectMirrorsBlocked = false;
             const result = {
               html: out.text,
               finalUrl: out.finalUrl,
@@ -555,6 +570,7 @@ export async function mlbdFetchPage(upstreamPath = "/", options = {}) {
       }
     }
     mirrorsBlockedUntil = Date.now() + 120000;
+    mlbdDirectMirrorsBlocked = true;
     throw lastErr || new Error("All MovieStreamBD mirrors are currently unreachable");
   })();
 
@@ -570,8 +586,16 @@ export async function getMlbdServerHealth() {
   const cached = getCached("server-health");
   if (cached) return cached;
 
+  const discovered = await discoverLiveMirrorOrigin(5000).catch(() => []);
+  const mirrorTargets = [
+    ...discovered
+      .filter(origin => !MLBD_MIRRORS.some(m => m.baseUrl === origin))
+      .map((origin, idx) => ({ id: `discovered-${idx + 1}`, name: "Discovered Portal Mirror", baseUrl: origin, priority: 0 })),
+    ...MLBD_MIRRORS
+  ];
+
   const checks = await Promise.all(
-    MLBD_MIRRORS.map(async mirror => {
+    mirrorTargets.map(async mirror => {
       const started = Date.now();
       try {
         const res = await fetch(mirror.baseUrl + "/", {
@@ -623,6 +647,7 @@ export async function getMlbdServerHealth() {
       activeMirror: activeResolvedOrigin,
       onlineCount: checks.filter(c => c.online).length,
       totalMirrors: checks.length,
+      cinepulseConfigured: isCinePulseConfigured(),
       servers: checks,
       checkedAt: new Date().toISOString()
     },
@@ -1505,26 +1530,84 @@ async function resolvePosterForItem(item) {
   return await job;
 }
 
+async function resolveMbBridgeForItem(item) {
+  const rawSeed = String(item?.title || item?.searchTitle || "").trim();
+  const variants = splitSearchTitleVariants(rawSeed);
+  const searchTitle = cleanMlbdSearchTitle(rawSeed) || variants[0] || "";
+  if (!searchTitle && !variants.length) return null;
+  const year = String(item?.year || "");
+  const wantSeries = Boolean(item?.isSeries || /\b(?:S\d{1,2}|Season\s*\d+|Ep(?:isode)?s?\s*\d+)\b/i.test(rawSeed));
+  const cacheKey = `mbbridge:${(variants[0] || searchTitle).toLowerCase()}|${year}|${wantSeries ? "s" : "m"}`;
+  const cached = getCached(cacheKey);
+  if (cached !== null) return cached || null;
+
+  const queryList = [...new Set([
+    ...variants,
+    ...(searchTitle ? expandSearchQueryVariants(searchTitle) : [])
+  ])].filter(q => q.length >= 2).slice(0, 2);
+
+  try {
+    for (const q of queryList) {
+      const res = await handleMovieBoxRoute("search", new URLSearchParams({ q, page: "1" })).catch(() => null);
+      const candidates = Array.isArray(res?.items) ? res.items : [];
+      const matched = candidates
+        .filter(c => c && !isNigerianContent(c) && !isMusicOrClipSubject(c) && c?.hasResource !== false)
+        .map(c => {
+          const sim = titleSimilarityScore(q, c?.title || "", {
+            queryYear: year,
+            candidateYear: c?.year || "",
+            isSeries: wantSeries
+          });
+          const sameFmt = Boolean(c?.isSeries) === wantSeries;
+          const total = sim + (year && c?.year === year ? 0.12 : 0) + (sameFmt ? 0.08 : -0.08);
+          return { c, sim, total };
+        })
+        .filter(x => x.sim >= 0.74 && (Boolean(x.c?.isSeries) === wantSeries || x.sim >= 0.90))
+        .sort((a, b) => b.total - a.total)[0]?.c;
+      if (matched?.subjectId) {
+        const hit = { mbSubjectId: matched.subjectId, mbDetailPath: matched.detailPath || "" };
+        return setCached(cacheKey, hit, 21600000);
+      }
+    }
+    return setCached(cacheKey, false, 3600000) || null;
+  } catch {
+    return null;
+  }
+}
+
 async function enrichMlbdItemsWithPosters(items = [], maxToEnrich = 24, concurrency = 6) {
   const list = Array.isArray(items) ? items : [];
-  // Pass 1: instant in-memory poster registry match
+  // Pass 1: instant in-memory poster + bridge registry match (even if poster already exists)
   for (const item of list) {
-    if (!item || item.poster) continue;
+    if (!item) continue;
     const reg = lookupPosterRegistry(item.searchTitle || cleanMlbdSearchTitle(item.title || ""), item.year);
-    if (reg?.poster) {
+    if (!reg) continue;
+    let changed = false;
+    if (!item.poster && reg.poster) {
       item.poster = reg.poster;
-      if (reg.mbSubjectId && !item.mbSubjectId) item.mbSubjectId = reg.mbSubjectId;
-      if (reg.mbDetailPath && !item.mbDetailPath) item.mbDetailPath = reg.mbDetailPath;
-      if (reg.rating && !item.rating) item.rating = reg.rating;
-      registerMlbdItem(item);
+      changed = true;
     }
+    if (reg.mbSubjectId && !item.mbSubjectId) {
+      item.mbSubjectId = reg.mbSubjectId;
+      changed = true;
+    }
+    if (reg.mbDetailPath && !item.mbDetailPath) {
+      item.mbDetailPath = reg.mbDetailPath;
+      changed = true;
+    }
+    if (reg.rating && !item.rating) {
+      item.rating = reg.rating;
+      changed = true;
+    }
+    if (changed) registerMlbdItem(item);
   }
 
-  // Pass 2: bounded async enrichment across visible cards
+  // Pass 2: bounded async enrichment across unpostered cards + bridge lookup for postered cards
+  const bridgeLimit = Math.max(maxToEnrich, 48);
   const needPoster = list.filter(it => it && !it.poster && (it.searchTitle || it.title)).slice(0, maxToEnrich);
-  if (!needPoster.length) return list;
+  const needBridgeOnly = list.filter(it => it && it.poster && !it.mbSubjectId && !it.isUpcoming && (it.searchTitle || it.title)).slice(0, bridgeLimit);
+  const step = Math.max(1, Math.min(12, Number(concurrency) || 6));
 
-  const step = Math.max(1, Math.min(10, Number(concurrency) || 6));
   for (let i = 0; i < needPoster.length; i += step) {
     const batch = needPoster.slice(i, i + step);
     await Promise.allSettled(
@@ -1535,6 +1618,20 @@ async function enrichMlbdItemsWithPosters(items = [], maxToEnrich = 24, concurre
           if (hit.mbSubjectId) item.mbSubjectId = hit.mbSubjectId;
           if (hit.mbDetailPath) item.mbDetailPath = hit.mbDetailPath;
           if (!item.rating && hit.rating) item.rating = hit.rating;
+          registerMlbdItem(item);
+        }
+      })
+    );
+  }
+
+  for (let i = 0; i < needBridgeOnly.length; i += step) {
+    const batch = needBridgeOnly.slice(i, i + step);
+    await Promise.allSettled(
+      batch.map(async item => {
+        const bridge = await resolveMbBridgeForItem(item);
+        if (bridge?.mbSubjectId) {
+          item.mbSubjectId = bridge.mbSubjectId;
+          if (bridge.mbDetailPath) item.mbDetailPath = bridge.mbDetailPath;
           registerMlbdItem(item);
         }
       })
@@ -1552,10 +1649,13 @@ const DEFAULT_MLBD_COM_CONTENT_PATHS = [
   "/browse/punjabi", "/browse/turkish", "/browse/spanish", "/browse/french",
   "/browse/indonesian", "/browse/kannada", "/browse/marathi", "/browse/others",
   "/browse/genre-action", "/browse/genre-adventure", "/browse/genre-animation",
-  "/browse/genre-comedy", "/browse/genre-crime", "/browse/genre-drama",
-  "/browse/genre-family", "/browse/genre-fantasy", "/browse/genre-historical",
-  "/browse/genre-horror", "/browse/genre-mystery", "/browse/genre-romance",
-  "/browse/genre-sci-fi", "/browse/genre-thriller"
+  "/browse/genre-biographical", "/browse/genre-comedy", "/browse/genre-crime",
+  "/browse/genre-documentary", "/browse/genre-drama", "/browse/genre-family",
+  "/browse/genre-fantasy", "/browse/genre-historical", "/browse/genre-horror",
+  "/browse/genre-music", "/browse/genre-musical", "/browse/genre-mystery",
+  "/browse/genre-romance", "/browse/genre-sci-fi", "/browse/genre-sports",
+  "/browse/genre-superhero", "/browse/genre-survival", "/browse/genre-suspense",
+  "/browse/genre-thriller", "/browse/genre-war"
 ];
 
 async function getMlbdComSitemapPaths() {
@@ -1616,7 +1716,7 @@ async function getMlbdComFullIndex() {
   return await mlbdComFullIndexPromise;
 }
 
-function mapCategoryToMlbdComUrls(rawPath = "/") {
+export function mapCategoryToMlbdComUrls(rawPath = "/") {
   const p = String(rawPath || "/").toLowerCase().replace(/\/+$/, "") || "/";
   if (p === "/" || p === "/new" || p === "/popular" || p.startsWith("/mostwatch") || p === "/top10" || p === "/recently-updated") {
     return ["/", "/movies", "/web-series"];
@@ -1628,26 +1728,35 @@ function mapCategoryToMlbdComUrls(rawPath = "/") {
   if (p === "/type/series" || p === "/drama" || p === "/ongoing") return ["/web-series", "/korean-drama", "/browse/genre-drama", "/browse/turkish", "/browse/bangla", "/browse/chinese"];
   if (p === "/southindian" || p.includes("south-indian")) return ["/south-indian-movies", "/browse/tamil", "/browse/telugu", "/browse/malayalam"];
   if (p === "/anime") return ["/animation-movies", "/browse/genre-animation", "/browse/japanese"];
-  if (p === "/bollywood" || p === "/indian-series" || p === "/language/hindi") {
+  if (p === "/bollywood" || p === "/language/hindi") {
     return ["/hindi-movies", "/browse/hindi"];
   }
-  if (p === "/language/hindi-dubbed" || p === "/language/hindi-dubbed-series") {
-    return ["/browse/hindi-dubbed", "/hindi-movies"];
+  if (p === "/indian-series") {
+    return ["/web-series", "/hindi-movies", "/browse/hindi"];
+  }
+  if (p === "/language/hindi-dubbed" || p === "/language/hindi-dubbed-series" || p === "/collection/top-rated-hindi-dubbed-action") {
+    return p.includes("action")
+      ? ["/browse/hindi-dubbed", "/action-movies", "/browse/genre-action"]
+      : ["/browse/hindi-dubbed", "/hindi-movies"];
   }
   if (p === "/language/korean" || p.includes("korean-drama")) return ["/korean-drama", "/browse/korean"];
-  if (p === "/language/bengali" || p === "/language/bangla" || p === "/bengali-series" || p.includes("bangla-web-series")) return ["/browse/bangla", "/browse/bangla-dubbed"];
   if (p === "/language/bangla-dubbed" || p.includes("bangla-dubbed")) return ["/browse/bangla-dubbed", "/browse/bangla"];
+  if (p === "/language/bengali" || p === "/language/bangla" || p === "/bengali-series" || p.includes("bangla-web-series")) {
+    return p.includes("series") ? ["/browse/bangla", "/web-series"] : ["/browse/bangla", "/browse/bangla-dubbed"];
+  }
   if (p === "/language/japanese-drama" || p === "/language/japanese") return ["/browse/japanese", "/animation-movies"];
   if (p === "/language/english") return ["/browse/english", "/movies"];
   if (p === "/language/urdu") return ["/browse/hindi", "/browse/others"];
-  if (p === "/genre/horror" || p.includes("horror")) return ["/browse/genre-horror"];
-  if (p === "/genre/thriller" || p.includes("thriller")) return ["/browse/genre-thriller"];
+  if (p.includes("mcu") || p.includes("marvel") || p.includes("dc-universe") || p.includes("dceu")) return ["/browse/genre-superhero"];
+  if (p === "/category/wwe") return ["/browse/genre-sports"];
+  if (p === "/collection/horror-night" || p === "/genre/horror" || p.includes("horror")) return ["/browse/genre-horror"];
+  if (p === "/collection/thriller-mystery" || p === "/genre/thriller" || p.includes("thriller")) return ["/browse/genre-thriller", "/browse/genre-mystery"];
+  if (p === "/collection/family-animation" || p === "/genre/animation" || p.includes("animation")) return ["/animation-movies", "/browse/genre-animation", "/browse/genre-family"];
   if (p.startsWith("/language/")) {
     const slug = p.slice("/language/".length);
     return [`/browse/${slug}`];
   }
   if (p === "/genre/action") return ["/action-movies", "/browse/genre-action"];
-  if (p === "/genre/animation" || p.includes("animation")) return ["/animation-movies", "/browse/genre-animation"];
   if (p.startsWith("/genre/")) {
     const slug = p.slice("/genre/".length).replace(/^sci-fi$/, "sci-fi");
     return [`/browse/genre-${slug}`];
@@ -1690,20 +1799,50 @@ function sortMlbdNewestFirst(items = []) {
     .map(x => x.item);
 }
 
-function matchesMlbdCategoryItem(item, categoryPath = "/") {
+export function matchesMlbdCategoryItem(item, categoryPath = "/") {
   const p = String(categoryPath || "/").toLowerCase().replace(/\/+$/, "") || "/";
   const title = String(item?.title || "");
   const hay = `${title} ${item?.language || ""} ${item?.typeBadge || ""} ${item?.genre || ""}`.toLowerCase();
   if (p === "/" || p === "/all" || p === "/collections" || p === "/new" || p === "/popular" || p.startsWith("/mostwatch") || p === "/top10" || p === "/recently-updated") return true;
   if (p === "/type/movies") return !item?.isSeries && !item?.isAnime;
   if (p === "/type/series" || p === "/drama" || p === "/ongoing") return Boolean(item?.isSeries);
-  if (p === "/language/hindi-dubbed" || p === "/language/hindi") return Boolean(item?.isHindiDubbed || /hindi|dual\s*audio/i.test(hay));
-  if (p === "/language/korean" || p.includes("korean-drama")) return /korean|k-?drama/i.test(hay);
-  if (p === "/language/bangla" || p === "/language/bangla-dubbed" || p === "/language/bengali") return /bangla|bengali/i.test(hay);
+  if (p === "/language/hindi-dubbed-series") return Boolean(item?.isSeries) && Boolean(item?.isHindiDubbed || /hindi|dual\s*audio/i.test(hay));
+  if (p === "/language/hindi-dubbed" || p === "/language/hindi" || p === "/bollywood") return Boolean(item?.isHindiDubbed || /hindi|dual\s*audio|bollywood/i.test(hay));
+  if (p === "/indian-series") {
+    return Boolean(item?.isSeries) &&
+      !item?.isAnime &&
+      /\b(?:indian|bollywood|hindi\s*original|tamil|telugu|malayalam|bengali|marathi|punjabi|hotstar|sonyliv|zee5|jiocinema)\b/i.test(hay) &&
+      !/\b(?:korean|k-?drama|turkish|chinese|c-?drama|japanese|anime)\b/i.test(hay);
+  }
+  if (p === "/language/korean" || p === "/collection/korean-drama-must-watch") {
+    const isKorean = /\b(?:korean|k-?drama|korea)\b/i.test(hay);
+    return p.includes("must-watch") ? Boolean(item?.isSeries) && isKorean : isKorean;
+  }
+  if (p === "/language/bangla-dubbed" || p === "/collection/best-bangla-dubbed-movies") {
+    return /bangla\s*dub/i.test(hay) && (p.includes("movies") ? !item?.isSeries : true);
+  }
+  if (p === "/bengali-series" || p === "/collection/bangla-web-series") {
+    return Boolean(item?.isSeries) && /\b(?:bangla|bengali|bangladesh|hoichoi|chorki|bongo)\b/i.test(hay);
+  }
+  if (p === "/language/bangla" || p === "/language/bengali") return /\b(?:bangla|bengali)\b/i.test(hay);
+  if (p === "/collection/top-rated-hindi-dubbed-action") {
+    return Boolean(item?.isHindiDubbed || /hindi|dual\s*audio/i.test(hay)) && /\baction\b/i.test(hay);
+  }
   if (p === "/southindian" || p.includes("south-indian")) return /south\s*indian|tamil|telugu|malayalam|kannada/i.test(hay);
-  if (p === "/anime" || p.includes("animation")) return Boolean(item?.isAnime || /anime|animation/i.test(hay));
-  if (p === "/genre/action") return /action/i.test(hay);
-  if (p === "/genre/thriller" || p === "/genre/horror") return /thriller|horror|mystery|crime/i.test(hay);
+  if (p === "/collection/family-animation" || p === "/anime" || p.includes("animation")) {
+    return Boolean(item?.isAnime || /\b(?:anime|animation|animated|family|pixar|disney|dreamworks|toy\s*story)\b/i.test(hay));
+  }
+  if (p.includes("mcu") || p.includes("marvel")) return /\b(?:marvel|avengers|iron\s*man|captain\s*america|thor|spider-?man|guardians\s*of\s*the\s*galaxy|ant-?man|doctor\s*strange|black\s*panther|deadpool|wolverine|shang-?chi|eternals|thunderbolts|fantastic\s*four|x-?men|loki|wandavision|moon\s*knight|hawkeye|she-?hulk|ms\.?\s*marvel|what\s*if|daredevil|echo|agatha|venom|captain\s*marvel|black\s*widow)\b/i.test(hay);
+  if (p.includes("dc-universe") || p.includes("dceu")) return /\b(?:dc\b|batman|superman|wonder\s*woman|aquaman|the\s*flash|joker|justice\s*league|suicide\s*squad|shazam|black\s*adam|blue\s*beetle|peacemaker|the\s*penguin|creature\s*commandos|harley\s*quinn|green\s*lantern|man\s*of\s*steel)\b/i.test(hay);
+  if (p === "/category/wwe") return /\b(?:wwe|wrestlemania|monday\s*night\s*raw|smackdown|summerslam|royal\s*rumble|nxt|survivor\s*series|elimination\s*chamber)\b/i.test(hay);
+  if (p === "/genre/action") return /\baction\b/i.test(hay);
+  if (p === "/collection/horror-night" || p === "/genre/horror") {
+    return /\b(?:horror|ghost|bhoot|conjuring|exorcist|haunted|demon|witch|zombie|evil\s*dead)\b/i.test(hay);
+  }
+  if (p === "/collection/thriller-mystery" || p === "/genre/thriller") {
+    return /\b(?:thriller|horror|mystery|suspense|crime|detective)\b/i.test(hay);
+  }
+  if (p === "/language/english") return /\b(?:english|hollywood|usa)\b/i.test(hay);
   if (p.startsWith("/language/")) {
     const slug = p.slice("/language/".length).replace(/-/g, " ");
     return hay.includes(slug);
@@ -1711,6 +1850,15 @@ function matchesMlbdCategoryItem(item, categoryPath = "/") {
   if (p.startsWith("/genre/")) {
     const slug = p.slice("/genre/".length).replace(/-/g, " ");
     return hay.includes(slug);
+  }
+  if (p.startsWith("/category/") || p.startsWith("/collection/")) {
+    const stopWords = new Set(["best", "top", "rated", "must", "watch", "night", "movies", "movie", "series", "web", "blockbusters", "hits", "collection", "all", "new", "the", "and", "for"]);
+    const slugWords = p
+      .replace(/^\/(?:category|collection)\//, "")
+      .split(/[-_]+/)
+      .filter(w => w.length >= 3 && !stopWords.has(w));
+    if (!slugWords.length) return false;
+    return slugWords.every(w => new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(hay));
   }
   return false;
 }
@@ -1747,7 +1895,13 @@ async function getMlbdComCatalog({ path = "/", q = "", page = 1 } = {}) {
       normCat === "/type/series" ||
       normCat === "/new" ||
       normCat === "/popular" ||
-      normCat === "/";
+      normCat === "/" ||
+      normCat === "/indian-series" ||
+      normCat === "/language/hindi-dubbed-series" ||
+      normCat.startsWith("/collection/mcu") ||
+      normCat.startsWith("/collection/dc-") ||
+      normCat === "/collection/top-rated-hindi-dubbed-action" ||
+      normCat === "/category/wwe";
 
     const seen = new Set();
     const pushItem = c => {
@@ -1769,6 +1923,12 @@ async function getMlbdComCatalog({ path = "/", q = "", page = 1 } = {}) {
       }
     } else {
       const baseTargets = mapCategoryToMlbdComUrls(path);
+      const isGenericListingFallback = !baseTargets.some(t => t.startsWith("/browse/") || /hindi-movies|south-indian|action-movies|korean-drama|animation-movies/i.test(t));
+      const isStrictMultiFilter =
+        normCat.startsWith("/collection/") ||
+        normCat.startsWith("/category/") ||
+        normCat === "/bengali-series" ||
+        normCat === "/language/bangla-dubbed";
       const shouldIncludeLatestHome = !baseTargets.includes("/");
       const targetPages = shouldIncludeLatestHome ? ["/", ...baseTargets] : baseTargets;
       const settled = await Promise.allSettled(
@@ -1777,9 +1937,12 @@ async function getMlbdComCatalog({ path = "/", q = "", page = 1 } = {}) {
       for (const r of settled) {
         if (r.status !== "fulfilled") continue;
         const cards = extractMlbdComCards(r.value.html, r.value.tp);
-        const fromLatestOnly = r.value.tp === "/" && shouldIncludeLatestHome;
+        const mustFilter =
+          isStrictMultiFilter ||
+          (r.value.tp === "/" && shouldIncludeLatestHome) ||
+          (isGenericListingFallback && !["/", "/new", "/popular", "/top10", "/recently-updated"].includes(normCat));
         for (const c of cards) {
-          if (fromLatestOnly && !matchesMlbdCategoryItem(c, path)) continue;
+          if (mustFilter && !matchesMlbdCategoryItem(c, path)) continue;
           pushItem(c);
         }
       }
@@ -1864,10 +2027,10 @@ async function getMlbdComHomeFeed() {
       if (sec.items[idx]) roundRobinItems.push(sec.items[idx]);
     }
   }
-  await enrichMlbdItemsWithPosters(roundRobinItems, 30, 10);
+  await enrichMlbdItemsWithPosters(roundRobinItems, 48, 10);
   setTimeout(() => {
-    enrichMlbdItemsWithPosters(roundRobinItems, 140, 6).catch(() => {});
-  }, 250);
+    enrichMlbdItemsWithPosters(roundRobinItems, roundRobinItems.length, 6).catch(() => {});
+  }, 150);
 
   const rankMlbdPlayability = (list = []) =>
     [...list].sort((a, b) => {
@@ -1996,6 +2159,25 @@ export async function getMlbdHomeFeed() {
       120000
     );
   } catch {
+    if (isCinePulseConfigured()) {
+      const cp = await fetchCinePulseApi("home", { source: "movielinkbd", lang: "en" }, { timeoutMs: 12000 });
+      if (cp.ok && cp.data && (Array.isArray(cp.data.sections) || Array.isArray(cp.data.trending) || Array.isArray(cp.data.mlbdSections))) {
+        const norm = normalizeCinePulsePayload("home", cp.data);
+        const sections = (norm.mlbdSections?.length ? norm.mlbdSections : (norm.sections || [])).filter(s => Array.isArray(s?.items) && s.items.length > 0);
+        if (sections.length || norm.trending?.length) {
+          mlbdCinePulseHasContent = true;
+          return setCached("home-feed", {
+            ok: true,
+            source: "movielinkbd",
+            activeMirror: "CinePulse Gateway",
+            sections,
+            trending: norm.trending || sections.flatMap(s => s.items || []).slice(0, 28),
+            banners: norm.banners || [],
+            categories: norm.categories?.length ? norm.categories : DEFAULT_FALLBACK_CATEGORIES.map(c => ({ ...c, source: "movielinkbd" }))
+          }, 120000);
+        }
+      }
+    }
     const portalFeed = await getMlbdComHomeFeed();
     return setCached("home-feed", portalFeed, 120000);
   }
@@ -2046,6 +2228,25 @@ export async function getMlbdCatalog({ path = "/", q = "", page = 1 } = {}) {
       90000
     );
   } catch {
+    if (isCinePulseConfigured()) {
+      const cpRoute = cleanQuery ? "search" : "catalog";
+      const cpParams = cleanQuery
+        ? { q: cleanQuery, page: String(pageNum), source: "movielinkbd" }
+        : { category: basePath, page: String(pageNum), source: "movielinkbd" };
+      const cp = await fetchCinePulseApi(cpRoute, cpParams, { timeoutMs: 12000 });
+      if (cp.ok && Array.isArray(cp.data?.items) && cp.data.items.length > 0) {
+        mlbdCinePulseHasContent = true;
+        const norm = normalizeCinePulsePayload(cpRoute, cp.data);
+        return setCached(cacheKey, {
+          ...norm,
+          ok: true,
+          source: "movielinkbd",
+          activeMirror: "CinePulse Gateway",
+          path: basePath,
+          page: pageNum
+        }, 90000);
+      }
+    }
     const portalCat = await getMlbdComCatalog({ path: basePath, q: cleanQuery, page: pageNum });
     return setCached(cacheKey, portalCat, 90000);
   }
@@ -2183,7 +2384,12 @@ async function resolveMlbdTitleViaMovieBox(rawPath, hintTitle = "", extraQuery =
 
   let targetSubjectId = "";
   let targetDetailPath = "";
-  const targetYear = String(regItem?.year || String(hintTitle || "").match(/\((19\d\d|20\d\d)\)/)?.[1] || "");
+  const targetYear = String(
+    regItem?.year ||
+    String(hintTitle || "").match(/\((19\d\d|20\d\d)\)/)?.[1] ||
+    cleanPath.match(/-(19\d\d|20\d\d)(?:$|[-/\b])/)?.[1] ||
+    ""
+  );
 
   if (regItem?.mbSubjectId) {
     targetSubjectId = regItem.mbSubjectId;
@@ -2206,10 +2412,14 @@ async function resolveMlbdTitleViaMovieBox(rawPath, hintTitle = "", extraQuery =
       }
     }
     const candidates = [...candidateMap.values()];
-    const wantSeries = regItem?.isSeries ?? /^\/(?:mlbd\/)?(?:series|drama|anime)\//i.test(cleanPath);
+    const wantSeries = Boolean(
+      regItem?.isSeries ||
+      /^\/(?:mlbd\/)?(?:series|drama|anime)\//i.test(cleanPath) ||
+      /\b(?:S\d{1,2}|Season\s*\d+|Ep(?:isode)?s?\s*\d+)\b/i.test(rawSeed)
+    );
     const scored = candidates
       .map(c => {
-        const bestSim = Math.max(...queriesToTry.map(qv => titleSimilarityScore(qv, c?.title || "", { queryYear: targetYear, candidateYear: c?.year || "" })));
+        const bestSim = Math.max(...queriesToTry.map(qv => titleSimilarityScore(qv, c?.title || "", { queryYear: targetYear, candidateYear: c?.year || "", isSeries: wantSeries })));
         const sameFmt = Boolean(c?.isSeries) === Boolean(wantSeries);
         const typeBonus = sameFmt ? 0.12 : -0.10;
         const yrBonus = targetYear && String(c?.year || "") === targetYear ? 0.16 : 0;
@@ -2254,6 +2464,26 @@ export async function getMlbdDetails(rawPath, hintTitle = "", extraOpts = {}) {
   try {
     page = await mlbdFetchPage(cleanPath, { ttlMs: 120000 });
   } catch {
+    const regItemPre = mlbdItemRegistry.get(String(rawPath || "").trim()) || mlbdItemRegistry.get(cleanPath);
+    if (isCinePulseConfigured()) {
+      const cp = await fetchCinePulseApi("details", {
+        path: cleanPath,
+        title: String(hintTitle || regItemPre?.title || ""),
+        source: "movielinkbd"
+      }, { timeoutMs: 12000 });
+      const cpRawDetail = cp.data?.detail || (cp.data?.title ? cp.data : null);
+      if (cp.ok && cpRawDetail) {
+        const cpDetail = normalizeCinePulseDetail(cpRawDetail, cleanPath);
+        if (cpDetail && cpDetail.hasResource) {
+          mlbdCinePulseHasContent = true;
+          cpDetail.mlbdOriginalPath = rawPath;
+          cpDetail.source = "movielinkbd-cinepulse";
+          if (!cpDetail.poster && regItemPre?.poster) cpDetail.poster = regItemPre.poster;
+          return setCached(cacheKey, { ok: true, source: "movielinkbd", detail: cpDetail }, 120000);
+        }
+      }
+    }
+
     const { params, regItem, searchName } = await resolveMlbdTitleViaMovieBox(
       rawPath,
       hintTitle,
@@ -2268,21 +2498,42 @@ export async function getMlbdDetails(rawPath, hintTitle = "", extraOpts = {}) {
       .replace(/\b\w/g, m => m.toUpperCase());
     const displayTitle = dedupeRepeatedTitleYear(regItem?.title || String(hintTitle || "").trim() || searchName || fallbackSlugTitle || "Title Details");
     const yearMatch = displayTitle.match(/\((19\d\d|20\d\d)\)/)?.[1] || cleanPath.match(/-(19\d\d|20\d\d)(?:$|[-/\b])/)?.[1] || regItem?.year || "";
+    const parsedEpRange = parseEpisodeRangeFromTitle(displayTitle);
+    const isSeries = Boolean(
+      regItem?.isSeries ||
+      /^\/(?:mlbd\/)?(?:series|drama|anime)\//i.test(cleanPath) ||
+      parsedEpRange ||
+      /\b(?:S\d{1,2}|Season\s*\d+|Ep(?:isode)?s?\s*\d+)\b/i.test(displayTitle)
+    );
 
     if (params) {
       const mbDetails = await handleMovieBoxRoute("details", params).catch(() => null);
       const bridgeVariants = splitSearchTitleVariants(displayTitle);
       const bridgeSim = mbDetails?.detail
         ? Math.max(
-            titleSimilarityScore(searchName, mbDetails.detail.title || "", { queryYear: yearMatch, candidateYear: mbDetails.detail.year || "" }),
-            ...bridgeVariants.map(v => titleSimilarityScore(v, mbDetails.detail.title || "", { queryYear: yearMatch, candidateYear: mbDetails.detail.year || "" }))
+            titleSimilarityScore(searchName, mbDetails.detail.title || "", { queryYear: yearMatch, candidateYear: mbDetails.detail.year || "", isSeries }),
+            ...bridgeVariants.map(v => titleSimilarityScore(v, mbDetails.detail.title || "", { queryYear: yearMatch, candidateYear: mbDetails.detail.year || "", isSeries }))
           )
         : 0;
       if (mbDetails?.detail && bridgeSim >= 0.72 && !isMusicOrClipSubject(mbDetails.detail)) {
+        let startEpisodeIndex = 0;
+        const mbEps = Array.isArray(mbDetails.detail.episodes) ? mbDetails.detail.episodes : [];
+        if (parsedEpRange?.season && mbEps.length) {
+          const exactIdx = mbEps.findIndex(
+            ep => Number(ep.seasonNumber ?? ep.se ?? 0) === parsedEpRange.season &&
+                  Number(ep.episodeNumber ?? ep.ep ?? 0) === (parsedEpRange.startEp || 1)
+          );
+          const seasonFirstIdx = mbEps.findIndex(
+            ep => Number(ep.seasonNumber ?? ep.se ?? 0) === parsedEpRange.season
+          );
+          if (exactIdx >= 0) startEpisodeIndex = exactIdx;
+          else if (seasonFirstIdx >= 0) startEpisodeIndex = seasonFirstIdx;
+        }
         const detail = {
           ...mbDetails.detail,
           mlbdOriginalPath: rawPath,
           poster: mbDetails.detail.poster || regItem?.poster || "",
+          startEpisodeIndex,
           source: "movielinkbd-bridge"
         };
         return setCached(cacheKey, { ok: true, source: "movielinkbd", detail }, 120000);
@@ -2292,13 +2543,6 @@ export async function getMlbdDetails(rawPath, hintTitle = "", extraOpts = {}) {
     // Build accurate metadata detail for this exact MLBD title (never return an unrelated mock item or wrong-movie bridge)
     const lookupTerms = splitSearchTitleVariants(searchName || displayTitle);
     const meta = await lookupExternalTitleMetadata(lookupTerms[0] || cleanMlbdSearchTitle(displayTitle), yearMatch);
-    const parsedEpRange = parseEpisodeRangeFromTitle(displayTitle);
-    const isSeries = Boolean(
-      regItem?.isSeries ||
-      /^\/(?:mlbd\/)?(?:series|drama|anime)\//i.test(cleanPath) ||
-      parsedEpRange ||
-      /\b(?:S\d{1,2}|Season\s*\d+|Ep(?:isode)?s?\s*\d+)\b/i.test(displayTitle)
-    );
     const poster = regItem?.poster || meta.poster || "";
     const isUpcoming = isUpcomingUnreleased({
       title: displayTitle,
@@ -2565,9 +2809,29 @@ export async function getMlbdStream({ path = "", se = 0, ep = 1, title = "", dub
     episodes[Math.max(0, Math.min(episodes.length - 1, Number(detail.startEpisodeIndex) || 0))] ||
     episodes[0];
 
-  const sources = Array.isArray(chosen?.sources) ? chosen.sources : [];
-  const subtitles = Array.isArray(chosen?.subtitles) ? chosen.subtitles : [];
-  const audioTracks = Array.isArray(chosen?.audioTracks) ? chosen.audioTracks : [];
+  let sources = Array.isArray(chosen?.sources) ? chosen.sources : [];
+  let subtitles = Array.isArray(chosen?.subtitles) ? chosen.subtitles : [];
+  let audioTracks = Array.isArray(chosen?.audioTracks) ? chosen.audioTracks : [];
+
+  if ((detail?.source === "movielinkbd-cinepulse" || !sources.length) && isCinePulseConfigured()) {
+    const cp = await fetchCinePulseApi("stream", {
+      path: normalizeUpstreamPath(detail?.path || path),
+      subjectId: String(detail?.subjectId || ""),
+      se: String(targetSe),
+      ep: String(targetEp),
+      title: String(title || detail?.title || ""),
+      source: detail?.source === "movielinkbd-cinepulse" ? "movielinkbd" : "all"
+    }, { timeoutMs: 14000 });
+    if (cp.ok && cp.data) {
+      const norm = normalizeCinePulsePayload("stream", cp.data);
+      const cpSources = Array.isArray(norm?.sources) ? norm.sources : [];
+      if (cpSources.length) {
+        sources = cpSources;
+        subtitles = Array.isArray(norm?.subtitles) && norm.subtitles.length ? norm.subtitles : subtitles;
+        audioTracks = Array.isArray(norm?.audioTracks) && norm.audioTracks.length ? norm.audioTracks : audioTracks;
+      }
+    }
+  }
 
   return {
     ok: true,
@@ -2589,7 +2853,7 @@ export async function getMlbdStream({ path = "", se = 0, ep = 1, title = "", dub
       ? ""
       : detail?.isUpcoming
         ? `Upcoming release (${detail.year || "2026"}) — Official details & trailer available; full stream opens after release.`
-        : "No direct video stream available on this mirror right now."
+        : "Direct video stream is unavailable on this server right now — watch the official trailer or tap Retry Stream."
   };
 }
 
