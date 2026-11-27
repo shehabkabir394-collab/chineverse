@@ -2155,3 +2155,62 @@ body.cv-modal-open {
   border-color: rgba(254, 202, 202, 0.65);
   color: #ffffff;
 }
+
+/* =========================================================
+   CROSS-DEVICE 60FPS SCROLL & PAINT PERFORMANCE
+   ========================================================= */
+#movieApiSections > .cv-section:nth-of-type(n+4) {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 340px;
+}
+
+.cv-poster-grid > .cv-card:nth-child(n+13) {
+  content-visibility: auto;
+  contain-intrinsic-size: 160px 260px;
+}
+
+.cv-card,
+.cv-match-card,
+.cv-cat-card {
+  contain: layout style paint;
+}
+
+.cv-card-thumb img {
+  content-visibility: auto;
+}
+
+@media (max-width: 900px), (pointer: coarse) {
+  .cv-topbar,
+  .cv-watch-topbar,
+  .cv-more-dropdown,
+  .cv-details-backdrop,
+  .cv-bottom-bar,
+  .cv-me-panel {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+  .cv-topbar,
+  .cv-watch-topbar {
+    background: rgba(6, 9, 20, 0.96) !important;
+  }
+  .cv-card-thumb,
+  .cv-cat-card,
+  .cv-platform-logo,
+  .cv-match-btn {
+    transition: none !important;
+  }
+  .cv-card:hover .cv-card-thumb,
+  .cv-cat-card:hover,
+  .cv-platform-logo:hover {
+    transform: none !important;
+  }
+  .cv-spotlight {
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45) !important;
+  }
+}
+
+@media (hover: none) {
+  .cv-card:hover .cv-card-thumb {
+    transform: none !important;
+  }
+}

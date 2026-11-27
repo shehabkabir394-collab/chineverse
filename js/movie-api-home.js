@@ -15,10 +15,11 @@
     return /^(?:https?:\/\/|\/\/)/i.test(String(u || "")) ? String(u) : "";
   };
   const safeImg = u => (/^(?:https?:\/\/|\/\/|\/api\/)/i.test(String(u || "")) ? String(u) : "");
-  const posterImgAttrs = (poster, rawPoster, alt, eager = false) => {
+  const posterImgAttrs = (poster, rawPoster, alt, eager = false, highPriority = false) => {
     const fbAttr = rawPoster && rawPoster !== poster ? ` data-fallback-src="${esc(rawPoster)}"` : "";
     const loadAttr = eager ? `loading="eager"` : `loading="lazy"`;
-    return `${loadAttr} decoding="async" referrerpolicy="no-referrer" src="${esc(poster)}"${fbAttr} alt="${esc(alt)}" data-poster-img="1"`;
+    const prioAttr = highPriority ? ` fetchpriority="high"` : "";
+    return `${loadAttr}${prioAttr} decoding="async" referrerpolicy="no-referrer" src="${esc(poster)}"${fbAttr} alt="${esc(alt)}" data-poster-img="1"`;
   };
   const isNigerian = (item, sectionTitle = "") => {
     const sec = String(sectionTitle || "").trim();
@@ -67,6 +68,8 @@
 
   const WATCHLIST_KEY = "cv_watchlist_v1";
   const SPORTS_REMINDER_KEY = "cv_sports_reminders_v1";
+  const HOME_CACHE_KEY = "cv_home_cache_v2";
+  const HOME_CACHE_TTL_MS = 20 * 60 * 1000;
 
   const EXPLORE_CATEGORIES = [
     { icon: "🇧🇩", title: "Bangla", href: "catalog.html?category=%2Flanguage%2Fbangla" },
@@ -180,6 +183,7 @@
   let resumeSpotlightFn = null;
   let detailsModalSeq = 0;
   let isHomeView = true;
+  let deferredShelfRaf = 0;
 
   function showToast(msg) {
     document.querySelector(".cv-toast")?.remove();
@@ -681,7 +685,7 @@
     }
   }
 
-  function cardMarkup(item, eager = false) {
+  function cardMarkup(item, eager = false, highPriority = false) {
     const title = String(item.title || "Untitled").trim();
     const poster = safeImg(posterOf(item));
     const rawPoster = rawPosterOf(item);
@@ -694,7 +698,7 @@
       <a class="cv-card" href="${esc(href)}">
         <div class="cv-card-thumb">
           ${poster
-            ? `<img ${posterImgAttrs(poster, rawPoster, title, eager)}><div class="cv-card-fallback" hidden>${esc(title)}</div>`
+            ? `<img ${posterImgAttrs(poster, rawPoster, title, eager, highPriority)}><div class="cv-card-fallback" hidden>${esc(title)}</div>`
             : `<div class="cv-card-fallback">${esc(title)}</div>`}
           <div class="cv-card-hover-play" aria-hidden="true">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
@@ -772,7 +776,7 @@
       const rawImg = rawPosterOf(item);
       heroEl.innerHTML = `
         <div class="cv-spotlight-stage">
-          ${img ? `<img class="cv-spotlight-bg" decoding="async" referrerpolicy="no-referrer" src="${esc(img)}"${rawImg && rawImg !== img ? ` data-fallback-src="${esc(rawImg)}"` : ""} alt="${esc(title)}" data-poster-img="1">` : ""}
+          ${img ? `<img class="cv-spotlight-bg" fetchpriority="high" decoding="async" referrerpolicy="no-referrer" src="${esc(img)}"${rawImg && rawImg !== img ? ` data-fallback-src="${esc(rawImg)}"` : ""} alt="${esc(title)}" data-poster-img="1">` : ""}
           <div class="cv-spotlight-scrim" aria-hidden="true"></div>
 
           <div class="cv-spotlight-top">
@@ -927,17 +931,27 @@
     renderPlatforms();
     renderLiveSportsSection();
 
-    const bannersRaw = [...(homeData.banners || []), ...(homeData.trending || [])];
-    const bannerUniq = dedupeList(bannersRaw).filter(item => safeImg(posterOf(item)) && item.hasResource !== false).slice(0, 7);
+    const bannersRaw = [
+      ...(Array.isArray(homeData.recentlyUploaded) ? homeData.recentlyUploaded : []),
+      ...(homeData.curated?.recentlyAdded || []),
+      ...(homeData.banners || []),
+      ...(homeData.trending || [])
+    ];
+    const bannerUniq = sortNewestFirst(
+      dedupeList(bannersRaw).filter(item => safeImg(posterOf(item)) && item.hasResource !== false && !isUpcomingUnreleased(item))
+    ).slice(0, 7);
     renderSpotlight(bannerUniq);
 
     const curated = homeData.curated || {};
     const sectionsPool = (Array.isArray(homeData.sections) ? homeData.sections : []).flatMap(s => s.items || []);
     const allPool = dedupeList([
+      ...(Array.isArray(homeData.recentlyUploaded) ? homeData.recentlyUploaded : []),
+      ...(curated.recentlyAdded || []),
+      ...(curated.latestMovies || []),
+      ...(curated.recentlyUpdated || []),
       ...(curated.trending || []),
       ...(homeData.trending || []),
       ...(curated.hindiMovies || []),
-      ...(curated.latestMovies || []),
       ...(curated.kDramas || []),
       ...(curated.southIndian || []),
       ...(curated.hollywood || []),
@@ -958,7 +972,7 @@
     const hasLang = (x, re) => re.test([x.language, x.audioLanguage, x.country, x.title, x.genre].filter(Boolean).join(" "));
 
     const curatedPoolsForCat = {
-      "/new": [...(curated.recentlyAdded || []), ...(curated.trending || [])],
+      "/new": [...(homeData.recentlyUploaded || []), ...(curated.recentlyAdded || []), ...(curated.trending || [])],
       "/type/movies": curated.latestMovies || [],
       "/type/series": curated.recentlyUpdated || [],
       "/language/hindi": [...(curated.hindiMovies || []), ...(curated.hindiSeries || [])],
@@ -971,16 +985,29 @@
       "/genre/thriller": matchAny(x => /thriller|horror|mystery|crime/i.test(`${x.genre || ""}`))
     };
 
-    const isPlayableCard = x => Boolean(x && (x.source !== "movielinkbd" || x.mbSubjectId));
+    const isPlayableCard = x => Boolean(x && x.hasResource !== false);
     const prioritizePostered = list => {
       const arr = Array.isArray(list) ? list : [];
       const postered = arr.filter(x => safeImg(posterOf(x)));
       const pool = postered.length >= 6 ? postered : arr;
-      return [...pool].sort((a, b) => {
+      return sortNewestFirst(pool).sort((a, b) => {
         const score = x => (safeImg(posterOf(x)) ? 4 : 0) + (isPlayableCard(x) ? 2 : 0);
-        return score(b) - score(a);
+        const diff = score(b) - score(a);
+        if (diff !== 0) return diff;
+        return releaseTime(b) - releaseTime(a);
       });
     };
+
+    const mlbdFreshSec = mlbdSections.find(sec => /latest\s*release|new|\b\/new\b/i.test(`${sec?.title || ""} ${sec?.categoryPath || ""}`));
+    const recentlyUploadedItems = prioritizePostered(
+      dedupeList([
+        ...(Array.isArray(homeData.recentlyUploaded) ? homeData.recentlyUploaded : []),
+        ...(mlbdFreshSec?.items || []),
+        ...(curated.recentlyAdded || []),
+        ...(curated.latestMovies || []),
+        ...(curated.recentlyUpdated || [])
+      ]).filter(x => !isUpcomingUnreleased(x))
+    );
 
     const mlbdSectionShelves = mlbdSections
       .filter(sec => !isNigerian(null, sec?.title))
@@ -1013,23 +1040,38 @@
     ]));
 
     const orderedShelves = [
+      ...(recentlyUploadedItems.length
+        ? [{
+            title: "🆕 Recently Uploaded",
+            items: recentlyUploadedItems,
+            moreHref: "catalog.html?category=%2Fnew"
+          }]
+        : []),
+      {
+        title: "🎬 Latest Movies",
+        items: prioritizePostered(dedupeList([...(curated.latestMovies || []), ...matchAny(x => x.type === "movie" || x.isMovie)])),
+        moreHref: "catalog.html?category=%2Ftype%2Fmovies"
+      },
+      {
+        title: "🔄 Latest Web Series & Dramas",
+        items: prioritizePostered(dedupeList([...(curated.recentlyUpdated || []), ...matchAny(x => x.isSeries || x.type === "series")])),
+        moreHref: "catalog.html?category=%2Frecently-updated"
+      },
       {
         title: "🔥 Trending in India & Bangladesh",
         items: indiaBdItems,
         moreHref: "catalog.html?category=%2FsouthIndian"
       },
       {
+        title: "🟢 Latest & Bangla",
+        items: prioritizePostered(sortNewestFirst(dedupeList([...mlbdItems, ...(curated.bengali || [])]))),
+        moreHref: "catalog.html?category=%2Flanguage%2Fbangla"
+      },
+      {
         title: "🔥 Trending Now",
         items: sortNewestFirst(dedupeList(curated.trending?.length ? curated.trending : homeData.trending)),
         moreHref: "catalog.html?category=%2Fmostwatch%2F7d"
       },
-      ...(mlbdItems.length || (curated.bengali || []).length
-        ? [{
-            title: "🟢 Latest & Bangla",
-            items: prioritizePostered(sortNewestFirst(dedupeList([...mlbdItems, ...(curated.bengali || [])]))),
-            moreHref: "catalog.html?category=%2Flanguage%2Fbangla"
-          }]
-        : []),
       {
         title: "🏆 Top 10 This Week",
         top10: true,
@@ -1040,11 +1082,6 @@
         title: "🇮🇳 Hindi Dubbed Movies",
         items: sortNewestFirst(dedupeList([...(curated.hindiMovies || []), ...matchAny(x => (x._hindiCatalog || hasLang(x, /hindi/i)) && !x.isSeries)])),
         moreHref: "catalog.html?category=%2Flanguage%2Fhindi-dubbed"
-      },
-      {
-        title: "🎬 Latest Movies",
-        items: sortNewestFirst(dedupeList([...(curated.latestMovies || []), ...matchAny(x => x.type === "movie" || x.isMovie)])),
-        moreHref: "catalog.html?category=%2Ftype%2Fmovies"
       },
       {
         title: "📺 Hindi Dubbed Web Series",
@@ -1083,16 +1120,6 @@
         moreHref: "catalog.html?category=%2Flanguage%2Fbengali"
       },
       {
-        title: "🆕 Recently Added",
-        items: sortNewestFirst(dedupeList(curated.recentlyAdded?.length ? curated.recentlyAdded : allPool)),
-        moreHref: "catalog.html?category=%2Fnew"
-      },
-      {
-        title: "🔄 Recently Updated",
-        items: sortNewestFirst(dedupeList([...(curated.recentlyUpdated || []), ...matchAny(x => x.isSeries || x.type === "series")])),
-        moreHref: "catalog.html?category=%2Frecently-updated"
-      },
-      {
         title: "⭐ IMDb Top Rated",
         items: dedupeList(
           curated.imdbTopRated?.length
@@ -1101,7 +1128,7 @@
         ),
         moreHref: "catalog.html?category=%2Ftop-rated"
       }
-    ];
+    ].filter(s => Array.isArray(s.items) && s.items.length > 0);
 
     const normShelfTitle = t => String(t || "").replace(/[^\p{L}\p{N}\s]+/gu, " ").replace(/\s+/g, " ").trim().toLowerCase();
     const usedShelfTitles = new Set();
@@ -1146,38 +1173,56 @@
       moreHref: ""
     };
 
-    const allShelves = [...orderedShelves, ...extraLiveSections, upcomingShelf];
+    const allShelves = [...orderedShelves, ...extraLiveSections, upcomingShelf].filter(s => s.items.length > 0);
 
-    const html = allShelves
-      .filter(s => s.items.length > 0)
-      .map((s, shelfIdx) => {
-        const visible = s.items.slice(0, s.top10 ? 10 : 36);
-        const rowClass = s.top10 ? "cv-shelf-row cv-shelf-top10" : "cv-shelf-row";
-        const eagerShelf = shelfIdx < 4;
-        const cardsHtml = s.top10
-          ? visible.map((item, idx) => cardTop10Markup(item, idx + 1)).join("")
-          : s.isUpcomingShelf
-            ? visible.map(upcomingPosterCardMarkup).join("")
-            : visible.map(item => cardMarkup(item, eagerShelf)).join("");
+    const buildShelfHtml = (s, shelfIdx) => {
+      const visible = s.items.slice(0, s.top10 ? 10 : 24);
+      const rowClass = s.top10 ? "cv-shelf-row cv-shelf-top10" : "cv-shelf-row";
+      const cardsHtml = s.top10
+        ? visible.map((item, idx) => cardTop10Markup(item, idx + 1)).join("")
+        : s.isUpcomingShelf
+          ? visible.map(upcomingPosterCardMarkup).join("")
+          : visible.map((item, cardIdx) => cardMarkup(item, shelfIdx < 2 && cardIdx < 6, shelfIdx === 0 && cardIdx < 4)).join("");
 
-        return `
-          <section class="cv-section${s.isUpcomingShelf ? " cv-section-upcoming" : ""}"${s.isUpcomingShelf ? ' data-section="upcoming"' : ""}>
-            <div class="cv-section-header">
-              <div class="cv-section-title-group">
-                <h2 class="cv-section-title">${esc(s.title)}</h2>
-              </div>
-              ${s.moreHref ? `<a class="cv-more-link" href="${esc(s.moreHref)}">View All ›</a>` : `<span class="cv-section-sub">Coming Soon · Opens After Release</span>`}
+      return `
+        <section class="cv-section${s.isUpcomingShelf ? " cv-section-upcoming" : ""}"${s.isUpcomingShelf ? ' data-section="upcoming"' : ""}>
+          <div class="cv-section-header">
+            <div class="cv-section-title-group">
+              <h2 class="cv-section-title">${esc(s.title)}</h2>
             </div>
-            <div class="${rowClass}">
-              ${cardsHtml}
-            </div>
-          </section>
-        `;
-      })
-      .join("");
+            ${s.moreHref ? `<a class="cv-more-link" href="${esc(s.moreHref)}">View All ›</a>` : `<span class="cv-section-sub">Coming Soon · Opens After Release</span>`}
+          </div>
+          <div class="${rowClass}">
+            ${cardsHtml}
+          </div>
+        </section>
+      `;
+    };
 
-    sectionsRoot.innerHTML = html || `<div class="cv-status-banner">No titles available right now.</div>`;
+    if (deferredShelfRaf) {
+      cancelAnimationFrame(deferredShelfRaf);
+      deferredShelfRaf = 0;
+    }
+
+    if (!allShelves.length) {
+      sectionsRoot.innerHTML = `<div class="cv-status-banner">No titles available right now.</div>`;
+      statusEl.hidden = true;
+      return;
+    }
+
+    const firstBatch = allShelves.slice(0, 4);
+    const restBatch = allShelves.slice(4);
+    sectionsRoot.innerHTML = firstBatch.map((s, idx) => buildShelfHtml(s, idx)).join("");
     statusEl.hidden = true;
+
+    if (restBatch.length) {
+      deferredShelfRaf = requestAnimationFrame(() => {
+        deferredShelfRaf = 0;
+        if (!isHomeView) return;
+        const extraHtml = restBatch.map((s, idx) => buildShelfHtml(s, idx + 4)).join("");
+        sectionsRoot.insertAdjacentHTML("beforeend", extraHtml);
+      });
+    }
   }
 
   async function renderFilteredTab(tabKey, label, appendPage = 1, existingItems = []) {
@@ -1331,10 +1376,62 @@
     } catch {}
   }
 
+  function readCachedHomeSnapshot() {
+    try {
+      const raw = localStorage.getItem(HOME_CACHE_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (!parsed || !parsed.data || !parsed.savedAt) return null;
+      if (Date.now() - Number(parsed.savedAt) > HOME_CACHE_TTL_MS) return null;
+      return parsed.data;
+    } catch {
+      return null;
+    }
+  }
+
+  function writeCachedHomeSnapshot(payload) {
+    if (!payload || payload.ok !== true) return;
+    try {
+      const trimList = (arr, n = 18) => (Array.isArray(arr) ? arr.slice(0, n) : []);
+      const slimCurated = {};
+      if (payload.curated && typeof payload.curated === "object") {
+        for (const k of Object.keys(payload.curated)) {
+          if (Array.isArray(payload.curated[k])) slimCurated[k] = trimList(payload.curated[k], 16);
+        }
+      }
+      const snapshot = {
+        ok: true,
+        banners: trimList(payload.banners, 8),
+        recentlyUploaded: trimList(payload.recentlyUploaded, 20),
+        trending: trimList(payload.trending, 18),
+        mlbdBangla: trimList(payload.mlbdBangla, 16),
+        mlbdTrending: trimList(payload.mlbdTrending, 16),
+        mlbdSections: trimList(payload.mlbdSections, 6).map(s => ({ ...s, items: trimList(s?.items, 16) })),
+        sections: trimList(payload.sections, 8).map(s => ({ ...s, items: trimList(s?.items, 16) })),
+        curated: slimCurated,
+        upcoming: trimList(payload.upcoming, 12),
+        categories: Array.isArray(payload.categories) ? payload.categories.slice(0, 60) : []
+      };
+      localStorage.setItem(HOME_CACHE_KEY, JSON.stringify({ savedAt: Date.now(), data: snapshot }));
+    } catch {}
+  }
+
   async function init() {
     renderCategories();
-    statusEl.hidden = false;
-    statusEl.textContent = "Loading featured movies and dramas…";
+    const cachedHome = readCachedHomeSnapshot();
+    let renderedFromCache = false;
+    if (cachedHome) {
+      homeData = cachedHome;
+      if (Array.isArray(cachedHome.categories) && cachedHome.categories.length) {
+        renderMoreCategories(cachedHome.categories);
+      }
+      renderHomeView();
+      renderedFromCache = true;
+    } else {
+      statusEl.hidden = false;
+      statusEl.textContent = "Loading featured movies and dramas…";
+    }
+
     loadSportsPreview();
     loadAllCategories();
     try {
@@ -1342,12 +1439,17 @@
       const d = await r.json();
       if (!r.ok || d.ok !== true) throw new Error(d.error || "API unavailable");
       homeData = d;
+      writeCachedHomeSnapshot(d);
       if (Array.isArray(d.categories) && d.categories.length) {
         renderMoreCategories(d.categories);
       }
-      renderHomeView();
+      if (isHomeView && (!renderedFromCache || window.scrollY < 180)) {
+        renderHomeView();
+      }
     } catch (err) {
-      statusEl.textContent = "Could not load catalog: " + (err?.message || "Network error");
+      if (!renderedFromCache) {
+        statusEl.textContent = "Could not load catalog: " + (err?.message || "Network error");
+      }
     }
   }
 

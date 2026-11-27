@@ -422,15 +422,6 @@
     apiSearchQuery=norm(q);
     if(!all.length)status.textContent="No matching movies or dramas found.";
    }else{
-    status.textContent="Loading Movie API catalog…";
-    const [{res:response,data:payload},cats]=await Promise.all([
-     fetchJsonSafe("/api/movie-api/home",{headers:{Accept:"application/json"},cache:"default"}),
-     catsPromise
-    ]);
-    if(!response.ok||payload.ok!==true)throw new Error(payload.error||"Movie API unavailable");
-    data=payload;
-    if(cats.length)data.categories=cats;
-    else if(Array.isArray(payload.categories)&&payload.categories.length)allApiCategories=payload.categories;
     const customPaths={
      "cv:movie":"/type/movies",
      "cv:anime":"/anime",
@@ -441,22 +432,50 @@
      "cv:bollywood":"/bollywood",
      "cv:hollywood":"/language/english"
     };
-    const category=(data.categories||[]).find(x=>[x.path,x.slug,x.label,x.name,x.title].some(v=>norm(v)===norm(selected)));
-    const apiPath=customPaths[selected]||text(category?.path)||(selected.startsWith("/")?selected:(!selected?"/all":""));
-    if(apiPath&&(apiPath!=="/"||selected==="/")){
-     status.textContent="Loading "+(stripCatBrand(category?.label||customLabels[selected]||"All Content")||"All Content")+" · Page "+page+"…";
-     const {res:cr,data:pagePayload}=await fetchJsonSafe("/api/movie-api/catalog?category="+encodeURIComponent(apiPath)+"&page="+Math.max(1,Math.min(100,page)),{headers:{Accept:"application/json"},cache:"default"});
+    const directApiPath=customPaths[selected]||(selected.startsWith("/")?selected:"");
+    if(directApiPath){
+     status.textContent="Loading "+(stripCatBrand(customLabels[selected]||selected)||"Catalog")+" · Page "+page+"…";
+     const [{res:cr,data:pagePayload},cats]=await Promise.all([
+      fetchJsonSafe("/api/movie-api/catalog?category="+encodeURIComponent(directApiPath)+"&page="+Math.max(1,Math.min(100,page)),{headers:{Accept:"application/json"},cache:"default"}),
+      catsPromise
+     ]);
      if(!cr.ok||pagePayload.ok!==true)throw new Error(pagePayload.error||"Movie Catalog API unavailable");
+     data={categories:cats};
      const unique=new Map();
      (Array.isArray(pagePayload.items)?pagePayload.items:[]).forEach(item=>{
       const key=pathOf(item)||norm(item.title);
       if(key&&!unique.has(key))unique.set(key,{...item,_sections:[],_sources:["catalog"]});
      });
-     all=[...unique.values()].filter(item=>!isNigerian(item)).map(item=>apiPath==="/language/hindi-dubbed"?({...item,_hindiCatalog:true}):item);
+     all=[...unique.values()].filter(item=>!isNigerian(item)).map(item=>directApiPath==="/language/hindi-dubbed"?({...item,_hindiCatalog:true}):item);
      apiCatalogMode=true;
      apiMeta=pagePayload;
     }else{
-     all=flatten(data);
+     status.textContent="Loading Movie API catalog…";
+     const [{res:response,data:payload},cats]=await Promise.all([
+      fetchJsonSafe("/api/movie-api/home",{headers:{Accept:"application/json"},cache:"default"}),
+      catsPromise
+     ]);
+     if(!response.ok||payload.ok!==true)throw new Error(payload.error||"Movie API unavailable");
+     data=payload;
+     if(cats.length)data.categories=cats;
+     else if(Array.isArray(payload.categories)&&payload.categories.length)allApiCategories=payload.categories;
+     const category=(data.categories||[]).find(x=>[x.path,x.slug,x.label,x.name,x.title].some(v=>norm(v)===norm(selected)));
+     const apiPath=text(category?.path)||(!selected?"/all":"");
+     if(apiPath&&(apiPath!=="/"||selected==="/")){
+      status.textContent="Loading "+(stripCatBrand(category?.label||customLabels[selected]||"All Content")||"All Content")+" · Page "+page+"…";
+      const {res:cr,data:pagePayload}=await fetchJsonSafe("/api/movie-api/catalog?category="+encodeURIComponent(apiPath)+"&page="+Math.max(1,Math.min(100,page)),{headers:{Accept:"application/json"},cache:"default"});
+      if(!cr.ok||pagePayload.ok!==true)throw new Error(pagePayload.error||"Movie Catalog API unavailable");
+      const unique=new Map();
+      (Array.isArray(pagePayload.items)?pagePayload.items:[]).forEach(item=>{
+       const key=pathOf(item)||norm(item.title);
+       if(key&&!unique.has(key))unique.set(key,{...item,_sections:[],_sources:["catalog"]});
+      });
+      all=[...unique.values()].filter(item=>!isNigerian(item)).map(item=>apiPath==="/language/hindi-dubbed"?({...item,_hindiCatalog:true}):item);
+      apiCatalogMode=true;
+      apiMeta=pagePayload;
+     }else{
+      all=flatten(data);
+     }
     }
    }
    renderNav();

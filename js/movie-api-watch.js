@@ -1347,7 +1347,7 @@
           : 0);
       selectedSeasonNum = Number(episodes[initialEpIdx]?.seasonNumber ?? episodes[initialEpIdx]?.se ?? seasonKeys[0] ?? 0) || 0;
 
-      const isSeries = seasonKeys.some(k => k > 0) || episodes.length > 1;
+      const isSeries = Boolean(d.isSeries && !d.isMovie) || seasonKeys.some(k => k > 0) || episodes.length > 1;
       const seasonsLabel = isSeries ? `${seasonKeys.filter(k => k > 0).length || 1} season${seasonKeys.length > 1 ? "s" : ""}` : "Feature Film";
       const metaItems = [
         isWatchUpcoming(d) ? `<span style="color:#00c882;font-weight:700">Upcoming</span>` : "",
@@ -1368,13 +1368,20 @@
               <option value="${esc(path)}">${esc(d.language || "Original Audio")}</option>
             </select>`;
 
+      const seenSeasonLabels = new Set();
+      const dedupedSeasons = (Array.isArray(d.relatedSeasons) ? d.relatedSeasons : []).filter(rs => {
+        if (!rs?.path || rs.path === path) return false;
+        const lblKey = String(rs.title || rs.language || "Edition").trim().toLowerCase().replace(/\s+/g, " ");
+        if (!lblKey || seenSeasonLabels.has(lblKey)) return false;
+        seenSeasonLabels.add(lblKey);
+        return true;
+      });
       const relatedSeasonsHtml =
-        Array.isArray(d.relatedSeasons) && d.relatedSeasons.length > 0
+        dedupedSeasons.length > 0
           ? `<div class="cv-related-seasons" style="margin-top:14px;padding-top:12px;border-top:1px solid rgba(255,255,255,.08)">
               <div style="font-size:12px;font-weight:700;color:#cbd5e1;margin-bottom:8px">Seasons &amp; Editions</div>
               <div style="display:flex;flex-wrap:wrap;gap:6px">
-                ${d.relatedSeasons
-                  .filter(rs => rs?.path && rs.path !== path)
+                ${dedupedSeasons
                   .slice(0, 10)
                   .map(rs => `<a class="cv-util-pill" style="padding:5px 10px;font-size:12px" href="watch.html?path=${encodeURIComponent(rs.path)}&title=${encodeURIComponent(rs.title || "")}">${esc(rs.title || rs.language || "Edition")}</a>`)
                   .join("")}

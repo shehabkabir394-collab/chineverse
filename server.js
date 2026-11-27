@@ -2,6 +2,8 @@ import express from "express";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
+import { gzip } from "node:zlib";
 import {
   MOVIEBOX_PLAYER_REFERER,
   MOVIEBOX_REFERER,
@@ -49,6 +51,7 @@ const __dirname = path.dirname(__filename);
 loadDotEnvIfPresent(path.join(__dirname, ".env"));
 
 const app = express();
+const gzipAsync = promisify(gzip);
 const RAW_PORT = process.env.PORT;
 const IS_PORT_NUMBER = !RAW_PORT || /^\d+$/.test(String(RAW_PORT).trim());
 const PORT = IS_PORT_NUMBER ? Number(RAW_PORT || 3000) : String(RAW_PORT).trim();
@@ -61,6 +64,36 @@ function recordStreamEvent(evt) {
 }
 
 app.set("trust proxy", true);
+
+// Fast gzip compression for API JSON & text assets (>= 1 KB)
+app.use((req, res, next) => {
+  const acceptEnc = String(req.headers["accept-encoding"] || "");
+  if (!/\bgzip\b/i.test(acceptEnc) || req.path.includes("-stream") || req.path.includes("cinepulse-media")) {
+    return next();
+  }
+  const origJson = res.json.bind(res);
+  res.json = data => {
+    const body = JSON.stringify(data);
+    if (body.length < 1024 || res.headersSent) {
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      return res.send(body);
+    }
+    gzipAsync(Buffer.from(body, "utf8"), { level: 4 })
+      .then(gz => {
+        if (res.headersSent) return;
+        res.setHeader("Content-Type", "application/json; charset=utf-8");
+        res.setHeader("Content-Encoding", "gzip");
+        res.setHeader("Vary", "Accept-Encoding");
+        res.setHeader("Content-Length", String(gz.length));
+        res.end(gz);
+      })
+      .catch(() => {
+        if (!res.headersSent) origJson(data);
+      });
+    return res;
+  };
+  next();
+});
 
 function getBaseUrl(req) {
   const proto = req.get("x-forwarded-proto") || req.protocol || "http";
@@ -1160,7 +1193,7 @@ app.get("/api/details", async (req, res) => {
     const data = await getMlbdDetails(pathParam, String(req.query.title || ""), {
       dubLock: req.query.dubLock === "1"
     });
-    res.setHeader("Cache-Control", "public, max-age=120");
+    res.setHeader("Cache-Control", data?.detail?.hasResource ? "public, max-age=120" : "no-store");
     return res.json(data);
   } catch (err) {
     return res.status(503).json({ ok: false, error: err?.message || "Title details unavailable" });
@@ -1321,7 +1354,7 @@ app.all("/api/movie-api/*", async (req, res) => {
       const payload = await getMlbdDetails(reqPath, String(query.get("title") || ""), {
         dubLock: query.get("dubLock") === "1"
       });
-      res.setHeader("Cache-Control", "public, max-age=120");
+      res.setHeader("Cache-Control", payload?.detail?.hasResource ? "public, max-age=120" : "no-store");
       return res.status(200).json(payload);
     }
 
@@ -1348,98 +1381,17 @@ app.all("/api/movie-api/*", async (req, res) => {
     }
 
     if (legacy === "home") {
-      const hasCardPoster = x => Boolean(x?.poster || x?.previewImage);
-
-      const [mbRes, mlbdRes, mlbdBanglaRes] = await Promise.allSettled([
-        handleMovieBoxRoute("home", query),
-        getMlbdHomeFeed(),
-        getMlbdCatalog({ path: "/language/bangla", page: 1 })
-      ]);
-      const mlbdDirectOk = isMlbdDirectPlaybackAvailable();
-      const isDirectlyStreamable = x => Boolean(x && x.hasResource !== false && (mlbdDirectOk || x.source !== "movielinkbd" || x.mbSubjectId));
-      const hasPlayableStream = x => Boolean(x && x.hasResource !== false);
-      const rankHomeItems = list =>
-        [...(Array.isArray(list) ? list : [])].sort((a, b) => {
-          const score = x => (isDirectlyStreamable(x) ? 4 : 0) + (hasCardPoster(x) ? 2 : 0);
-          return score(b) - score(a);
-        });
-
-      const payload = mbRes.status === "fulfilled"
-        ? mbRes.value
-        : { ok: true, sections: [], trending: [], banners: [], categories: [], curated: {} };
-      if (mlbdRes.status === "fulfilled" && mlbdRes.value?.ok) {
-        const mlbd = mlbdRes.value;
-        const cleanMlbdSecs = (mlbd.sections || [])
-          .filter(s => !isNigerianContent(null, s?.title))
-          .map(s => {
-            const validItems = (s.items || []).filter(x => !isNigerianContent(x, s?.title) && hasPlayableStream(x));
-            const postered = validItems.filter(hasCardPoster);
-            const curatedItems = postered.length >= 4 ? rankHomeItems(postered) : rankHomeItems(validItems);
-            return { ...s, items: curatedItems };
-          })
-          .filter(s => s.items.length > 0);
-        payload.mlbdSections = cleanMlbdSecs;
-        payload.mlbdTrending = rankHomeItems((mlbd.trending || []).filter(x => !isNigerianContent(x) && hasPlayableStream(x)));
-        payload.mlbdCategories = mlbd.categories || [];
-        const existingCats = new Set((payload.categories || []).map(c => c?.path));
-        payload.categories = [
-          ...(payload.categories || []),
-          ...(mlbd.categories || []).filter(c => c?.path && !existingCats.has(c.path))
-        ];
-        const mbBanners = (payload.banners || []).filter(x => !isNigerianContent(x) && x?.hasResource !== false);
-        const mlbdBanners = (mlbd.banners || []).filter(x => !isNigerianContent(x) && hasPlayableStream(x) && hasCardPoster(x));
-        const playableMlbdBanners = mlbdBanners.filter(b => Boolean(b?.mbSubjectId));
-        const seenBannerKeys = new Set();
-        payload.banners = [...mbBanners, ...playableMlbdBanners, ...mlbdBanners]
-          .filter(b => {
-            const k = String(b?.mbSubjectId || b?.subjectId || b?.path || b?.title || "").toLowerCase();
-            if (!k || seenBannerKeys.has(k)) return false;
-            seenBannerKeys.add(k);
-            return true;
-          })
-          .slice(0, 10);
-        payload.sections = [
-          ...(payload.sections || []).filter(s => !isNigerianContent(null, s?.title)),
-          ...cleanMlbdSecs
-        ];
-        payload.activeMlbdMirror = mlbd.activeMirror;
+      const homeOut = await getMergedHomePayloadCached(query);
+      const acceptEnc = String(req.headers["accept-encoding"] || "");
+      res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=120");
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      if (/\bgzip\b/i.test(acceptEnc) && homeOut.gzipBuf) {
+        res.setHeader("Content-Encoding", "gzip");
+        res.setHeader("Vary", "Accept-Encoding");
+        res.setHeader("Content-Length", String(homeOut.gzipBuf.length));
+        return res.status(200).end(homeOut.gzipBuf);
       }
-      if (mlbdBanglaRes.status === "fulfilled" && Array.isArray(mlbdBanglaRes.value?.items)) {
-        payload.mlbdBangla = rankHomeItems(
-          mlbdBanglaRes.value.items.filter(x => !isNigerianContent(x) && hasPlayableStream(x))
-        );
-      }
-      if (Array.isArray(payload.trending)) {
-        payload.trending = payload.trending.filter(x => !isNigerianContent(x) && !isMusicOrClipSubject(x));
-      }
-      if (payload.curated) {
-        if (Array.isArray(payload.curated.trending)) {
-          payload.curated.trending = payload.curated.trending.filter(x => !isNigerianContent(x) && !isMusicOrClipSubject(x));
-        }
-        if (Array.isArray(payload.curated.bengali)) {
-          payload.curated.bengali = payload.curated.bengali.filter(x => !isNigerianContent(x) && !isMusicOrClipSubject(x));
-        }
-        const existingIb = Array.isArray(payload.curated.indiaBangladeshTrending) ? payload.curated.indiaBangladeshTrending : [];
-        const banglaPool = Array.isArray(payload.mlbdBangla) ? payload.mlbdBangla : [];
-        const playablePosteredBangla = banglaPool.filter(x => isDirectlyStreamable(x) && hasCardPoster(x));
-        const posteredBangla = banglaPool.filter(hasCardPoster);
-        const seen = new Set();
-        const prioritized = [
-          ...playablePosteredBangla.slice(0, 8),
-          ...existingIb.filter(x => hasCardPoster(x) && !isMusicOrClipSubject(x)),
-          ...posteredBangla.slice(0, 10),
-          ...existingIb.filter(x => !isMusicOrClipSubject(x))
-        ];
-        payload.curated.indiaBangladeshTrending = prioritized.filter(x => {
-          if (!x || isNigerianContent(x) || isMusicOrClipSubject(x)) return false;
-          const k = x.path || x.subjectId || x.title;
-          if (!k || seen.has(k)) return false;
-          seen.add(k);
-          return true;
-        });
-      }
-      res.setHeader("Cache-Control", "public, max-age=60");
-      return res.status(200).json(payload);
+      return res.status(200).send(homeOut.jsonStr);
     }
 
     if (legacy === "categories") {
@@ -1721,14 +1673,289 @@ app.all("/api/movie-api/*", async (req, res) => {
   }
 });
 
+// Fast SWR cache for merged /api/movie-api/home payload + pre-gzipped buffer
+const HOME_FRESH_MS = 60 * 1000;
+const HOME_STALE_MS = 5 * 60 * 1000;
+let mergedHomeCache = null;
+let mergedHomeInFlight = null;
+
+function parseHomeRecencyMs(item) {
+  if (!item || typeof item !== "object") return 0;
+  const nowLimit = Date.now() + 36 * 3600 * 1000;
+  let best = 0;
+  for (const raw of [item.uploadedAtMs, item.uploadTimestamp, item.uploadTime, item.updatedAt, item.createdAt]) {
+    if (!raw) continue;
+    let ms = 0;
+    if (typeof raw === "number") {
+      ms = raw < 1e12 ? raw * 1000 : raw;
+    } else {
+      const s = String(raw).trim();
+      const lower = s.toLowerCase();
+      if (/^\d{9,16}$/.test(s)) {
+        const n = Number(s);
+        ms = n < 1e12 ? n * 1000 : n;
+      } else if (/\b(?:just now|now|today)\b/.test(lower)) {
+        ms = Date.now();
+      } else if (/\byesterday\b/.test(lower)) {
+        ms = Date.now() - 86400 * 1000;
+      } else {
+        const ago = /(\d+)\s*(sec(?:ond)?s?|min(?:ute)?s?|hrs?|hours?|days?|weeks?|months?|years?)\s*ago/i.exec(lower);
+        if (ago) {
+          const n = Number(ago[1]) || 1;
+          const u = ago[2].toLowerCase();
+          const mult = u.startsWith("sec") ? 1000 : u.startsWith("min") ? 60000 : u.startsWith("h") ? 3600000 : u.startsWith("d") ? 86400000 : u.startsWith("w") ? 604800000 : u.startsWith("mo") ? 2592000000 : 31536000000;
+          ms = Math.max(1, Date.now() - n * mult);
+        } else {
+          const parsed = Date.parse(s);
+          if (Number.isFinite(parsed) && parsed > 0) ms = parsed;
+        }
+      }
+    }
+    if (ms > 0 && ms <= nowLimit) best = Math.max(best, ms);
+  }
+  const rel = item.releaseDate || item.appointmentDate || (item.year && /^\d{4}$/.test(String(item.year)) ? `${item.year}-01-01` : "");
+  const relMs = rel ? Date.parse(String(rel)) : 0;
+  if (best > 0 && relMs > nowLimit) return best;
+  return Math.max(best, Number.isFinite(relMs) && relMs <= nowLimit ? relMs : 0);
+}
+
+function compactHomeCard(item) {
+  if (!item || typeof item !== "object") return item;
+  const out = {
+    id: item.id,
+    subjectId: item.subjectId,
+    path: item.path,
+    detailPath: item.detailPath,
+    title: item.title,
+    searchTitle: item.searchTitle,
+    poster: item.poster || item.previewImage || "",
+    rawPoster: item.rawPoster || "",
+    quality: item.quality,
+    language: item.language,
+    country: item.country,
+    genre: item.genre,
+    type: item.type,
+    typeBadge: item.typeBadge,
+    isSeries: item.isSeries,
+    isMovie: item.isMovie,
+    isAnime: item.isAnime,
+    isUpcoming: item.isUpcoming,
+    year: item.year,
+    rating: item.rating,
+    releaseDate: item.releaseDate,
+    uploadTime: item.uploadTime,
+    uploadedAtMs: item.uploadedAtMs,
+    duration: item.duration,
+    hasResource: item.hasResource,
+    source: item.source,
+    mbSubjectId: item.mbSubjectId,
+    mbDetailPath: item.mbDetailPath,
+    _hindiCatalog: item._hindiCatalog
+  };
+  for (const k of Object.keys(out)) {
+    if (out[k] === undefined || out[k] === "") delete out[k];
+  }
+  if (item.hasResource === false) out.hasResource = false;
+  return out;
+}
+
+async function buildMergedHomePayload(query = new URLSearchParams()) {
+  const hasCardPoster = x => Boolean(x?.poster || x?.previewImage);
+  const [mbRes, mlbdRes, mlbdBanglaRes] = await Promise.allSettled([
+    handleMovieBoxRoute("home", query),
+    getMlbdHomeFeed(),
+    getMlbdCatalog({ path: "/language/bangla", page: 1 })
+  ]);
+  const mlbdDirectOk = isMlbdDirectPlaybackAvailable();
+  const isDirectlyStreamable = x => Boolean(x && x.hasResource !== false && (mlbdDirectOk || x.source !== "movielinkbd" || x.mbSubjectId));
+  const hasPlayableStream = x => Boolean(x && x.hasResource !== false);
+  const rankHomeItems = list =>
+    [...(Array.isArray(list) ? list : [])].sort((a, b) => {
+      const score = x => (isDirectlyStreamable(x) ? 4 : 0) + (hasCardPoster(x) ? 2 : 0);
+      const diff = score(b) - score(a);
+      if (diff !== 0) return diff;
+      return parseHomeRecencyMs(b) - parseHomeRecencyMs(a);
+    });
+
+  const rawMb = mbRes.status === "fulfilled"
+    ? mbRes.value
+    : { ok: true, sections: [], trending: [], banners: [], categories: [], curated: {} };
+  const payload = {
+    ok: true,
+    categories: rawMb.categories || [],
+    banners: [],
+    trending: [],
+    upcoming: Array.isArray(rawMb.upcoming) ? rawMb.upcoming.slice(0, 24).map(compactHomeCard) : [],
+    sections: [],
+    curated: rawMb.curated ? { ...rawMb.curated } : {},
+    mlbdSections: [],
+    mlbdTrending: [],
+    mlbdCategories: [],
+    mlbdBangla: [],
+    recentlyUploaded: []
+  };
+
+  let mlbdFreshNewItems = [];
+  if (mlbdRes.status === "fulfilled" && mlbdRes.value?.ok) {
+    const mlbd = mlbdRes.value;
+    const cleanMlbdSecs = (mlbd.sections || [])
+      .filter(s => !isNigerianContent(null, s?.title))
+      .map(s => {
+        const validItems = (s.items || []).filter(x => !isNigerianContent(x, s?.title) && hasPlayableStream(x));
+        const postered = validItems.filter(hasCardPoster);
+        const curatedItems = (postered.length >= 4 ? rankHomeItems(postered) : rankHomeItems(validItems)).slice(0, 28).map(compactHomeCard);
+        return { ...s, items: curatedItems };
+      })
+      .filter(s => s.items.length > 0);
+
+    const newSec = cleanMlbdSecs.find(s => /latest\s*release|new|\b\/new\b/i.test(`${s.title || ""} ${s.categoryPath || ""}`));
+    mlbdFreshNewItems = newSec ? newSec.items : (cleanMlbdSecs[0]?.items || []);
+    payload.mlbdSections = cleanMlbdSecs;
+    payload.mlbdTrending = rankHomeItems((mlbd.trending || []).filter(x => !isNigerianContent(x) && hasPlayableStream(x))).slice(0, 28).map(compactHomeCard);
+    payload.mlbdCategories = mlbd.categories || [];
+    const existingCats = new Set((payload.categories || []).map(c => c?.path));
+    payload.categories = [
+      ...(payload.categories || []),
+      ...(mlbd.categories || []).filter(c => c?.path && !existingCats.has(c.path))
+    ];
+    payload.activeMlbdMirror = mlbd.activeMirror;
+  }
+
+  if (mlbdBanglaRes.status === "fulfilled" && Array.isArray(mlbdBanglaRes.value?.items)) {
+    payload.mlbdBangla = rankHomeItems(
+      mlbdBanglaRes.value.items.filter(x => !isNigerianContent(x) && hasPlayableStream(x))
+    ).slice(0, 28).map(compactHomeCard);
+  }
+
+  const mbSections = (rawMb.sections || [])
+    .filter(s => !isNigerianContent(null, s?.title))
+    .map(s => ({
+      ...s,
+      items: (s.items || []).filter(x => !isNigerianContent(x, s?.title)).slice(0, 28).map(compactHomeCard)
+    }))
+    .filter(s => s.items.length > 0);
+  payload.sections = mbSections;
+
+  if (Array.isArray(rawMb.trending)) {
+    payload.trending = rawMb.trending.filter(x => !isNigerianContent(x) && !isMusicOrClipSubject(x)).slice(0, 30).map(compactHomeCard);
+  }
+
+  if (payload.curated) {
+    for (const key of Object.keys(payload.curated)) {
+      const arr = payload.curated[key];
+      if (!Array.isArray(arr)) continue;
+      payload.curated[key] = arr
+        .filter(x => !isNigerianContent(x) && !isMusicOrClipSubject(x))
+        .slice(0, 30)
+        .map(compactHomeCard);
+    }
+    const existingIb = Array.isArray(payload.curated.indiaBangladeshTrending) ? payload.curated.indiaBangladeshTrending : [];
+    const banglaPool = Array.isArray(payload.mlbdBangla) ? payload.mlbdBangla : [];
+    const playablePosteredBangla = banglaPool.filter(x => isDirectlyStreamable(x) && hasCardPoster(x));
+    const posteredBangla = banglaPool.filter(hasCardPoster);
+    const seen = new Set();
+    const prioritized = [
+      ...playablePosteredBangla.slice(0, 8),
+      ...existingIb.filter(x => hasCardPoster(x) && !isMusicOrClipSubject(x)),
+      ...posteredBangla.slice(0, 10),
+      ...existingIb.filter(x => !isMusicOrClipSubject(x))
+    ];
+    payload.curated.indiaBangladeshTrending = prioritized.filter(x => {
+      if (!x || isNigerianContent(x) || isMusicOrClipSubject(x)) return false;
+      const k = x.path || x.subjectId || x.title;
+      if (!k || seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    }).slice(0, 28);
+  }
+
+  // Build unified Recently Uploaded pool (newest movies & dramas at the very top & front)
+  const recentPoolRaw = [
+    ...mlbdFreshNewItems,
+    ...(payload.curated?.recentlyAdded || []),
+    ...(payload.curated?.latestMovies || []),
+    ...(payload.curated?.recentlyUpdated || []),
+    ...(payload.mlbdTrending || []).slice(0, 12)
+  ];
+  const recentSeen = new Set();
+  payload.recentlyUploaded = recentPoolRaw
+    .filter(x => x && !isNigerianContent(x) && !isMusicOrClipSubject(x) && hasPlayableStream(x) && hasCardPoster(x))
+    .filter(x => {
+      const k = String(x.path || x.subjectId || x.title || "").toLowerCase();
+      if (!k || recentSeen.has(k)) return false;
+      recentSeen.add(k);
+      return true;
+    })
+    .sort((a, b) => parseHomeRecencyMs(b) - parseHomeRecencyMs(a))
+    .slice(0, 30)
+    .map(compactHomeCard);
+
+  // Prioritize freshest recent uploads right at the front of Spotlight Banners
+  const mbBanners = (rawMb.banners || []).filter(x => !isNigerianContent(x) && x?.hasResource !== false).map(compactHomeCard);
+  const mlbdBanners = (mlbdRes.status === "fulfilled" && Array.isArray(mlbdRes.value?.banners) ? mlbdRes.value.banners : [])
+    .filter(x => !isNigerianContent(x) && hasPlayableStream(x) && hasCardPoster(x))
+    .map(compactHomeCard);
+  const seenBannerKeys = new Set();
+  payload.banners = [...payload.recentlyUploaded.slice(0, 8), ...mbBanners, ...mlbdBanners]
+    .filter(b => {
+      const k = String(b?.mbSubjectId || b?.subjectId || b?.path || b?.title || "").toLowerCase();
+      if (!k || seenBannerKeys.has(k)) return false;
+      seenBannerKeys.add(k);
+      return true;
+    })
+    .sort((a, b) => parseHomeRecencyMs(b) - parseHomeRecencyMs(a))
+    .slice(0, 10);
+
+  const jsonStr = JSON.stringify(payload);
+  const gzipBuf = await gzipAsync(Buffer.from(jsonStr, "utf8"), { level: 4 }).catch(() => null);
+  return { payload, jsonStr, gzipBuf, builtAt: Date.now() };
+}
+
+async function getMergedHomePayloadCached(query = new URLSearchParams()) {
+  const qs = query.toString();
+  if (qs) {
+    return await buildMergedHomePayload(query);
+  }
+  const now = Date.now();
+  if (mergedHomeCache && now - mergedHomeCache.builtAt < HOME_FRESH_MS) {
+    return mergedHomeCache;
+  }
+  if (mergedHomeCache && now - mergedHomeCache.builtAt < HOME_STALE_MS) {
+    if (!mergedHomeInFlight) {
+      mergedHomeInFlight = buildMergedHomePayload(new URLSearchParams())
+        .then(res => {
+          mergedHomeCache = res;
+          return res;
+        })
+        .catch(() => mergedHomeCache)
+        .finally(() => {
+          mergedHomeInFlight = null;
+        });
+    }
+    return mergedHomeCache;
+  }
+  if (!mergedHomeInFlight) {
+    mergedHomeInFlight = buildMergedHomePayload(new URLSearchParams())
+      .then(res => {
+        mergedHomeCache = res;
+        return res;
+      })
+      .finally(() => {
+        mergedHomeInFlight = null;
+      });
+  }
+  return await mergedHomeInFlight;
+}
+
 // Serve static HTML/CSS/JS/assets from repository root
 app.use(
   express.static(__dirname, {
     extensions: ["html"],
     setHeaders: (res, filePath) => {
-      if (/\.(?:html|js|css)$/i.test(filePath)) {
-        res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
-        res.setHeader("Pragma", "no-cache");
+      if (/\.html$/i.test(filePath)) {
+        res.setHeader("Cache-Control", "no-cache, must-revalidate");
+      } else if (/\.(?:js|css)$/i.test(filePath)) {
+        res.setHeader("Cache-Control", "public, max-age=60, must-revalidate");
       }
     }
   })
@@ -1741,11 +1968,20 @@ const configureServer = srv => {
   return srv;
 };
 
+const warmStartupCaches = () => {
+  setTimeout(() => {
+    getMergedHomePayloadCached().catch(() => {});
+    getMlbdCategories().catch(() => {});
+    handleMovieBoxRoute("sports", new URLSearchParams()).catch(() => {});
+  }, 350);
+};
+
 if (IS_PORT_NUMBER) {
   configureServer(
     app.listen(PORT, HOST, () => {
       console.log(`MovieStream BD server listening on http://${HOST}:${PORT}`);
       console.log("Primary upstream: MovieBox Direct API (https://h5-api.aoneroom.com)");
+      warmStartupCaches();
     })
   );
 } else {
@@ -1753,6 +1989,7 @@ if (IS_PORT_NUMBER) {
     app.listen(PORT, () => {
       console.log(`MovieStream BD server listening on socket/pipe ${PORT}`);
       console.log("Primary upstream: MovieBox Direct API (https://h5-api.aoneroom.com)");
+      warmStartupCaches();
     })
   );
 }
