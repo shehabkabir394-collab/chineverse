@@ -110,6 +110,7 @@ const DEFAULT_FALLBACK_CATEGORIES = [
 ];
 
 const mlbdCache = new Map();
+const mlbdStaleCache = new Map();
 const mlbdInFlight = new Map();
 const mlbdItemRegistry = new Map();
 const posterRegistry = new Map();
@@ -118,53 +119,14 @@ const mlbdArchiveByPath = new Map();
 const mlbdArchiveByNormTitle = new Map();
 let mlbdArchiveRecords = [];
 let mlbdArchiveLoaded = false;
-let activeResolvedOrigin = "https://xuysbd.movielinkbd.de";
+let mlbdArchiveLoadPromise = null;
+let activeResolvedOrigin = "https://5njsa5.movielinkbd.de";
 let mirrorsBlockedUntil = 0;
 let mlbdDirectMirrorsBlocked = false;
 let mlbdCinePulseHasContent = false;
 
 export function isMlbdDirectPlaybackAvailable() {
   return Boolean(!mlbdDirectMirrorsBlocked || mlbdCinePulseHasContent);
-}
-
-export function getMlbdRelayConfig() {
-  const rawUrl = String(process.env.MLBD_RELAY_URL || "").trim();
-  if (!rawUrl) return null;
-  try {
-    const parsed = new URL(rawUrl);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
-    return {
-      url: parsed.href.replace(/\/+$/, ""),
-      secret: String(process.env.MLBD_RELAY_SECRET || "").trim()
-    };
-  } catch {
-    return null;
-  }
-}
-
-export async function fetchViaMlbdRelay(targetUrl, { method = "GET", headers = {}, timeoutMs = 15000, signal = null } = {}) {
-  const relay = getMlbdRelayConfig();
-  if (!relay) return null;
-  const endpoint = new URL(relay.url);
-  endpoint.searchParams.set("url", targetUrl);
-  const fwdHeaders = new Headers();
-  for (const [k, v] of Object.entries(headers || {})) {
-    const low = k.toLowerCase();
-    if (low === "referer") fwdHeaders.set("x-mlbd-referer", String(v));
-    else if (low === "range" || low === "accept" || low === "accept-language" || low === "if-range") {
-      fwdHeaders.set(k, String(v));
-    }
-  }
-  if (relay.secret) fwdHeaders.set("x-mlbd-relay-secret", relay.secret);
-  const reqSignal = signal
-    ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)])
-    : AbortSignal.timeout(timeoutMs);
-  return await fetch(endpoint.toString(), {
-    method,
-    headers: fwdHeaders,
-    redirect: "follow",
-    signal: reqSignal
-  });
 }
 
 function normalizePosterKey(title = "") {
@@ -275,6 +237,13 @@ function normalizeArchiveItem(rec) {
   const isHindiDubbed = Boolean(rec.isHindiDubbed) || /hindi|dual/i.test(`${lang} ${rawTitle}`);
   const searchTitle = cleanMlbdSearchTitle(rawTitle);
   const cats = Array.isArray(rec.categories) ? [...new Set(rec.categories.map(c => String(c || "").toLowerCase().replace(/\/+$/, "") || "/"))] : ["/"];
+  const rawUploadLabel = String(rec.uploadTime || rec.timeAgo || "").trim();
+  const isBareOldYearLabel = /^(?:19\d\d|20\d\d)$/.test(rawUploadLabel);
+  const isOldRelativeLabel = /\b(?:years?|months?)\s+ago\b/i.test(rawUploadLabel);
+  let effectiveUploadedAtMs = Number(rec.uploadedAtMs) || 0;
+  if (isBareOldYearLabel || isOldRelativeLabel) {
+    effectiveUploadedAtMs = 0;
+  }
 
   return {
     id: String(rec.id || normPath.split("/").pop() || normPath),
@@ -298,8 +267,9 @@ function normalizeArchiveItem(rec) {
     rating: String(rec.rating || ""),
     viewsText: String(rec.viewsText || rec.views || ""),
     views: Number(rec.viewsNum) || parseViewsCount(rec.viewsText || rec.views || ""),
-    uploadTime: String(rec.uploadTime || rec.timeAgo || ""),
-    uploadedAtMs: Number(rec.uploadedAtMs) || 0,
+    uploadTime: rawUploadLabel,
+    uploadedAtMs: effectiveUploadedAtMs,
+    fromArchive: true,
     hypeScore: Number(rec.hypeScore) || 0,
     isPinned: Boolean(rec.isPinned),
     isAdult: Boolean(rec.isAdult) || /\b(?:18\+|adult|erotic|vivamax|midnight)\b/i.test(`${rawTitle} ${typeBadgeRaw} ${cats.join(" ")}`),
@@ -311,31 +281,62 @@ function normalizeArchiveItem(rec) {
   };
 }
 
+function populateArchiveFromRawJson(raw) {
+  const parsed = JSON.parse(raw);
+  const list = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.records) ? parsed.records : []);
+  for (const rec of list) {
+    const item = normalizeArchiveItem(rec);
+    if (!item || isNigerianContent(item)) continue;
+    mlbdArchiveByPath.set(item.path, item);
+    const normKey = normalizePosterKey(item.searchTitle || item.title);
+    if (normKey && (!mlbdArchiveByNormTitle.has(normKey) || (!mlbdArchiveByNormTitle.get(normKey).poster && item.poster))) {
+      mlbdArchiveByNormTitle.set(normKey, item);
+    }
+    registerMlbdItem(item);
+  }
+  mlbdArchiveRecords = [...mlbdArchiveByPath.values()];
+}
+
 function loadMlbdArchiveFromDisk() {
   if (mlbdArchiveLoaded) return;
-  mlbdArchiveLoaded = true;
   try {
     const fs = typeof process !== "undefined" ? process.getBuiltinModule?.("fs") : null;
     if (!fs) return;
+    mlbdArchiveLoaded = true;
     const archiveUrl = new URL("./data/mlbd-archive.json", import.meta.url);
     if (!fs.existsSync(archiveUrl)) return;
     const raw = fs.readFileSync(archiveUrl, "utf8");
-    const parsed = JSON.parse(raw);
-    const list = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.records) ? parsed.records : []);
-    for (const rec of list) {
-      const item = normalizeArchiveItem(rec);
-      if (!item || isNigerianContent(item)) continue;
-      mlbdArchiveByPath.set(item.path, item);
-      const normKey = normalizePosterKey(item.searchTitle || item.title);
-      if (normKey && (!mlbdArchiveByNormTitle.has(normKey) || (!mlbdArchiveByNormTitle.get(normKey).poster && item.poster))) {
-        mlbdArchiveByNormTitle.set(normKey, item);
-      }
-      registerMlbdItem(item);
-    }
-    mlbdArchiveRecords = [...mlbdArchiveByPath.values()];
+    populateArchiveFromRawJson(raw);
   } catch (err) {
     console.warn("[MovieStreamBD archive load]", err?.message || err);
   }
+}
+
+async function ensureMlbdArchiveLoaded() {
+  if (mlbdArchiveLoaded && mlbdArchiveRecords.length > 0) return;
+  loadMlbdArchiveFromDisk();
+  if (mlbdArchiveLoaded) return;
+  if (mlbdArchiveLoadPromise) return await mlbdArchiveLoadPromise;
+  mlbdArchiveLoadPromise = (async () => {
+    try {
+      if (typeof process === "undefined" || !process.versions?.node) {
+        mlbdArchiveLoaded = true;
+        return;
+      }
+      const fs = await import("node:fs");
+      const archiveUrl = new URL("./data/mlbd-archive.json", import.meta.url);
+      if (fs.existsSync(archiveUrl)) {
+        const raw = await fs.promises.readFile(archiveUrl, "utf8");
+        populateArchiveFromRawJson(raw);
+      }
+      mlbdArchiveLoaded = true;
+    } catch (err) {
+      console.warn("[MovieStreamBD async archive load]", err?.message || err);
+    }
+  })().finally(() => {
+    mlbdArchiveLoadPromise = null;
+  });
+  return await mlbdArchiveLoadPromise;
 }
 
 function upsertMlbdArchiveItems(items = [], categoryPath = "/") {
@@ -345,8 +346,10 @@ function upsertMlbdArchiveItems(items = [], categoryPath = "/") {
   for (const raw of Array.isArray(items) ? items : []) {
     const item = normalizeArchiveItem(raw);
     if (!item || isNigerianContent(item)) continue;
+    item.fromArchive = Boolean(raw?.fromArchive);
     const existing = mlbdArchiveByPath.get(item.path);
     if (existing) {
+      if (!item.fromArchive) existing.fromArchive = false;
       if (cat && !existing.categories.includes(cat)) existing.categories.push(cat);
       if (!existing.poster && item.poster) {
         existing.poster = item.poster;
@@ -486,13 +489,46 @@ function getCached(key) {
   return entry.val;
 }
 
+function getStaleCached(key, maxStaleMs = 15 * 60 * 1000) {
+  const entry = mlbdStaleCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.savedAt > maxStaleMs) {
+    mlbdStaleCache.delete(key);
+    return null;
+  }
+  return entry.val;
+}
+
+function deleteStaleCached(key) {
+  mlbdCache.delete(key);
+  mlbdStaleCache.delete(key);
+}
+
 function setCached(key, val, ttlMs = 90000) {
-  mlbdCache.set(key, { val, exp: Date.now() + ttlMs });
+  const now = Date.now();
+  mlbdCache.set(key, { val, exp: now + ttlMs });
+  mlbdStaleCache.set(key, { val, savedAt: now });
   if (mlbdCache.size > 400) {
     const oldest = mlbdCache.keys().next().value;
     if (oldest) mlbdCache.delete(oldest);
   }
+  if (mlbdStaleCache.size > 400) {
+    const oldest = mlbdStaleCache.keys().next().value;
+    if (oldest) mlbdStaleCache.delete(oldest);
+  }
   return val;
+}
+
+function isAuthOrForbiddenError(err) {
+  const st = Number(err?.status || 0);
+  return st === 401 || st === 403 || Boolean(err?.isAuthError) || Boolean(err?.isCloudflareBlock);
+}
+
+function isTemporaryOrRateLimitError(err) {
+  if (isAuthOrForbiddenError(err)) return false;
+  const st = Number(err?.status || 0);
+  if (st === 429 || st >= 500) return true;
+  return Boolean(err?.isTemporary) || /timeout|aborted|fetch failed|econnreset|enotfound|unreachable/i.test(String(err?.message || ""));
 }
 
 export function isBlockedHost(hostname) {
@@ -591,6 +627,7 @@ function parseFlexibleDateMs(raw) {
   }
   const s = String(raw).trim();
   if (!s) return 0;
+  if (/^(?:19|20)\d{2}$/.test(s)) return 0;
   if (/^\d{9,16}$/.test(s)) {
     const n = Number(s);
     return n < 1e12 ? n * 1000 : n;
@@ -733,17 +770,6 @@ async function fetchMirrorOnce(baseUrl, pathWithQuery, extraHeaders = {}, timeou
       if (!loc) return { res, text: "", finalUrl: currentUrl, finalOrigin: new URL(currentUrl).origin, cookies: allCookies.join("; ") };
       const nextUrl = new URL(loc, currentUrl);
       if (BLOCKED_TRAP_HOSTS.has(nextUrl.hostname.toLowerCase())) {
-        if (getMlbdRelayConfig()) {
-          try {
-            const relRes = await fetchViaMlbdRelay(relayCandidateUrl, { headers: baseHeaders, timeoutMs });
-            if (relRes && relRes.ok) {
-              const text = await relRes.text();
-              if (text && !/cf-mitigated|Just a moment\.\.\./i.test(text)) {
-                return { res: relRes, text, finalUrl: relayCandidateUrl, finalOrigin: new URL(relayCandidateUrl).origin, cookies: allCookies.join("; "), viaRelay: true };
-              }
-            }
-          } catch {}
-        }
         return {
           res,
           text: "",
@@ -760,18 +786,6 @@ async function fetchMirrorOnce(baseUrl, pathWithQuery, extraHeaders = {}, timeou
 
     const finalOrigin = new URL(res.url || currentUrl).origin;
     const text = await res.text();
-    const isCfBlock = res.status === 403 && (/challenge/i.test(res.headers.get("cf-mitigated") || "") || /Just a moment\.\.\./i.test(text || ""));
-    if (isCfBlock && getMlbdRelayConfig()) {
-      try {
-        const relRes = await fetchViaMlbdRelay(relayCandidateUrl, { headers: baseHeaders, timeoutMs });
-        if (relRes) {
-          const relText = await relRes.text();
-          if (relRes.ok && relText && !/cf-mitigated|Just a moment\.\.\./i.test(relText)) {
-            return { res: relRes, text: relText, finalUrl: relayCandidateUrl, finalOrigin: new URL(relayCandidateUrl).origin, cookies: allCookies.join("; "), viaRelay: true };
-          }
-        }
-      } catch {}
-    }
     return { res, text, finalUrl: res.url || currentUrl, finalOrigin, cookies: allCookies.join("; ") };
   }
   throw new Error(`Too many redirects from ${baseUrl}`);
@@ -834,7 +848,10 @@ export async function mlbdFetchPage(upstreamPath = "/", options = {}) {
   }
 
   if (!options.bypassCache && Date.now() < mirrorsBlockedUntil) {
-    throw new Error("MovieStreamBD mirrors temporarily blocked");
+    const blockedErr = new Error("MovieStreamBD mirrors blocked by Cloudflare (HTTP 403)");
+    blockedErr.status = 403;
+    blockedErr.isCloudflareBlock = true;
+    throw blockedErr;
   }
 
   if (mlbdInFlight.has(cacheKey)) {
@@ -842,10 +859,10 @@ export async function mlbdFetchPage(upstreamPath = "/", options = {}) {
   }
 
   const job = (async () => {
-    const discoveredOrigins = await discoverLiveMirrorOrigin(5000).catch(() => []);
+    const cachedOrigins = getCached("portal:mirrors") || [];
     const candidateBases = [...new Set([
-      ...discoveredOrigins,
       activeResolvedOrigin,
+      ...cachedOrigins,
       ...MLBD_MIRRORS.map(m => m.baseUrl)
     ])].filter(b => {
       try { return !BLOCKED_TRAP_HOSTS.has(new URL(b).hostname.toLowerCase()); } catch { return false; }
@@ -860,7 +877,8 @@ export async function mlbdFetchPage(upstreamPath = "/", options = {}) {
     )];
 
     let lastErr = null;
-    let portalChecked = discoveredOrigins.length > 0;
+    let portalChecked = cachedOrigins.length > 0;
+    const perMirrorTimeoutMs = options.timeoutMs || 9000;
 
     for (let i = 0; i < candidateBases.length; i++) {
       const base = candidateBases[i];
@@ -871,7 +889,7 @@ export async function mlbdFetchPage(upstreamPath = "/", options = {}) {
       if (/^https?:\/\/(?:www\.)?movielinkbd\.com$/i.test(base)) {
         if (!portalChecked) {
           portalChecked = true;
-          const discovered = await discoverLiveMirrorOrigin(options.timeoutMs || 8000);
+          const discovered = await discoverLiveMirrorOrigin(6000);
           for (const d of discovered) {
             if (!tried.has(d) && !candidateBases.includes(d)) {
               candidateBases.splice(i + 1, 0, d);
@@ -884,16 +902,23 @@ export async function mlbdFetchPage(upstreamPath = "/", options = {}) {
       for (const reqVariant of pathVariants) {
         try {
           const extra = options.headers || {};
-          const out = await fetchMirrorOnce(base, reqVariant, extra, options.timeoutMs || 14000);
+          const out = await fetchMirrorOnce(base, reqVariant, extra, perMirrorTimeoutMs);
           if (out.blockedRedirect) {
             lastErr = new Error(`Blocked redirect (${out.blockedRedirect}) from ${base}`);
             break;
           }
           const isCfChallenge =
             out.res.status === 403 &&
-            (/challenge/i.test(out.res.headers.get("cf-mitigated") || "") || /Just a moment\.\.\./i.test(out.text || ""));
-          if (isCfChallenge) {
-            lastErr = new Error(`Cloudflare challenge (403) from ${base}`);
+            (/challenge/i.test(out.res.headers.get("cf-mitigated") || "") || /Just a moment\.\.\.|Attention Required|cf-browser-verification/i.test(out.text || ""));
+          if (isCfChallenge || out.res.status === 403 || out.res.status === 401) {
+            lastErr = new Error(
+              isCfChallenge
+                ? `Cloudflare challenge (403) from ${base}`
+                : `HTTP ${out.res.status} from ${base}${reqVariant}`
+            );
+            lastErr.status = out.res.status;
+            lastErr.isCloudflareBlock = isCfChallenge;
+            lastErr.isAuthError = out.res.status === 401;
             break;
           }
           if (out.res.ok && out.text && out.text.length > 400) {
@@ -918,15 +943,20 @@ export async function mlbdFetchPage(upstreamPath = "/", options = {}) {
             };
             return setCached(cacheKey, result, ttlMs);
           }
-          lastErr = new Error(`HTTP ${out.res.status} from ${base}${reqVariant}`);
+          const httpErr = new Error(`HTTP ${out.res.status} from ${base}${reqVariant}`);
+          httpErr.status = out.res.status;
+          httpErr.isTemporary = out.res.status === 429 || out.res.status >= 500;
+          lastErr = httpErr;
+          if (out.res.status === 429 || out.res.status >= 500) break;
         } catch (err) {
+          err.isTemporary = true;
           lastErr = err;
         }
       }
 
       if (!portalChecked) {
         portalChecked = true;
-        const discovered = await discoverLiveMirrorOrigin(options.timeoutMs || 8000);
+        const discovered = await discoverLiveMirrorOrigin(6000);
         for (const d of discovered) {
           if (!tried.has(d) && !candidateBases.includes(d)) {
             candidateBases.splice(i + 1, 0, d);
@@ -934,7 +964,20 @@ export async function mlbdFetchPage(upstreamPath = "/", options = {}) {
         }
       }
     }
-    mirrorsBlockedUntil = Date.now() + 120000;
+
+    if (isAuthOrForbiddenError(lastErr)) {
+      mirrorsBlockedUntil = Date.now() + 120000;
+      mlbdDirectMirrorsBlocked = true;
+      deleteStaleCached(cacheKey);
+      throw lastErr;
+    }
+
+    if (isTemporaryOrRateLimitError(lastErr)) {
+      const stale = getStaleCached(cacheKey);
+      if (stale) return stale;
+    }
+
+    mirrorsBlockedUntil = Date.now() + 45000;
     mlbdDirectMirrorsBlocked = true;
     throw lastErr || new Error("All MovieStreamBD mirrors are currently unreachable");
   })();
@@ -967,7 +1010,7 @@ export async function getMlbdServerHealth() {
           method: "HEAD",
           headers: { "User-Agent": MOVIEBOX_UA },
           redirect: "follow",
-          signal: AbortSignal.timeout(8000)
+          signal: AbortSignal.timeout(5500)
         });
         const latencyMs = Date.now() - started;
         return {
@@ -998,9 +1041,10 @@ export async function getMlbdServerHealth() {
     })
   );
 
-  const primaryOnline =
-    checks.find(c => c.online && !/\/\/(?:www\.)?movielinkbd\.com$/i.test(c.baseUrl)) ||
-    checks.find(c => c.online);
+  const onlineMirrors = checks
+    .filter(c => c.online && !/\/\/(?:www\.)?movielinkbd\.com$/i.test(c.baseUrl))
+    .sort((a, b) => a.latencyMs - b.latencyMs);
+  const primaryOnline = onlineMirrors[0] || checks.find(c => c.online);
   if (primaryOnline?.resolvedUrl) {
     try {
       activeResolvedOrigin = new URL(primaryOnline.resolvedUrl).origin;
@@ -1019,7 +1063,6 @@ export async function getMlbdServerHealth() {
       onlineCount: checks.filter(c => c.online).length,
       totalMirrors: checks.length,
       cinepulseConfigured: isCinePulseConfigured(),
-      relayConfigured: Boolean(getMlbdRelayConfig()),
       servers: checks,
       checkedAt: new Date().toISOString()
     },
@@ -2154,14 +2197,20 @@ export function mapCategoryToMlbdComUrls(rawPath = "/") {
 
 function sortMlbdNewestFirst(items = []) {
   const arr = Array.isArray(items) ? items : [];
-  const futureCutoff = getEndOfTodayMs();
+  const futureCutoff = Date.now() + 12 * 3600 * 1000;
   return arr
     .map((item, idx) => {
       const yr = Number(extractPlausibleYear(item?.title || "", item?.year || "", item?.path || "")) || 0;
       let bestUpload = 0;
-      for (const raw of [item?.uploadedAtMs, item?.uploadTimestamp, item?.uploadTime, item?.updatedAt, item?.createdAt]) {
+      for (const raw of [item?.uploadedAtMs, item?.uploadTimestamp]) {
         const t = parseFlexibleDateMs(raw);
         if (t > 0 && t <= futureCutoff) bestUpload = Math.max(bestUpload, t);
+      }
+      if (bestUpload === 0 && !item?.fromArchive) {
+        for (const raw of [item?.uploadTime, item?.updatedAt, item?.createdAt]) {
+          const t = parseFlexibleDateMs(raw);
+          if (t > 0 && t <= futureCutoff) bestUpload = Math.max(bestUpload, t);
+        }
       }
       let bestRelease = 0;
       for (const raw of [item?.releaseDate, item?.appointmentDate, yr >= 1900 ? `${yr}-01-01` : ""]) {
@@ -2171,16 +2220,18 @@ function sortMlbdNewestFirst(items = []) {
           break;
         }
       }
-      const ts = bestUpload > 0 && bestRelease > futureCutoff
-        ? bestUpload
-        : Math.max(bestUpload, bestRelease);
-      const isFutureUnreleased = ts > futureCutoff;
-      return { item, idx, yr, ts, isFutureUnreleased };
+      const isLiveUpdate = !item?.fromArchive;
+      const ts = bestUpload > 0 ? bestUpload : bestRelease;
+      const isFutureUnreleased = bestUpload === 0 && bestRelease > futureCutoff;
+      return { item, idx, yr, bestUpload, ts, isLiveUpdate, isFutureUnreleased };
     })
     .sort((a, b) => {
       if (a.isFutureUnreleased !== b.isFutureUnreleased) return a.isFutureUnreleased ? 1 : -1;
       if (a.isFutureUnreleased && b.isFutureUnreleased) return a.ts - b.ts;
       if (b.ts !== a.ts) return b.ts - a.ts;
+      if (b.isLiveUpdate !== a.isLiveUpdate) return b.isLiveUpdate ? 1 : -1;
+      if (Boolean(b.bestUpload > 0) !== Boolean(a.bestUpload > 0)) return b.bestUpload > 0 ? 1 : -1;
+      if (b.bestUpload !== a.bestUpload) return b.bestUpload - a.bestUpload;
       if (b.yr !== a.yr) return b.yr - a.yr;
       return a.idx - b.idx;
     })
@@ -2271,6 +2322,7 @@ export function matchesMlbdCategoryItem(item, categoryPath = "/") {
 }
 
 async function getMlbdComCatalog({ path = "/", q = "", page = 1 } = {}) {
+  await ensureMlbdArchiveLoaded();
   const pageNum = Math.max(1, Number(page) || 1);
   const cleanQ = String(q || "").trim();
   const normCat = String(path || "/").toLowerCase().replace(/\/+$/, "") || "/";
@@ -2381,7 +2433,7 @@ async function getMlbdComCatalog({ path = "/", q = "", page = 1 } = {}) {
 }
 
 async function getMlbdComHomeFeed() {
-  loadMlbdArchiveFromDisk();
+  await ensureMlbdArchiveLoaded();
   const specs = [
     { id: "mlbd-latest", title: "🆕 Latest Releases", path: "/", categoryPath: "/new" },
     { id: "mlbd-movies", title: "🎬 Latest Movies", path: "/movies", categoryPath: "/type/movies" },
@@ -2517,6 +2569,7 @@ export async function getMlbdCategories() {
 }
 
 export async function getMlbdHomeFeed() {
+  await ensureMlbdArchiveLoaded();
   const cached = getCached("home-feed");
   if (cached) return cached;
 
@@ -2528,8 +2581,8 @@ export async function getMlbdHomeFeed() {
     if (sections.length <= 1) {
       const extraShelves = [
         { id: "mlbd-new", title: "🆕 NEW & POPULAR", path: "/new" },
-        { id: "mlbd-movies", title: "🎬 MOVIES", path: "/type/movies/" },
-        { id: "mlbd-series", title: "📺 SERIES & TV SHOWS", path: "/type/series/" },
+        { id: "mlbd-movies", title: "🎬 MOVIES", path: "/type/movies" },
+        { id: "mlbd-series", title: "📺 SERIES & TV SHOWS", path: "/type/series" },
         { id: "mlbd-south", title: "💫 SOUTH INDIAN", path: "/southIndian/" },
         { id: "mlbd-anime", title: "🍥 ANIME ZONE", path: "/anime/" },
         { id: "mlbd-anim", title: "🎨 ANIMATION", path: "/genre/animation/" }
@@ -2576,7 +2629,14 @@ export async function getMlbdHomeFeed() {
       },
       120000
     );
-  } catch {
+  } catch (err) {
+    if (isTemporaryOrRateLimitError(err)) {
+      const stale = getStaleCached("home-feed");
+      if (stale) return stale;
+    } else if (isAuthOrForbiddenError(err)) {
+      deleteStaleCached("home-feed");
+    }
+
     if (isCinePulseConfigured()) {
       const cp = await fetchCinePulseApi("home", { source: "movielinkbd", lang: "en" }, { timeoutMs: 12000 });
       const rawCp = cp.data?.separated && cp.data?.movielinkbd ? cp.data.movielinkbd : cp.data;
@@ -2614,6 +2674,7 @@ export async function getMlbdHomeFeed() {
 }
 
 export async function getMlbdCatalog({ path = "/", q = "", page = 1 } = {}) {
+  await ensureMlbdArchiveLoaded();
   const pageNum = Math.max(1, Math.min(400, Number(page) || 1));
   const cleanQuery = String(q || "").trim();
   const basePath = normalizeUpstreamPath(path);
@@ -2662,7 +2723,14 @@ export async function getMlbdCatalog({ path = "/", q = "", page = 1 } = {}) {
       },
       90000
     );
-  } catch {
+  } catch (err) {
+    if (isTemporaryOrRateLimitError(err)) {
+      const stale = getStaleCached(cacheKey);
+      if (stale) return stale;
+    } else if (isAuthOrForbiddenError(err)) {
+      deleteStaleCached(cacheKey);
+    }
+
     if (isCinePulseConfigured()) {
       const cpRoute = cleanQuery ? "search" : "catalog";
       const cpParams = cleanQuery
@@ -2689,6 +2757,7 @@ export async function getMlbdCatalog({ path = "/", q = "", page = 1 } = {}) {
 }
 
 export async function getMlbdSuggest(rawQuery) {
+  await ensureMlbdArchiveLoaded();
   const q = String(rawQuery || "").trim();
   if (!q) return { ok: true, query: "", items: [], suggestions: [] };
 
@@ -2973,6 +3042,7 @@ async function resolveLiveMlbdPathBySearch(hintTitle = "", cleanPath = "", yearH
 }
 
 export async function getMlbdDetails(rawPath, hintTitle = "", extraOpts = {}) {
+  await ensureMlbdArchiveLoaded();
   const cleanPath = normalizeUpstreamPath(rawPath);
   if (cleanPath === "/") {
     throw new Error("Movie or series path is required");
@@ -3427,7 +3497,7 @@ function attachFastRelatedSeasons(detailObj, rawPath = "", hintTitle = "") {
 
 export async function findExactTitleMlbdBackup(rawTitle = "", wantMovie = true) {
   try {
-    loadMlbdArchiveFromDisk();
+    await ensureMlbdArchiveLoaded();
     const cleanStrictBase = s =>
       extractBaseSeriesTitle(String(s || "").replace(/\(\s*(?:19|20)\d{2}\s*\)[\s\S]*$/, ""))
         .replace(/\b(?:HQ|Dubbed|Subbed|Dub|Sub|Uncut|Extended|Malayalam|Tamil|Telugu|Kannada|English|Korean|Japanese|Chinese|Spanish|French|Punjabi|Marathi|WebRip|BluRay|HDRip|1080p|720p|480p|CAMRip|PREHD|HDCAM|ESub|MSub|HEVC|x264|x265|IMAX|Remastered|Director'?s?\s*Cut)\b/gi, " ")

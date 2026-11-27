@@ -14,14 +14,12 @@ import {
   verifyMediaToken
 } from "./moviebox-api.js";
 import {
-  fetchViaMlbdRelay,
   findExactTitleMlbdBackup,
   getActiveMlbdReferer,
   getMlbdCatalog,
   getMlbdCategories,
   getMlbdDetails,
   getMlbdHomeFeed,
-  getMlbdRelayConfig,
   getMlbdServerHealth,
   getMlbdStream,
   getMlbdSuggest,
@@ -562,19 +560,6 @@ async function fetchUpstreamMedia(targetUrl, method, headers, clientAbortSignal,
         await upstream.body?.cancel();
       } catch {}
     }
-  } else if (upstream.status === 403 && getMlbdRelayConfig()) {
-    try {
-      await upstream.body?.cancel();
-    } catch {}
-    const relRes = await fetchViaMlbdRelay(targetUrl, {
-      method,
-      headers: Object.fromEntries(headers.entries()),
-      timeoutMs: connectTimeoutMs,
-      signal: clientAbortSignal
-    }).catch(() => null);
-    if (relRes && (relRes.ok || relRes.status === 206)) {
-      return { upstream: relRes, usedHeaders: headers };
-    }
   }
   return { upstream, usedHeaders: headers };
 }
@@ -1003,63 +988,9 @@ app.get("/api/health", (_req, res) => {
     startedAt: SERVER_STARTED_AT,
     runtimeMode: IS_PORT_NUMBER ? "port" : "cpanel-socket",
     apiKeyConfigured: isCinePulseConfigured(),
-    mlbdRelayConfigured: Boolean(getMlbdRelayConfig()),
     activeMlbdMirror: getActiveMlbdReferer(),
     checkedAt: new Date().toISOString()
   });
-});
-
-app.all("/api/mlbd-relay", async (req, res) => {
-  if (req.method !== "GET" && req.method !== "HEAD") {
-    return res.status(405).set("Allow", "GET, HEAD").json({ ok: false, error: "Method not allowed" });
-  }
-  const relaySecret = String(process.env.MLBD_RELAY_SECRET || "").trim();
-  if (relaySecret && req.get("x-mlbd-relay-secret") !== relaySecret) {
-    return res.status(403).json({ ok: false, error: "Forbidden" });
-  }
-  const targetUrl = validateExternalHttpUrl(String(req.query.url || "").trim());
-  if (!targetUrl) {
-    return res.status(400).json({ ok: false, error: "Invalid target URL" });
-  }
-  const parsed = new URL(targetUrl);
-  const hostOk = /(?:^|\.)movielinkbd\.(?:de|at|com)$/i.test(parsed.hostname);
-  const mediaOk = /\.(?:m3u8|mp4|vtt|srt|ts|aac|m4s|jpg|jpeg|png|webp)(?:$|[?#])|\/(?:hls|vseg|vsub|s)\//i.test(parsed.pathname);
-  if (!hostOk && !mediaOk) {
-    return res.status(403).json({ ok: false, error: "Relay target host not allowed" });
-  }
-  try {
-    const fwdHeaders = {
-      "User-Agent": MOVIEBOX_UA,
-      Accept: req.get("accept") || "*/*",
-      "Accept-Language": req.get("accept-language") || "en-US,en;q=0.9",
-      Referer: validateExternalHttpUrl(req.get("x-mlbd-referer")) || getActiveMlbdReferer(),
-      Cookie: "mlbd_show18=1; hide18On=false"
-    };
-    if (req.get("range")) fwdHeaders.Range = req.get("range");
-    if (req.get("if-range")) fwdHeaders["If-Range"] = req.get("if-range");
-    const upstream = await fetch(targetUrl, {
-      method: req.method,
-      headers: fwdHeaders,
-      redirect: "follow",
-      signal: AbortSignal.timeout(25000)
-    });
-    for (const h of ["content-type", "content-length", "content-range", "accept-ranges", "cache-control", "etag", "last-modified"]) {
-      const v = upstream.headers.get(h);
-      if (v) res.setHeader(h, v);
-    }
-    if (upstream.headers.get("cf-mitigated")) {
-      res.setHeader("cf-mitigated", upstream.headers.get("cf-mitigated"));
-    }
-    res.setHeader("x-mlbd-relayed", "1");
-    res.status(upstream.status);
-    if (req.method === "HEAD" || !upstream.body) return res.end();
-    const nodeStream = Readable.fromWeb(upstream.body);
-    res.on("close", () => { try { nodeStream.destroy(); } catch {} });
-    nodeStream.on("error", () => { if (!res.headersSent) res.status(502).end(); else res.end(); });
-    return nodeStream.pipe(res);
-  } catch (err) {
-    return res.status(502).json({ ok: false, error: err?.message || "Relay fetch failed" });
-  }
 });
 
 app.all("/api/cinepulse/v1/*", async (req, res) => {
@@ -1076,10 +1007,17 @@ app.all("/api/cinepulse/v1/*", async (req, res) => {
     accept: req.get("accept") || "application/json",
     timeoutMs: 18000
   });
-  res.setHeader("Cache-Control", route === "stream" ? "no-store" : "public, max-age=60");
+  const isErrorResp = !cpRes.ok || !cpRes.data;
+  res.setHeader("Cache-Control", (route === "stream" || isErrorResp) ? "no-store" : "public, max-age=60");
   res.setHeader("X-Content-Type-Options", "nosniff");
   if (!cpRes.data) {
-    return res.status(cpRes.status || 502).json({ ok: false, error: cpRes.error || "CinePulse upstream error" });
+    return res.status(cpRes.status || 502).json({
+      ok: false,
+      errorCode: cpRes.errorCode || "UPSTREAM_ERROR",
+      isCloudflareBlock: Boolean(cpRes.isCloudflareBlock),
+      isAuthError: Boolean(cpRes.isAuthError),
+      error: cpRes.error || "CinePulse upstream error"
+    });
   }
   return res.status(cpRes.status || 200).json(normalizeCinePulsePayload(route, cpRes.data));
 });
@@ -1335,7 +1273,7 @@ app.get("/api/mlbd-hls.m3u8", async (req, res) => {
       Referer: getActiveMlbdReferer(),
       Accept: "*/*"
     };
-    let upstream = await fetchMediaWithRetry(
+    const upstream = await fetchMediaWithRetry(
       targetUrl,
       "GET",
       hlsHeaders,
@@ -1343,11 +1281,6 @@ app.get("/api/mlbd-hls.m3u8", async (req, res) => {
       2,
       20000
     );
-    if (upstream.status === 403 && getMlbdRelayConfig()) {
-      try { await upstream.body?.cancel(); } catch {}
-      const rel = await fetchViaMlbdRelay(targetUrl, { headers: hlsHeaders, timeoutMs: 20000 }).catch(() => null);
-      if (rel) upstream = rel;
-    }
     if (!upstream.ok) {
       return res.status(upstream.status).type("text/plain").send("HLS playlist unavailable");
     }
@@ -2003,6 +1936,11 @@ function sendPreGzipped(req, res, out, cacheHeader) {
   return res.status(200).send(out.jsonStr);
 }
 
+function isSwrAuthOrForbiddenError(err) {
+  const st = Number(err?.status || 0);
+  return st === 401 || st === 403 || Boolean(err?.isAuthError) || Boolean(err?.isCloudflareBlock);
+}
+
 async function getSwrJsonCached(key, opts = {}, builderFn) {
   const { freshMs = 60000, staleMs = 300000, bypass = false, isCacheable = null } = opts;
   if (bypass) {
@@ -2025,6 +1963,12 @@ async function getSwrJsonCached(key, opts = {}, builderFn) {
         }
         return out;
       })
+      .catch(err => {
+        if (isSwrAuthOrForbiddenError(err)) {
+          swrApiCache.delete(key);
+        }
+        throw err;
+      })
       .finally(() => {
         swrInFlight.delete(key);
       });
@@ -2038,90 +1982,72 @@ async function getSwrJsonCached(key, opts = {}, builderFn) {
   try {
     return await refresh();
   } catch (err) {
-    if (hit) return hit;
+    if (hit && !isSwrAuthOrForbiddenError(err)) return hit;
     throw err;
   }
 }
 
-function parseHomeRecencyMs(item) {
-  if (!item || typeof item !== "object") return 0;
-  const nowLimit = Date.now() + 36 * 3600 * 1000;
-  let best = 0;
-  for (const raw of [item.uploadedAtMs, item.uploadTimestamp, item.uploadTime, item.updatedAt, item.createdAt]) {
-    if (!raw) continue;
-    let ms = 0;
-    if (typeof raw === "number") {
-      ms = raw < 1e12 ? raw * 1000 : raw;
+function parseUploadCandidateMs(raw, nowLimit) {
+  if (!raw) return 0;
+  let ms = 0;
+  if (typeof raw === "number") {
+    ms = raw < 1e12 ? raw * 1000 : raw;
+  } else {
+    const s = String(raw).trim();
+    if (!s || /^(?:19|20)\d{2}$/.test(s)) return 0;
+    const lower = s.toLowerCase();
+    if (/^\d{9,16}$/.test(s)) {
+      const n = Number(s);
+      ms = n < 1e12 ? n * 1000 : n;
+    } else if (/\b(?:just now|now|today)\b/.test(lower)) {
+      ms = Date.now();
+    } else if (/\byesterday\b/.test(lower)) {
+      ms = Date.now() - 86400 * 1000;
     } else {
-      const s = String(raw).trim();
-      const lower = s.toLowerCase();
-      if (/^\d{9,16}$/.test(s)) {
-        const n = Number(s);
-        ms = n < 1e12 ? n * 1000 : n;
-      } else if (/\b(?:just now|now|today)\b/.test(lower)) {
-        ms = Date.now();
-      } else if (/\byesterday\b/.test(lower)) {
-        ms = Date.now() - 86400 * 1000;
+      const ago = /(\d+)\s*(sec(?:ond)?s?|min(?:ute)?s?|hrs?|hours?|days?|weeks?|months?|years?)\s*ago/i.exec(lower);
+      if (ago) {
+        const n = Number(ago[1]) || 1;
+        const u = ago[2].toLowerCase();
+        const mult = u.startsWith("sec") ? 1000 : u.startsWith("min") ? 60000 : u.startsWith("h") ? 3600000 : u.startsWith("d") ? 86400000 : u.startsWith("w") ? 604800000 : u.startsWith("mo") ? 2592000000 : 31536000000;
+        ms = Math.max(1, Date.now() - n * mult);
       } else {
-        const ago = /(\d+)\s*(sec(?:ond)?s?|min(?:ute)?s?|hrs?|hours?|days?|weeks?|months?|years?)\s*ago/i.exec(lower);
-        if (ago) {
-          const n = Number(ago[1]) || 1;
-          const u = ago[2].toLowerCase();
-          const mult = u.startsWith("sec") ? 1000 : u.startsWith("min") ? 60000 : u.startsWith("h") ? 3600000 : u.startsWith("d") ? 86400000 : u.startsWith("w") ? 604800000 : u.startsWith("mo") ? 2592000000 : 31536000000;
-          ms = Math.max(1, Date.now() - n * mult);
-        } else {
-          const parsed = Date.parse(s);
-          if (Number.isFinite(parsed) && parsed > 0) ms = parsed;
-        }
+        const parsed = Date.parse(s);
+        if (Number.isFinite(parsed) && parsed > 0) ms = parsed;
       }
     }
-    if (ms > 0 && ms <= nowLimit) best = Math.max(best, ms);
   }
-  const rel = item.releaseDate || item.appointmentDate || (item.year && /^\d{4}$/.test(String(item.year)) ? `${item.year}-01-01` : "");
-  const relMs = rel ? Date.parse(String(rel)) : 0;
-  if (best > 0 && relMs > nowLimit) return best;
-  return Math.max(best, Number.isFinite(relMs) && relMs <= nowLimit ? relMs : 0);
+  return ms > 0 && ms <= nowLimit ? ms : 0;
 }
 
 function parseExactUploadMs(item) {
   if (!item || typeof item !== "object") return 0;
-  const nowLimit = Date.now() + 36 * 3600 * 1000;
+  const nowLimit = Date.now() + 12 * 3600 * 1000;
   let best = 0;
-  for (const raw of [item.uploadedAtMs, item.uploadTimestamp, item.uploadTime, item.updatedAt, item.createdAt]) {
-    if (!raw) continue;
-    let ms = 0;
-    if (typeof raw === "number") {
-      ms = raw < 1e12 ? raw * 1000 : raw;
-    } else {
-      const s = String(raw).trim();
-      const lower = s.toLowerCase();
-      if (/^\d{9,16}$/.test(s)) {
-        const n = Number(s);
-        ms = n < 1e12 ? n * 1000 : n;
-      } else if (/\b(?:just now|now|today)\b/.test(lower)) {
-        ms = Date.now();
-      } else if (/\byesterday\b/.test(lower)) {
-        ms = Date.now() - 86400 * 1000;
-      } else {
-        const ago = /(\d+)\s*(sec(?:ond)?s?|min(?:ute)?s?|hrs?|hours?|days?|weeks?|months?|years?)\s*ago/i.exec(lower);
-        if (ago) {
-          const n = Number(ago[1]) || 1;
-          const u = ago[2].toLowerCase();
-          const mult = u.startsWith("sec") ? 1000 : u.startsWith("min") ? 60000 : u.startsWith("h") ? 3600000 : u.startsWith("d") ? 86400000 : u.startsWith("w") ? 604800000 : u.startsWith("mo") ? 2592000000 : 31536000000;
-          ms = Math.max(1, Date.now() - n * mult);
-        } else {
-          const parsed = Date.parse(s);
-          if (Number.isFinite(parsed) && parsed > 0) ms = parsed;
-        }
-      }
+  for (const raw of [item.uploadedAtMs, item.uploadTimestamp]) {
+    const ms = parseUploadCandidateMs(raw, nowLimit);
+    if (ms > best) best = ms;
+  }
+  if (best === 0 && !item.fromArchive) {
+    for (const raw of [item.uploadTime, item.updatedAt, item.createdAt]) {
+      const ms = parseUploadCandidateMs(raw, nowLimit);
+      if (ms > best) best = ms;
     }
-    if (ms > 0 && ms <= nowLimit) best = Math.max(best, ms);
   }
   return best;
 }
 
+function parseHomeRecencyMs(item) {
+  if (!item || typeof item !== "object") return 0;
+  const up = parseExactUploadMs(item);
+  if (up > 0) return up;
+  const nowLimit = Date.now() + 12 * 3600 * 1000;
+  const rel = item.releaseDate || item.appointmentDate || (item.year && /^\d{4}$/.test(String(item.year)) ? `${item.year}-01-01` : "");
+  const relMs = rel ? Date.parse(String(rel)) : 0;
+  return Number.isFinite(relMs) && relMs > 0 && relMs <= nowLimit ? relMs : 0;
+}
+
 function getCatalogReleaseTimestamp(item) {
-  const nowLimit = Date.now() + 36 * 3600 * 1000;
+  const nowLimit = Date.now() + 12 * 3600 * 1000;
   const relRaw = item?.releaseDate || item?.appointmentDate || "";
   if (relRaw) {
     const t = Date.parse(String(relRaw));
@@ -2136,24 +2062,26 @@ function getCatalogReleaseTimestamp(item) {
 }
 
 function sortCatalogNewestFirst(items = []) {
-  const nowLimit = Date.now() + 36 * 3600 * 1000;
+  const nowLimit = Date.now() + 12 * 3600 * 1000;
   const mlbdDirectOk = isMlbdDirectPlaybackAvailable();
   return [...(Array.isArray(items) ? items : [])]
     .map((item, idx) => {
       const up = parseExactUploadMs(item);
       const rel = getCatalogReleaseTimestamp(item);
       const isFuture = rel > nowLimit && up === 0;
-      const recency = up > 0 && rel > nowLimit ? up : Math.max(up, rel);
+      const isLiveUpdate = !item?.fromArchive ? 1 : 0;
+      const recency = up > 0 ? up : rel;
       const hasPoster = item?.poster || item?.previewImage ? 1 : 0;
       const isDirect = (mlbdDirectOk || item?.source !== "movielinkbd" || item?.mbSubjectId) ? 1 : 0;
-      return { item, idx, up, recency, isFuture, hasPoster, isDirect };
+      return { item, idx, up, recency, isFuture, isLiveUpdate, hasPoster, isDirect };
     })
     .sort((a, b) => {
       if (a.isFuture !== b.isFuture) return a.isFuture ? 1 : -1;
       if (a.isFuture && b.isFuture) return a.recency - b.recency;
       if (!mlbdDirectOk && b.isDirect !== a.isDirect) return b.isDirect - a.isDirect;
-      // Items with recent explicit upload timestamps first, strictly newest first
       if (b.recency !== a.recency) return b.recency - a.recency;
+      if (b.isLiveUpdate !== a.isLiveUpdate) return b.isLiveUpdate - a.isLiveUpdate;
+      if (Boolean(b.up > 0) !== Boolean(a.up > 0)) return b.up > 0 ? 1 : -1;
       if (b.up !== a.up) return b.up - a.up;
       if (b.hasPoster !== a.hasPoster) return b.hasPoster - a.hasPoster;
       if (b.isDirect !== a.isDirect) return b.isDirect - a.isDirect;
@@ -2194,25 +2122,40 @@ function normalizeCatalogDedupeKey(item) {
 function pickBetterCatalogItem(prev, next) {
   if (!prev) return next;
   if (!next) return prev;
+  const mergeMeta = (winner, loser) => {
+    const winUp = parseExactUploadMs(winner);
+    const loseUp = parseExactUploadMs(loser);
+    const eitherLive = !winner?.fromArchive || !loser?.fromArchive;
+    const bestUp = Math.max(winUp, loseUp);
+    if ((bestUp > winUp) || (eitherLive && winner?.fromArchive)) {
+      return {
+        ...winner,
+        ...(bestUp > 0 ? { uploadedAtMs: bestUp } : {}),
+        uploadTime: winner.uploadTime || loser.uploadTime,
+        ...(eitherLive ? { fromArchive: false } : {})
+      };
+    }
+    return winner;
+  };
   const mlbdDirectOk = isMlbdDirectPlaybackAvailable();
   const prevPoster = prev?.poster || prev?.previewImage ? 1 : 0;
   const nextPoster = next?.poster || next?.previewImage ? 1 : 0;
-  if (nextPoster !== prevPoster) return nextPoster > prevPoster ? next : prev;
+  if (nextPoster !== prevPoster) {
+    return nextPoster > prevPoster ? mergeMeta(next, prev) : mergeMeta(prev, next);
+  }
   const prevMb = prev?.mbSubjectId || prev?.source !== "movielinkbd" ? 1 : 0;
   const nextMb = next?.mbSubjectId || next?.source !== "movielinkbd" ? 1 : 0;
   if (!mlbdDirectOk && nextMb !== prevMb) {
-    const winner = nextMb > prevMb ? next : prev;
-    const loser = winner === next ? prev : next;
-    if (!winner.uploadedAtMs && loser.uploadedAtMs) {
-      return { ...winner, uploadedAtMs: loser.uploadedAtMs, uploadTime: winner.uploadTime || loser.uploadTime };
-    }
-    return winner;
+    return nextMb > prevMb ? mergeMeta(next, prev) : mergeMeta(prev, next);
   }
   const prevUp = parseExactUploadMs(prev);
   const nextUp = parseExactUploadMs(next);
-  if (nextUp !== prevUp) return nextUp > prevUp ? next : prev;
-  if (nextMb !== prevMb) return nextMb > prevMb ? next : prev;
-  return prev;
+  if (nextUp !== prevUp) return nextUp > prevUp ? mergeMeta(next, prev) : mergeMeta(prev, next);
+  if (Boolean(!next?.fromArchive) !== Boolean(!prev?.fromArchive)) {
+    return !next?.fromArchive ? mergeMeta(next, prev) : mergeMeta(prev, next);
+  }
+  if (nextMb !== prevMb) return nextMb > prevMb ? mergeMeta(next, prev) : mergeMeta(prev, next);
+  return mergeMeta(prev, next);
 }
 
 function dedupeCatalogItems(items = []) {
@@ -2406,7 +2349,16 @@ async function buildMergedHomePayload(query = new URLSearchParams()) {
       const db = isDirectlyStreamable(b) ? 1 : 0;
       if (db !== da) return db - da;
     }
-    return parseHomeRecencyMs(b) - parseHomeRecencyMs(a);
+    const recA = parseHomeRecencyMs(a);
+    const recB = parseHomeRecencyMs(b);
+    if (recB !== recA) return recB - recA;
+    const liveA = a?.fromArchive ? 0 : 1;
+    const liveB = b?.fromArchive ? 0 : 1;
+    if (liveB !== liveA) return liveB - liveA;
+    const upA = parseExactUploadMs(a);
+    const upB = parseExactUploadMs(b);
+    if (Boolean(upB > 0) !== Boolean(upA > 0)) return upB > 0 ? 1 : -1;
+    return upB - upA;
   };
   const rankHomeItems = list =>
     [...(Array.isArray(list) ? list : [])].sort((a, b) => {

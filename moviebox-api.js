@@ -714,6 +714,7 @@ function parseFlexibleDateMs(raw) {
   }
   const s = String(raw).trim();
   if (!s) return 0;
+  if (/^(?:19|20)\d{2}$/.test(s)) return 0;
   if (/^\d{9,16}$/.test(s)) {
     const n = Number(s);
     return n < 1e12 ? n * 1000 : n;
@@ -742,17 +743,18 @@ function parseFlexibleDateMs(raw) {
 function parseReleaseTs(item) {
   const nowLimit = getEndOfTodayMs();
   let bestUpload = 0;
-  const uploadCandidates = [
-    item?.uploadedAtMs,
-    item?.uploadTimestamp,
-    item?.uploadTime,
-    item?.updatedAt,
-    item?.createdAt
-  ];
-  for (const raw of uploadCandidates) {
+  for (const raw of [item?.uploadedAtMs, item?.uploadTimestamp]) {
     const t = parseFlexibleDateMs(raw);
     if (t > 0 && t <= nowLimit) {
       bestUpload = Math.max(bestUpload, t);
+    }
+  }
+  if (bestUpload === 0 && !item?.fromArchive) {
+    for (const raw of [item?.uploadTime, item?.updatedAt, item?.createdAt]) {
+      const t = parseFlexibleDateMs(raw);
+      if (t > 0 && t <= nowLimit) {
+        bestUpload = Math.max(bestUpload, t);
+      }
     }
   }
 
@@ -763,7 +765,9 @@ function parseReleaseTs(item) {
     item?.year && /^\d{4}$/.test(String(item.year)) ? `${item.year}-01-01` : ""
   ];
   for (const raw of candidates) {
-    const t = parseFlexibleDateMs(raw);
+    const str = String(raw || "").trim();
+    const normalized = /^(?:19|20)\d{2}$/.test(str) ? `${str}-01-01` : str;
+    const t = parseFlexibleDateMs(normalized);
     if (t > 0) {
       bestRelease = t;
       break;
