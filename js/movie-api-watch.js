@@ -1377,13 +1377,21 @@
     }
   }
 
-  const WATCH_DETAIL_CACHE_KEY = "cv_watch_detail_v1";
+  const WATCH_DETAIL_CACHE_KEY = "cv_watch_detail_v2";
   const WATCH_DETAIL_TTL_MS = 3 * 60 * 1000;
   function readCachedWatchDetail(targetPath) {
     try {
       const m = JSON.parse(sessionStorage.getItem(WATCH_DETAIL_CACHE_KEY) || "{}");
       const hit = m[targetPath];
       if (hit && hit.ts && Date.now() - hit.ts < WATCH_DETAIL_TTL_MS && hit.detail && hit.detail.hasResource !== false && Array.isArray(hit.detail.episodes) && hit.detail.episodes.length > 0) {
+        if (hit.detail.source === "movielinkbd-bridge" && requestedTitle) {
+          const epM = /\bEp(?:isode)?s?\s*0*(\d{1,3})(?:\s*[-–to]+\s*0*(\d{1,3}))?/i.exec(requestedTitle);
+          if (epM) {
+            const wantEp = Number(epM[1]) || 0;
+            const hasEp = hit.detail.episodes.some(e => Number(e?.episodeNumber ?? e?.ep ?? e?.number ?? 0) === wantEp);
+            if (!hasEp) return null;
+          }
+        }
         return hit.detail;
       }
     } catch {}
@@ -1445,7 +1453,9 @@
 
       if (d.path && d.path !== path) {
         path = d.path;
-        const nextUrl = `watch.html?path=${encodeURIComponent(path)}&title=${encodeURIComponent(d.title || requestedTitle || "")}${params.get("episode") ? `&episode=${encodeURIComponent(params.get("episode"))}` : ""}`;
+        const preserveRequested = requestedTitle && /\bEp(?:isode)?s?\s*\d+/i.test(requestedTitle) && !/\bEp(?:isode)?s?\s*\d+/i.test(d.title || "");
+        const urlTitle = preserveRequested ? requestedTitle : (d.title || requestedTitle || "");
+        const nextUrl = `watch.html?path=${encodeURIComponent(path)}&title=${encodeURIComponent(urlTitle)}${params.get("episode") ? `&episode=${encodeURIComponent(params.get("episode"))}` : ""}`;
         try { history.replaceState(null, "", nextUrl); } catch {}
       }
       d.poster = posterOf(d);

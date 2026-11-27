@@ -900,8 +900,32 @@
   }
 
   function dedupeList(list) {
+    const extractEpBatchScore = title => {
+      const s = String(title || "");
+      const seM = /\bS(\d{1,2})\b/i.exec(s) || /\bSeason\s*(\d{1,2})\b/i.exec(s);
+      const epM = /\bEp(?:isode)?s?\s*0*(\d{1,3})(?:\s*[-–to]+\s*0*(\d{1,3}))?/i.exec(s);
+      const se = seM ? Number(seM[1]) || 0 : 0;
+      const epEnd = epM ? Number(epM[2] || epM[1]) || 0 : 0;
+      return se * 10000 + epEnd;
+    };
+    const isBetterCandidate = (prev, next) => {
+      const pPoster = safeImg(posterOf(prev)) ? 1 : 0;
+      const nPoster = safeImg(posterOf(next)) ? 1 : 0;
+      if (nPoster !== pPoster) return nPoster > pPoster;
+      const pLive = prev?.fromArchive ? 0 : 1;
+      const nLive = next?.fromArchive ? 0 : 1;
+      if (nLive !== pLive) return nLive > pLive;
+      const pTime = releaseTime(prev);
+      const nTime = releaseTime(next);
+      if (nTime !== pTime) return nTime > pTime;
+      const pBatch = extractEpBatchScore(prev?.title);
+      const nBatch = extractEpBatchScore(next?.title);
+      if (nBatch !== pBatch) return nBatch > pBatch;
+      return false;
+    };
+
     const seen = new Set();
-    const seenTitles = new Set();
+    const titleIndexMap = new Map();
     const out = [];
     for (const item of Array.isArray(list) ? list : []) {
       if (!item || isNigerian(item)) continue;
@@ -916,9 +940,15 @@
         .replace(/[^a-z0-9\u0980-\u09ff]+/g, " ")
         .trim();
       const titleYearKey = coreTitle ? `${coreTitle}|${String(item.year || "").slice(0, 4)}` : "";
-      if (titleYearKey && seenTitles.has(titleYearKey)) continue;
       seen.add(key);
-      if (titleYearKey) seenTitles.add(titleYearKey);
+      if (titleYearKey && titleIndexMap.has(titleYearKey)) {
+        const idx = titleIndexMap.get(titleYearKey);
+        if (isBetterCandidate(out[idx], item)) {
+          out[idx] = item;
+        }
+        continue;
+      }
+      if (titleYearKey) titleIndexMap.set(titleYearKey, out.length);
       out.push(item);
     }
     return out;

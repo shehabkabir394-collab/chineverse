@@ -1149,8 +1149,12 @@ function scoreMergedSearchItem(item, q) {
   if (/\bmovie|movies|film\b/i.test(lower) && item?.isMovie) score += 12;
   if (/\bseries|drama\b/i.test(lower) && item?.isSeries) score += 12;
 
-  if (item?.source !== "movielinkbd" || item?.mbSubjectId) score += 10;
+  if (item?.source !== "movielinkbd" || item?.mbSubjectId || isMlbdDirectPlaybackAvailable()) score += 10;
   if (item?.poster || item?.previewImage) score += 6;
+  const upMs = parseExactUploadMs(item);
+  if (!item?.fromArchive && upMs > 0 && upMs >= Date.now() - 7 * 86400 * 1000) {
+    score += 14;
+  }
   const yr = Number(String(item?.year || "").match(/\b(19\d\d|20\d\d)\b/)?.[1] || 0);
   if (yr >= 2024) score += 38;
   else if (yr >= 2018) score += 28;
@@ -1977,9 +1981,11 @@ app.all("/api/movie-api/*", async (req, res) => {
       const reqTitle = String(query.get("title") || "").trim();
       if ((sourceCount === 0 || topSourceSlowOrBad) && reqTitle) {
         try {
-          const wantMovie = (Number(query.get("se") || 0) || 0) === 0;
+          const wantSe = Number(query.get("se") || 0) || 0;
+          const wantEp = Number(query.get("ep") || 1) || 1;
+          const wantMovie = wantSe === 0;
           const mlbdBackup = await Promise.race([
-            findExactTitleMlbdBackup(reqTitle, wantMovie),
+            findExactTitleMlbdBackup(reqTitle, wantMovie, { se: wantSe, ep: wantEp }),
             new Promise(r => setTimeout(() => r(null), sourceCount > 0 ? 1500 : 8000))
           ]);
           if (mlbdBackup?.path) {
