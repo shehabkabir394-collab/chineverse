@@ -46,9 +46,10 @@ export async function onRequest({ request, env }) {
       if (v) headers.set(name, v);
     }
     const rawCt = (upstream.headers.get("content-type") || "").toLowerCase();
-    const isSub = /\/vsub\//i.test(targetUrl);
-    if (!rawCt || rawCt.includes("octet-stream") || (rawCt.startsWith("image/") && /watch\.movielink\.tv/i.test(targetUrl))) {
-      headers.set("content-type", isSub ? "text/vtt; charset=utf-8" : "video/mp4");
+    const isSub = /\/v(?:sub|seg)\//i.test(targetUrl);
+    const isHlsSeg = /\/(?:s|vseg|hls|vsub)\//i.test(targetUrl);
+    if (!rawCt || rawCt.includes("octet-stream") || (rawCt.startsWith("image/") && (/movielink/i.test(targetUrl) || isHlsSeg))) {
+      headers.set("content-type", isSub ? "text/vtt; charset=utf-8" : (isHlsSeg ? "video/mp2t" : "video/mp4"));
     }
     if (!headers.get("accept-ranges")) {
       headers.set("accept-ranges", "bytes");

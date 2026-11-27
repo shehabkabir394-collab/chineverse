@@ -10,6 +10,7 @@
   const SEARCH_HISTORY_KEY = "cv_recent_searches_v1";
   const REMINDERS_KEY = "cv_sports_reminders_v1";
   const FAMILY_SAFE_KEY = "cv_family_safe_v1";
+  const PLAYBACK_MODE_KEY = "cv_playback_quality_mode_v1";
   const SCROLL_PROGRESS_KEY = "cv_scroll_progress_v1";
 
   const SCROLL_PROGRESS_THEMES = {
@@ -82,6 +83,26 @@
     } catch {}
     window.dispatchEvent(new CustomEvent("cv:family-safe-change", { detail: { enabled: Boolean(enabled) } }));
     return Boolean(enabled);
+  }
+
+  function getPlaybackMode() {
+    try {
+      const saved = localStorage.getItem(PLAYBACK_MODE_KEY);
+      if (saved === "data-saver" || saved === "high-quality") return saved;
+    } catch {}
+    try {
+      if (navigator.connection?.saveData) return "data-saver";
+    } catch {}
+    return "high-quality";
+  }
+
+  function setPlaybackMode(mode) {
+    const next = mode === "data-saver" ? "data-saver" : "high-quality";
+    try {
+      localStorage.setItem(PLAYBACK_MODE_KEY, next);
+    } catch {}
+    window.dispatchEvent(new CustomEvent("cv:playback-mode-change", { detail: { mode: next } }));
+    return next;
   }
 
   function loadScrollProgressConfig() {
@@ -288,6 +309,8 @@
     const searchHistory = loadSearchHistory();
     const reminders = loadJsonList(REMINDERS_KEY);
     const safeEnabled = getFamilySafe();
+    const playbackMode = getPlaybackMode();
+    const isDataSaver = playbackMode === "data-saver";
 
     if (meViewMode === "history") {
       content.innerHTML = `
@@ -355,6 +378,17 @@
               <span>App Language</span>
             </span>
             <span class="cv-me-row-right"><span>English</span></span>
+          </div>
+          <div class="cv-me-hub-row cv-me-switch-row" style="flex-direction:column;align-items:stretch;gap:10px;padding:14px 16px">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+              <span style="font-size:15px;font-weight:600">Playback Quality Mode</span>
+              <span style="font-size:12px;color:${isDataSaver ? "#34d399" : "#fda4af"};font-weight:700">${isDataSaver ? "Data Saver" : "High Quality"}</span>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+              <button type="button" class="cv-sp-chip ${isDataSaver ? "active" : ""}" data-set-playback-mode="data-saver" style="min-height:40px;border-radius:10px;border:1px solid ${isDataSaver ? "#10b981" : "rgba(255,255,255,.12)"};background:${isDataSaver ? "rgba(16,185,129,.2)" : "rgba(255,255,255,.04)"};color:${isDataSaver ? "#a7f3d0" : "#e2e8f0"};font-weight:700;cursor:pointer">⚡ Data Saver</button>
+              <button type="button" class="cv-sp-chip ${!isDataSaver ? "active" : ""}" data-set-playback-mode="high-quality" style="min-height:40px;border-radius:10px;border:1px solid ${!isDataSaver ? "#ef4444" : "rgba(255,255,255,.12)"};background:${!isDataSaver ? "rgba(239,68,68,.2)" : "rgba(255,255,255,.04)"};color:${!isDataSaver ? "#fecaca" : "#e2e8f0"};font-weight:700;cursor:pointer">✨ High Quality</button>
+            </div>
+            <small style="font-size:12px;color:#94a3b8;line-height:1.4">${isDataSaver ? "Caps bitrate (≤480p) and limits background buffering to save mobile data." : "Uses highest available HD bitrate and full adaptive streaming."}</small>
           </div>
           <button type="button" class="cv-me-hub-row" data-me-view="search-history">
             <span class="cv-me-row-left"><span>Search History</span></span>
@@ -588,6 +622,19 @@
 
         <div class="cv-me-hub-row cv-me-switch-row">
           <span class="cv-me-row-left">
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+            <span style="display:flex;flex-direction:column;gap:2px">
+              <span>Data Saver Playback</span>
+              <small style="font-size:11.5px;font-weight:500;color:#94a3b8">${isDataSaver ? "Active · Limits bitrate & background data" : "Off · High Quality HD playback"}</small>
+            </span>
+          </span>
+          <button type="button" id="cvDataSaverSwitch" class="cv-ios-switch ${isDataSaver ? "is-on" : ""}" role="switch" aria-checked="${isDataSaver ? "true" : "false"}" aria-label="Toggle Data Saver Playback">
+            <span class="cv-ios-switch-thumb"></span>
+          </button>
+        </div>
+
+        <div class="cv-me-hub-row cv-me-switch-row">
+          <span class="cv-me-row-left">
             ${shieldSvg}
             <span>Family-Safe Mode</span>
           </span>
@@ -660,6 +707,20 @@
           const next = setFamilySafe(!getFamilySafe());
           renderMeContent();
           showToast(next ? "Family-Safe Mode ON (18+ hidden)" : "Family-Safe Mode OFF (Unrestricted search)");
+          return;
+        }
+        const saverSwitch = e.target.closest("#cvDataSaverSwitch");
+        if (saverSwitch) {
+          const next = setPlaybackMode(getPlaybackMode() === "data-saver" ? "high-quality" : "data-saver");
+          renderMeContent();
+          showToast(next === "data-saver" ? "Data Saver ON (≤480p & low background buffer)" : "High Quality Playback ON (Max HD)");
+          return;
+        }
+        const modePick = e.target.closest("[data-set-playback-mode]");
+        if (modePick) {
+          const next = setPlaybackMode(modePick.dataset.setPlaybackMode);
+          renderMeContent();
+          showToast(next === "data-saver" ? "Data Saver ON (≤480p & low background buffer)" : "High Quality Playback ON (Max HD)");
           return;
         }
         if (e.target.closest("#cvMeShareAppBtn")) {
@@ -763,10 +824,17 @@
   window.CineVerseAccount = {
     open: showMe,
     getFamilySafe,
-    setFamilySafe
+    setFamilySafe,
+    getPlaybackMode,
+    setPlaybackMode
   };
 
   window.addEventListener("cv:search-history-change", () => {
+    const modal = $("#cvMePanel");
+    if (modal && !modal.hidden) renderMeContent();
+  });
+
+  window.addEventListener("cv:playback-mode-change", () => {
     const modal = $("#cvMePanel");
     if (modal && !modal.hidden) renderMeContent();
   });

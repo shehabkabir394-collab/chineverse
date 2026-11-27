@@ -419,6 +419,22 @@
     const modal = $("#cvPlayerSettingsModal");
     if (!modal || modal.hidden) return;
 
+    const isSaver = st.playbackMode === "data-saver";
+    const modeVal = $("#cvModalPlaybackModeVal");
+    const modeHint = $("#cvModalPlaybackModeHint");
+    if (modeVal) {
+      modeVal.textContent = isSaver ? "Data Saver ON" : "High Quality";
+      modeVal.style.color = isSaver ? "#34d399" : "#fda4af";
+    }
+    if (modeHint) {
+      modeHint.textContent = isSaver
+        ? "Caps bitrate (≤480p) and limits background buffering."
+        : "Streams highest available HD resolution & full bitrate.";
+    }
+    modal.querySelectorAll("[data-set-playback-mode]").forEach(btn => {
+      btn.classList.toggle("active", btn.dataset.setPlaybackMode === (st.playbackMode || "high-quality"));
+    });
+
     const qualGrid = $("#cvModalQualGrid");
     if (qualGrid) {
       const autoLabel = `Auto (${st.activeQuality})`;
@@ -514,8 +530,20 @@
     modal.innerHTML = `
       <div class="cv-ps-card" role="dialog" aria-modal="true" aria-label="Player Settings">
         <div class="cv-ps-head">
-          <span class="cv-ps-head-title">VIDEO QUALITY (কোয়ালিটি সিলেক্ট করুন)</span>
+          <span class="cv-ps-head-title">PLAYBACK DATA MODE (ডেটা সেভার)</span>
           <button type="button" class="cv-ps-close" aria-label="Close settings">×</button>
+        </div>
+        <div class="cv-ps-row-head" style="margin-bottom:8px">
+          <small id="cvModalPlaybackModeHint" style="color:#94a3b8;font-size:12px">Streams highest available HD resolution &amp; full bitrate.</small>
+          <b id="cvModalPlaybackModeVal" style="font-size:12px">High Quality</b>
+        </div>
+        <div class="cv-qs-grid" style="margin-bottom:14px">
+          <button type="button" class="cv-qs-btn" data-set-playback-mode="data-saver">⚡ Data Saver</button>
+          <button type="button" class="cv-qs-btn" data-set-playback-mode="high-quality">✨ High Quality</button>
+        </div>
+
+        <div class="cv-ps-head" style="margin-top:4px">
+          <span class="cv-ps-head-title">VIDEO QUALITY (কোয়ালিটি সিলেক্ট করুন)</span>
         </div>
         <div id="cvModalQualGrid" class="cv-qs-grid"></div>
 
@@ -601,6 +629,12 @@
       if (e.target === modal || e.target.closest(".cv-ps-close")) {
         modal.hidden = true;
         $("#cvWatchTopSettings")?.classList.remove("active");
+        return;
+      }
+      const modePick = e.target.closest("[data-set-playback-mode]");
+      if (modePick && playerApi) {
+        playerApi.setPlaybackMode?.(modePick.dataset.setPlaybackMode);
+        syncPlayerUiState();
         return;
       }
       const qBtn = e.target.closest("[data-set-quality]");

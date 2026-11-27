@@ -7,6 +7,33 @@
   const BRIGHT_KEY = "cv_brightness_v1";
   const AMBIENT_KEY = "cv_ambient_mode_v1";
   const AMBIENT_LEVEL_KEY = "cv_ambient_level_v1";
+  const PLAYBACK_MODE_KEY = "cv_playback_quality_mode_v1";
+
+  function readPlaybackMode() {
+    if (window.CineVerseAccount?.getPlaybackMode) {
+      return window.CineVerseAccount.getPlaybackMode();
+    }
+    try {
+      const v = localStorage.getItem(PLAYBACK_MODE_KEY);
+      if (v === "data-saver" || v === "high-quality") return v;
+    } catch {}
+    try {
+      if (navigator.connection?.saveData) return "data-saver";
+    } catch {}
+    return "high-quality";
+  }
+
+  function writePlaybackMode(mode) {
+    const next = mode === "data-saver" ? "data-saver" : "high-quality";
+    if (window.CineVerseAccount?.setPlaybackMode) {
+      return window.CineVerseAccount.setPlaybackMode(next);
+    }
+    try {
+      localStorage.setItem(PLAYBACK_MODE_KEY, next);
+    } catch {}
+    window.dispatchEvent(new CustomEvent("cv:playback-mode-change", { detail: { mode: next } }));
+    return next;
+  }
 
   function srtToVtt(text) {
     const clean = String(text || "").replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n").trim();
@@ -115,12 +142,44 @@
 
     let allSources = normalizeSources(sources);
     let ordered = dedupeByQuality(allSources);
+    let playbackMode = readPlaybackMode();
+    let activeHlsStopped = false;
+    let pauseStopTimer = 0;
+
+    const applySaverUrlFlag = rawUrl => {
+      try {
+        const u = new URL(String(rawUrl || ""), location.origin);
+        if (u.origin === location.origin && (u.pathname === "/api/cinepulse-media" || u.pathname === "/api/mlbd-stream.mp4")) {
+          if (playbackMode === "data-saver") u.searchParams.set("saver", "1");
+          else u.searchParams.delete("saver");
+          return u.pathname + u.search;
+        }
+      } catch {}
+      return String(rawUrl || "");
+    };
+
     const best = () => {
+      if (!ordered.length) return null;
+      if (playbackMode === "data-saver") {
+        return (
+          ordered.find(x => x.quality === "360p") ||
+          ordered.find(x => x.quality === "480p") ||
+          ordered.find(x => qualityNumber(x) > 0 && qualityNumber(x) <= 480) ||
+          ordered[0]
+        );
+      }
       const c = navigator.connection || {};
       const down = Number(c.downlink) || 0;
-      const verySlow = !!c.saveData || /2g|slow-2g/i.test(c.effectiveType || "") || (down > 0 && down < 1.5);
-      const q = verySlow ? "low" : !c.effectiveType && !down || down >= 4 || c.effectiveType === "4g" ? "1080p" : "720p";
-      return (verySlow ? ordered[0] : null) || ordered.find(x => x.quality === q) || ordered.find(x => x.quality === "720p") || ordered.find(x => x.quality === "480p") || ordered[0];
+      const verySlow = /2g|slow-2g/i.test(c.effectiveType || "") || (down > 0 && down < 1.2);
+      if (verySlow) {
+        return ordered.find(x => x.quality === "480p") || ordered[0];
+      }
+      return (
+        ordered[ordered.length - 1] ||
+        ordered.find(x => x.quality === "1080p") ||
+        ordered.find(x => x.quality === "720p") ||
+        ordered[0]
+      );
     };
 
     const initial = best();
@@ -449,8 +508,12 @@
     }
 
     function syncTopButtons() {
-      const qText = preferredQuality === "auto" ? `Auto${activeSource?.quality ? ` (${activeSource.quality})` : ""}` : preferredQuality;
+      const isSaver = playbackMode === "data-saver";
+      const qText = preferredQuality === "auto"
+        ? (isSaver ? `Saver${activeSource?.quality ? ` · ${activeSource.quality}` : ""}` : `Auto${activeSource?.quality ? ` (${activeSource.quality})` : ""}`)
+        : (isSaver ? `${preferredQuality} · Saver` : preferredQuality);
       qualBtn.textContent = `${qText} ▾`;
+      qualBtn.classList.toggle("active", isSaver);
       const activeSub = activeSubtitleIdx >= 0 ? subtitleItems[activeSubtitleIdx] : null;
       subsBtn.textContent = activeSub ? `CC: ${activeSub.label} ▾` : "CC: Off ▾";
       ambientTopBtn.classList.toggle("active", ambientMode);
@@ -468,13 +531,19 @@
       clearTimeout(hideTimer);
       wrap.classList.add("cv-ui-visible");
       if (type === "quality") {
+        const isSaver = playbackMode === "data-saver";
         const items = [
           { value: "auto", label: `Auto${activeSource?.quality ? ` (${activeSource.quality})` : ""}`, active: preferredQuality === "auto" },
           ...ordered.map(x => ({ value: x.quality, label: x.quality, active: preferredQuality === x.quality }))
         ];
-        topMenu.innerHTML = `<div class="cv-top-menu-head">Quality</div>` + items.map(
-          it => `<button type="button" class="cv-top-menu-item ${it.active ? "active" : ""}" data-pick-quality="${esc(it.value)}"><span>${esc(it.label)}</span>${it.active ? "<b>✓</b>" : ""}</button>`
-        ).join("");
+        topMenu.innerHTML =
+          `<div class="cv-top-menu-head">Playback Mode</div>` +
+          `<button type="button" class="cv-top-menu-item ${isSaver ? "active" : ""}" data-pick-playback-mode="data-saver"><span>⚡ Data Saver (≤480p)</span>${isSaver ? "<b>✓</b>" : ""}</button>` +
+          `<button type="button" class="cv-top-menu-item ${!isSaver ? "active" : ""}" data-pick-playback-mode="high-quality"><span>✨ High Quality</span>${!isSaver ? "<b>✓</b>" : ""}</button>` +
+          `<div class="cv-top-menu-head" style="margin-top:4px">Quality</div>` +
+          items.map(
+            it => `<button type="button" class="cv-top-menu-item ${it.active ? "active" : ""}" data-pick-quality="${esc(it.value)}"><span>${esc(it.label)}</span>${it.active ? "<b>✓</b>" : ""}</button>`
+          ).join("");
       } else {
         const items = [
           { value: -1, label: "Off", active: activeSubtitleIdx < 0 },
@@ -504,6 +573,13 @@
     });
     topMenu.addEventListener("click", e => {
       e.stopPropagation();
+      const modePick = e.target.closest("[data-pick-playback-mode]");
+      if (modePick) {
+        setPlaybackMode(modePick.dataset.pickPlaybackMode);
+        closeTopMenu();
+        scheduleHide(1200);
+        return;
+      }
       const qPick = e.target.closest("[data-pick-quality]");
       if (qPick) {
         selectQuality(qPick.dataset.pickQuality);
@@ -761,11 +837,51 @@
       emitState();
     }
 
+    function applyHlsPlaybackProfile(hlsInstance) {
+      if (!hlsInstance) return;
+      const isSaver = playbackMode === "data-saver";
+      if (hlsInstance.config) {
+        hlsInstance.config.maxBufferLength = isSaver ? 10 : 30;
+        hlsInstance.config.maxMaxBufferLength = isSaver ? 18 : 60;
+        hlsInstance.config.backBufferLength = isSaver ? 30 : 90;
+        hlsInstance.config.capLevelToPlayerSize = isSaver;
+      }
+      if (Array.isArray(hlsInstance.levels) && hlsInstance.levels.length > 0) {
+        if (isSaver) {
+          let capIdx = -1;
+          for (let i = 0; i < hlsInstance.levels.length; i++) {
+            const h = Number(hlsInstance.levels[i]?.height || 0);
+            if (h > 0 && h <= 480) capIdx = i;
+          }
+          if (capIdx < 0) {
+            let minIdx = 0;
+            let minBitrate = Number(hlsInstance.levels[0]?.bitrate || Infinity);
+            for (let i = 1; i < hlsInstance.levels.length; i++) {
+              const br = Number(hlsInstance.levels[i]?.bitrate || Infinity);
+              if (br < minBitrate) {
+                minBitrate = br;
+                minIdx = i;
+              }
+            }
+            capIdx = minIdx;
+          }
+          hlsInstance.autoLevelCapping = capIdx;
+          if (hlsInstance.currentLevel > capIdx || hlsInstance.nextLevel > capIdx) {
+            hlsInstance.nextLevel = capIdx;
+          }
+        } else {
+          hlsInstance.autoLevelCapping = -1;
+        }
+      }
+    }
+
     async function setSource(src, keep = true, autoplay = false, seekOverride = null) {
       const token = ++sourceToken;
       const t = seekOverride != null ? Math.max(0, Number(seekOverride) || 0) : keep ? video.currentTime : 0;
       const was = !video.paused;
       errorNotice.hidden = true;
+      clearTimeout(pauseStopTimer);
+      activeHlsStopped = false;
       if (activeHls) {
         activeHls.destroy();
         activeHls = null;
@@ -790,6 +906,7 @@
 
       const ready = () => {
         if (token !== sourceToken) return;
+        applyHlsPlaybackProfile(activeHls);
         if (t > 0 && Number.isFinite(video.duration)) {
           video.currentTime = Math.min(t, Math.max(0, video.duration - 2));
         }
@@ -809,7 +926,16 @@
             const Hls = await loadHlsLibrary();
             if (token !== sourceToken) return;
             if (Hls && Hls.isSupported()) {
-              activeHls = new Hls({ enableWorker: true, lowLatencyMode: false, backBufferLength: 90 });
+              const isSaver = playbackMode === "data-saver";
+              activeHls = new Hls({
+                enableWorker: true,
+                lowLatencyMode: false,
+                maxBufferLength: isSaver ? 10 : 30,
+                maxMaxBufferLength: isSaver ? 18 : 60,
+                backBufferLength: isSaver ? 30 : 90,
+                capLevelToPlayerSize: isSaver,
+                ...(isSaver ? { abrEwmaDefaultEstimate: 400000 } : {})
+              });
               activeHls.on(Hls.Events.MEDIA_ATTACHED, () => {
                 if (token === sourceToken) activeHls.loadSource(src.url);
               });
@@ -839,7 +965,7 @@
       }
 
       video.preload = "metadata";
-      video.src = src.url;
+      video.src = isHls ? src.url : applySaverUrlFlag(src.url);
       video.addEventListener("loadedmetadata", ready, { once: true });
       if (autoplay) {
         safePlayWithFallback();
@@ -957,6 +1083,11 @@
     });
 
     video.addEventListener("play", () => {
+      clearTimeout(pauseStopTimer);
+      if (activeHls && activeHlsStopped) {
+        activeHlsStopped = false;
+        try { activeHls.startLoad(); } catch {}
+      }
       if (soundBoostPct > 100) applyAudioBoost(soundBoostPct);
       wrap.classList.remove("cv-ended");
       play.textContent = "Ⅱ";
@@ -981,6 +1112,15 @@
       stopAmbientLoop();
       clearTimeout(hideTimer);
       wrap.classList.add("cv-ui-visible");
+      clearTimeout(pauseStopTimer);
+      if (activeHls && playbackMode === "data-saver") {
+        pauseStopTimer = setTimeout(() => {
+          if (video.paused && activeHls && playbackMode === "data-saver") {
+            activeHlsStopped = true;
+            try { activeHls.stopLoad(); } catch {}
+          }
+        }, 3500);
+      }
     });
 
     wrap.addEventListener(
@@ -1007,8 +1147,15 @@
     video.addEventListener("loadeddata", () => drawAmbientSample(true));
     video.addEventListener("seeked", () => drawAmbientSample(true));
     document.addEventListener("visibilitychange", () => {
-      if (document.hidden) stopAmbientLoop();
-      else scheduleAmbientLoop();
+      if (document.hidden) {
+        stopAmbientLoop();
+        if (activeHls && playbackMode === "data-saver" && video.paused) {
+          activeHlsStopped = true;
+          try { activeHls.stopLoad(); } catch {}
+        }
+      } else {
+        scheduleAmbientLoop();
+      }
     });
 
     const jump = delta => {
@@ -1373,6 +1520,57 @@
       return ambientLevel;
     }
 
+    function applyPlaybackModeChange(nextMode, opts = {}) {
+      const normalized = nextMode === "data-saver" ? "data-saver" : "high-quality";
+      const changed = playbackMode !== normalized;
+      playbackMode = normalized;
+      if (!opts.fromEvent) {
+        writePlaybackMode(normalized);
+      }
+      if (!opts.silent) {
+        showOsd(
+          normalized === "data-saver" ? "⚡" : "✨",
+          normalized === "data-saver" ? "Data Saver" : "High Quality",
+          normalized === "data-saver" ? 45 : 100,
+          0,
+          100,
+          normalized === "data-saver" ? "#10b981" : "#f87171"
+        );
+      }
+      if (activeHls) {
+        applyHlsPlaybackProfile(activeHls);
+      }
+      if (changed && ordered.length) {
+        preferredQuality = "auto";
+        const nextSrc = best() || ordered[0];
+        if (nextSrc) {
+          const isCurrentHls =
+            activeSource &&
+            (/\.m3u8(?:$|[?#])/i.test(activeSource.url) || /\/api\/(?:sports-hls|mlbd-hls)\//i.test(activeSource.url));
+          if (!isCurrentHls || nextSrc.url !== activeSource?.url) {
+            setSource(nextSrc, true, !video.paused);
+          }
+        }
+      }
+      emitState();
+      return playbackMode;
+    }
+
+    function setPlaybackMode(mode, opts = {}) {
+      return applyPlaybackModeChange(mode, opts);
+    }
+
+    function togglePlaybackMode() {
+      return setPlaybackMode(playbackMode === "data-saver" ? "high-quality" : "data-saver");
+    }
+
+    window.addEventListener("cv:playback-mode-change", ev => {
+      const mode = ev?.detail?.mode || readPlaybackMode();
+      if (mode !== playbackMode) {
+        applyPlaybackModeChange(mode, { fromEvent: true, silent: true });
+      }
+    });
+
     function getState() {
       let audioTracks = [];
       let activeAudioIdx = 0;
@@ -1396,6 +1594,7 @@
       return {
         qualities: ordered.map(x => x.quality),
         preferredQuality,
+        playbackMode,
         activeQuality: activeSource?.quality || initial?.quality || "Auto",
         soundBoost: soundBoostPct,
         brightness: brightnessPct,
@@ -1417,6 +1616,9 @@
       setSubtitles,
       setSuggestions,
       selectQuality,
+      getPlaybackMode: () => playbackMode,
+      setPlaybackMode,
+      togglePlaybackMode,
       setSoundBoost: pct => {
         applyAudioBoost(pct);
         showOsd("🔊", "Sound Boost", soundBoostPct, 100, 400, "#10b981");

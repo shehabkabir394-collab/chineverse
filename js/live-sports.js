@@ -299,15 +299,52 @@
     }
     if (seq !== playSeq) return;
 
+    const isDataSaverMode = () => {
+      try {
+        const saved = localStorage.getItem("cv_playback_quality_mode_v1");
+        if (saved === "data-saver") return true;
+        if (saved === "high-quality") return false;
+      } catch {}
+      return Boolean(navigator.connection?.saveData);
+    };
+
+    const applySportsHlsCap = hlsInst => {
+      if (!hlsInst) return;
+      const saver = isDataSaverMode();
+      if (hlsInst.config) {
+        hlsInst.config.maxBufferLength = saver ? 10 : 30;
+        hlsInst.config.maxMaxBufferLength = saver ? 18 : 60;
+        hlsInst.config.capLevelToPlayerSize = saver;
+      }
+      if (Array.isArray(hlsInst.levels) && hlsInst.levels.length > 0) {
+        if (saver) {
+          let capIdx = -1;
+          for (let i = 0; i < hlsInst.levels.length; i++) {
+            const h = Number(hlsInst.levels[i]?.height || 0);
+            if (h > 0 && h <= 480) capIdx = i;
+          }
+          if (capIdx < 0) capIdx = 0;
+          hlsInst.autoLevelCapping = capIdx;
+          if (hlsInst.currentLevel > capIdx || hlsInst.nextLevel > capIdx) hlsInst.nextLevel = capIdx;
+        } else {
+          hlsInst.autoLevelCapping = -1;
+        }
+      }
+    };
+
     if (!isSafari && HlsCtor && HlsCtor.isSupported()) {
       let mediaRecoveries = 0;
       let netRecoveries = 0;
+      const saverInit = isDataSaverMode();
       hls = new HlsCtor({
         enableWorker: true,
         lowLatencyMode: false,
         liveSyncDurationCount: 3,
         liveMaxLatencyDurationCount: 10,
-        backBufferLength: 60,
+        maxBufferLength: saverInit ? 10 : 30,
+        maxMaxBufferLength: saverInit ? 18 : 60,
+        backBufferLength: saverInit ? 30 : 60,
+        capLevelToPlayerSize: saverInit,
         manifestLoadingTimeOut: 15000,
         fragLoadingTimeOut: 20000,
         manifestLoadingMaxRetry: 3,
@@ -343,8 +380,13 @@
       });
       hls.on(HlsCtor.Events.MANIFEST_PARSED, () => {
         if (seq !== playSeq) return;
+        applySportsHlsCap(hls);
         tryAutoplay(matchName, seq);
       });
+      if (!window.__cvSportsSaverBound) {
+        window.__cvSportsSaverBound = true;
+        window.addEventListener("cv:playback-mode-change", () => applySportsHlsCap(hls));
+      }
       hls.attachMedia(video);
       return;
     }

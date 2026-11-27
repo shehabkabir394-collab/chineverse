@@ -21,13 +21,14 @@ import {
 } from "./lib/catalog-rules.js";
 
 export const MLBD_MIRRORS = [
-  { id: "primary", name: "Primary", baseUrl: "https://wvaedp.movielinkbd.at", priority: 1 },
-  { id: "mirror2", name: "Mirror 2", baseUrl: "https://movielinkbd.at", priority: 2 },
-  { id: "mirror3", name: "Mirror 3", baseUrl: "https://ep2zyu.movielinkbd.at", priority: 3 },
-  { id: "mirror4", name: "Mirror 4", baseUrl: "https://fvuyyu.movielinkbd.at", priority: 4 },
-  { id: "mirror5", name: "Mirror 5", baseUrl: "https://h5esed.movielinkbd.at", priority: 5 },
-  { id: "mirror6", name: "Mirror 6", baseUrl: "https://movielinkbd.com", priority: 6 },
-  { id: "backup", name: "Backup", baseUrl: "https://cmyyhb.movielinkbd.at", priority: 7 }
+  { id: "primary", name: "Primary", baseUrl: "https://xuysbd.movielinkbd.de", priority: 1 },
+  { id: "mirror2", name: "Mirror 2", baseUrl: "https://wvaedp.movielinkbd.at", priority: 2 },
+  { id: "mirror3", name: "Mirror 3", baseUrl: "https://movielinkbd.at", priority: 3 },
+  { id: "mirror4", name: "Mirror 4", baseUrl: "https://ep2zyu.movielinkbd.at", priority: 4 },
+  { id: "mirror5", name: "Mirror 5", baseUrl: "https://fvuyyu.movielinkbd.at", priority: 5 },
+  { id: "mirror6", name: "Mirror 6", baseUrl: "https://h5esed.movielinkbd.at", priority: 6 },
+  { id: "portal", name: "Portal", baseUrl: "https://movielinkbd.com", priority: 7 },
+  { id: "backup", name: "Backup", baseUrl: "https://cmyyhb.movielinkbd.at", priority: 8 }
 ];
 
 const DEFAULT_FALLBACK_CATEGORIES = [
@@ -116,7 +117,7 @@ const mlbdArchiveByPath = new Map();
 const mlbdArchiveByNormTitle = new Map();
 let mlbdArchiveRecords = [];
 let mlbdArchiveLoaded = false;
-let activeResolvedOrigin = "https://wvaedp.movielinkbd.at";
+let activeResolvedOrigin = "https://xuysbd.movielinkbd.de";
 let mirrorsBlockedUntil = 0;
 let mlbdDirectMirrorsBlocked = false;
 let mlbdCinePulseHasContent = false;
@@ -529,7 +530,7 @@ function stripTags(html) {
 
 function stripSiteBrandFromLabel(raw = "") {
   return String(raw || "")
-    .replace(/\bmovie\s*(?:stream|link)\s*bd\b(?:\.com|\.at)?/gi, "")
+    .replace(/\bmovie\s*(?:stream|link)\s*bd\b(?:\.com|\.at|\.de)?/gi, "")
     .replace(/\s*[—–\-|:]+\s*$/g, "")
     .replace(/^\s*[—–\-|:]+\s*/g, "")
     .replace(/\s+/g, " ")
@@ -721,11 +722,20 @@ function isPortalLandingHtml(html) {
 function extractMirrorOriginsFromPortal(html) {
   const out = [];
   const seen = new Set();
-  const re = /https:\/\/([a-z0-9-]+\.movielinkbd\.at)/gi;
+  const re = /https:\/\/((?:[a-z0-9-]+\.)?movielinkbd\.[a-z]{2,12})/gi;
   let m;
   while ((m = re.exec(String(html || "")))) {
-    const origin = `https://${m[1].toLowerCase()}`;
-    if (origin === "https://www.movielinkbd.at") continue;
+    const host = m[1].toLowerCase();
+    if (
+      host === "movielinkbd.com" ||
+      host === "www.movielinkbd.com" ||
+      host === "www.movielinkbd.at" ||
+      host === "www.movielinkbd.de" ||
+      BLOCKED_TRAP_HOSTS.has(host)
+    ) {
+      continue;
+    }
+    const origin = `https://${host}`;
     if (!seen.has(origin)) {
       seen.add(origin);
       out.push(origin);
@@ -919,10 +929,16 @@ export async function getMlbdServerHealth() {
     })
   );
 
-  const primaryOnline = checks.find(c => c.online);
+  const primaryOnline =
+    checks.find(c => c.online && !/\/\/(?:www\.)?movielinkbd\.com$/i.test(c.baseUrl)) ||
+    checks.find(c => c.online);
   if (primaryOnline?.resolvedUrl) {
     try {
       activeResolvedOrigin = new URL(primaryOnline.resolvedUrl).origin;
+      if (!/\/\/(?:www\.)?movielinkbd\.com$/i.test(activeResolvedOrigin)) {
+        mlbdDirectMirrorsBlocked = false;
+        mirrorsBlockedUntil = 0;
+      }
     } catch {}
   }
 
@@ -2376,7 +2392,7 @@ export async function getMlbdCategories() {
 
   const servers = MLBD_MIRRORS.map(m => ({
     ...m,
-    active: activeMirror === m.baseUrl || (m.id === "mirror6" && activeMirror.includes("movielinkbd.com"))
+    active: activeMirror === m.baseUrl || (m.id === "portal" && activeMirror.includes("movielinkbd.com"))
   }));
 
   return setCached(
@@ -3312,7 +3328,7 @@ export function rewriteMlbdHlsPlaylist(rawText, playlistUrl) {
             if (!validateExternalHttpUrl(abs)) return `URI="${uri}"`;
             const isSubM3u8 =
               /\.m3u8(?:$|[?#])/i.test(abs) ||
-              /\/(?:hls|m)\//i.test(abs) ||
+              /\/(?:hls|m|vsub)\//i.test(abs) ||
               /^#EXT-X-MEDIA:.*TYPE=(?:AUDIO|VIDEO)/i.test(trimmed);
             const isInitMap = /^#EXT-X-MAP/i.test(trimmed) || /^#EXT-X-KEY/i.test(trimmed);
             const proxied = isSubM3u8 && !isInitMap

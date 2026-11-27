@@ -429,19 +429,23 @@ app.get("/api/sports-hls/:file", async (req, res) => {
 
 const MAX_STREAM_CHUNK = 4 * 1024 * 1024;
 const INITIAL_STREAM_CHUNK = Math.floor(1.5 * 1024 * 1024);
+const MAX_STREAM_CHUNK_SAVER = 1024 * 1024;
+const INITIAL_STREAM_CHUNK_SAVER = 512 * 1024;
 
-function buildBoundedRangeHeader(rawRange, preserveUnbounded = false) {
+function buildBoundedRangeHeader(rawRange, preserveUnbounded = false, dataSaver = false) {
   if (preserveUnbounded) {
     return rawRange ? String(rawRange).trim() : null;
   }
+  const initialSpan = dataSaver ? INITIAL_STREAM_CHUNK_SAVER : INITIAL_STREAM_CHUNK;
+  const maxChunkSpan = dataSaver ? MAX_STREAM_CHUNK_SAVER : MAX_STREAM_CHUNK;
   if (!rawRange) {
-    return `bytes=0-${INITIAL_STREAM_CHUNK - 1}`;
+    return `bytes=0-${initialSpan - 1}`;
   }
   const match = /^bytes=(\d+)-(\d*)$/i.exec(String(rawRange).trim());
   if (!match) return rawRange;
   const start = Number(match[1]);
   const requestedEnd = match[2] ? Number(match[2]) : null;
-  const maxSpan = start === 0 ? INITIAL_STREAM_CHUNK : MAX_STREAM_CHUNK;
+  const maxSpan = start === 0 ? initialSpan : maxChunkSpan;
   if (!Number.isFinite(start) || start < 0) return rawRange;
   if (requestedEnd == null || !Number.isFinite(requestedEnd)) {
     return `bytes=${start}-${start + maxSpan - 1}`;
@@ -586,6 +590,7 @@ async function readChunkWithTimeout(reader, timeoutMs, abortSignal) {
 // Direct MP4 media proxy with Range support, Referer header & mid-stream auto-resume
 async function proxyMediaStream(req, res, targetUrl, extraHeaders = {}, forceDownload = false, customFilename = "", streamOpts = {}) {
   const isHlsSegment = Boolean(streamOpts?.isHlsSegment);
+  const dataSaver = Boolean(streamOpts?.dataSaver);
   if (forceDownload) {
     try {
       req.setTimeout?.(0);
@@ -603,9 +608,9 @@ async function proxyMediaStream(req, res, targetUrl, extraHeaders = {}, forceDow
     if (isHlsSegment) {
       if (clientRange) headers.set("range", clientRange);
     } else if (clientRange) {
-      headers.set("range", buildBoundedRangeHeader(clientRange));
+      headers.set("range", buildBoundedRangeHeader(clientRange, false, dataSaver));
     } else if (!forceDownload) {
-      headers.set("range", buildBoundedRangeHeader(null));
+      headers.set("range", buildBoundedRangeHeader(null, false, dataSaver));
     }
   } else if (clientRange) {
     headers.set("range", clientRange);
@@ -704,7 +709,7 @@ async function proxyMediaStream(req, res, targetUrl, extraHeaders = {}, forceDow
   if (!ct || ct.includes("octet-stream") || (ct.startsWith("image/") && (/movielink/i.test(targetUrl) || isHlsSegment))) {
     res.setHeader(
       "content-type",
-      /\/vsub\//i.test(targetUrl)
+      /\/v(?:sub|seg)\//i.test(targetUrl)
         ? "text/vtt; charset=utf-8"
         : isHlsSegment
           ? (clientRange ? "video/mp4" : "video/mp2t")
@@ -877,6 +882,7 @@ app.all("/api/cinepulse-media", async (req, res) => {
 
   const customFilename = String(req.query.filename || "");
   const forceDownload = req.query.download === "1";
+  const dataSaver = req.query.saver === "1";
   const mbToken = String(req.query.mb || "");
   if (mbToken) {
     const targetUrl = verifyMediaToken(mbToken);
@@ -890,7 +896,8 @@ app.all("/api/cinepulse-media", async (req, res) => {
         targetUrl,
         { Referer: MOVIEBOX_PLAYER_REFERER },
         forceDownload,
-        customFilename
+        customFilename,
+        { dataSaver }
       );
     } catch (error) {
       console.error("[cinepulse-media upstream error]", error?.name, error?.message, error?.cause?.code || "");
@@ -912,7 +919,8 @@ app.all("/api/cinepulse-media", async (req, res) => {
       `${CINEPULSE_UPSTREAM}/api/mb-stream.mp4?t=${encodeURIComponent(token)}`,
       { "x-api-key": apiKey },
       forceDownload,
-      customFilename
+      customFilename,
+      { dataSaver }
     );
   } catch (error) {
     console.error("[cinepulse-media fallback error]", error?.name, error?.message);
@@ -1235,6 +1243,7 @@ app.all("/api/mlbd-stream.mp4", async (req, res) => {
     return res.status(400).type("text/plain").send("Invalid or expired MovieStreamBD stream token");
   }
   const forceDownload = req.query.download === "1";
+  const dataSaver = req.query.saver === "1";
   const customFilename = String(req.query.filename || "");
   const isHlsSegment = /\/(?:s|vseg)\//i.test(targetUrl);
   try {
@@ -1245,7 +1254,7 @@ app.all("/api/mlbd-stream.mp4", async (req, res) => {
       { Referer: getActiveMlbdReferer() },
       forceDownload,
       customFilename,
-      { isHlsSegment }
+      { isHlsSegment, dataSaver }
     );
   } catch (err) {
     return res.status(502).type("text/plain").send(
