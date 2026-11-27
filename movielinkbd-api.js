@@ -28,10 +28,14 @@ import {
 } from "./lib/http-transport.js";
 
 export const MLBD_MIRRORS = [
-  { id: "primary", name: "Primary", baseUrl: "https://5njsa5.movielinkbd.de", priority: 1 },
-  { id: "mirror1", name: "Mirror 1", baseUrl: "https://74wyzj.movielinkbd.de", priority: 2 },
-  { id: "mirror2", name: "Mirror 2", baseUrl: "https://xuysbd.movielinkbd.de", priority: 3 },
-  { id: "portal", name: "Portal", baseUrl: "https://movielinkbd.com", priority: 4 }
+  { id: "primary", name: "Primary", baseUrl: "https://rnztvk.movielinkbd.de", priority: 1 },
+  { id: "mirror1", name: "Mirror 1", baseUrl: "https://5njsa5.movielinkbd.de", priority: 2 },
+  { id: "mirror2", name: "Mirror 2", baseUrl: "https://74wyzj.movielinkbd.de", priority: 3 },
+  { id: "mirror3", name: "Mirror 3", baseUrl: "https://xuysbd.movielinkbd.de", priority: 4 },
+  { id: "portal", name: "Portal", baseUrl: "https://movielinkbd.com", priority: 5 },
+  { id: "alt-one", name: "Alt .one", baseUrl: "https://movielinkbd.one", priority: 6 },
+  { id: "alt-tv", name: "Alt .tv", baseUrl: "https://movielinkbd.tv", priority: 7 },
+  { id: "alt-shop", name: "Alt .shop", baseUrl: "https://movielinkbd.shop", priority: 8 }
 ];
 
 const DEFAULT_FALLBACK_CATEGORIES = [
@@ -122,7 +126,7 @@ const mlbdArchiveByNormTitle = new Map();
 let mlbdArchiveRecords = [];
 let mlbdArchiveLoaded = false;
 let mlbdArchiveLoadPromise = null;
-let activeResolvedOrigin = "https://5njsa5.movielinkbd.de";
+let activeResolvedOrigin = "https://rnztvk.movielinkbd.de";
 let mirrorsBlockedUntil = 0;
 let mlbdDirectMirrorsBlocked = false;
 let mlbdCinePulseHasContent = false;
@@ -734,8 +738,6 @@ function cookieStringFromResponse(res) {
 }
 
 const BLOCKED_TRAP_HOSTS = new Set([
-  "movielinkbd.tv",
-  "www.movielinkbd.tv",
   "movielinkbd.app",
   "www.movielinkbd.app",
   "movielinkbd.at",
@@ -744,7 +746,7 @@ const BLOCKED_TRAP_HOSTS = new Set([
 
 function isTrapMirrorHost(hostname = "") {
   const h = String(hostname || "").toLowerCase();
-  return !h || BLOCKED_TRAP_HOSTS.has(h) || h.endsWith(".movielinkbd.at") || h.endsWith(".movielinkbd.tv") || h.endsWith(".movielinkbd.app");
+  return !h || BLOCKED_TRAP_HOSTS.has(h) || h.endsWith(".movielinkbd.at") || h.endsWith(".movielinkbd.app");
 }
 
 function ensureTrailingSlashPath(pathWithQuery) {
@@ -894,7 +896,8 @@ function isPortalLandingHtml(html) {
 }
 
 function extractMirrorOriginsFromPortal(html) {
-  const out = [];
+  const deOrigins = [];
+  const altOrigins = [];
   const seen = new Set();
   const re = /https:\/\/((?:[a-z0-9-]+\.)?movielinkbd\.[a-z]{2,12})/gi;
   let m;
@@ -911,10 +914,11 @@ function extractMirrorOriginsFromPortal(html) {
     const origin = `https://${host}`;
     if (!seen.has(origin)) {
       seen.add(origin);
-      out.push(origin);
+      if (host.endsWith(".movielinkbd.de")) deOrigins.push(origin);
+      else altOrigins.push(origin);
     }
   }
-  return out;
+  return [...deOrigins, ...altOrigins];
 }
 
 async function discoverLiveMirrorOrigin(timeoutMs = 8000, forceRefresh = false) {
@@ -3139,7 +3143,7 @@ async function fetchPlayerFrameData(frameSrc, page) {
   const candidateOrigins = [...new Set([
     page.origin,
     activeResolvedOrigin,
-    ...MLBD_MIRRORS.filter(m => /\.movielinkbd\.de$/i.test(m.baseUrl)).map(m => m.baseUrl)
+    ...MLBD_MIRRORS.filter(m => /\.movielinkbd\.(?:de|one|tv|shop)$/i.test(m.baseUrl)).map(m => m.baseUrl)
   ])].filter(Boolean);
 
   for (const origin of candidateOrigins) {
