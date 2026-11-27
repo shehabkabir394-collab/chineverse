@@ -1220,8 +1220,10 @@ app.get("/api/catalog", async (req, res) => {
       },
       async () => {
         const data = await getMlbdCatalog({ path: pathParam, q: "", page });
+        const normPath = pathParam.toLowerCase().replace(/\/page\/\d+\/?$/i, "").replace(/\/+$/, "") || "/";
+        const preserveOrder = normPath === "/mostwatch/7d" || normPath === "/mostwatch" || normPath === "/popular" || normPath === "/top10" || normPath === "/top-rated";
         if (Array.isArray(data?.items)) {
-          data.items = sortCatalogNewestFirst(data.items).map(compactCatalogCard);
+          data.items = (preserveOrder ? data.items : sortCatalogNewestFirst(data.items)).map(compactCatalogCard);
         }
         return data;
       }
@@ -2278,6 +2280,8 @@ function compactCatalogCard(item) {
   if (item.isHindiDubbed === true) out.isHindiDubbed = true;
   if (item._animeCatalog === true) out._animeCatalog = true;
   if (item.views != null && Number(item.views) > 0) out.views = Number(item.views);
+  if (item.viewsText) out.viewsText = String(item.viewsText);
+  if (typeof item.fromArchive === "boolean") out.fromArchive = item.fromArchive;
   if (Array.isArray(item.categories) && item.categories.length) out.categories = item.categories;
   return out;
 }
@@ -2294,7 +2298,7 @@ function matchesCatalogRecentCategory(item, categoryPath = "/") {
 
 function getRecentUploadsPoolForCategory(categoryPath = "/") {
   const norm = String(categoryPath || "/").toLowerCase().replace(/\/+$/, "") || "/";
-  if (/^\/(?:top-rated|upcoming|adult18plus|midnight|genre\/(?:adult|erotic|hot))$/.test(norm)) {
+  if (/^\/(?:top-rated|upcoming|popular|mostwatch(?:\/.*)?|adult18plus|midnight|genre\/(?:adult|erotic|hot))$/.test(norm)) {
     return [];
   }
   const home = mergedHomeCache?.payload;
@@ -2400,7 +2404,8 @@ async function fetchUnifiedCatalogUpstreamBatch({ category, norm, upstreamPage, 
       console.warn(`[MLBD catalog error] ${category}:`, err?.message || err);
     }
 
-    if (mlbdPlayable.length < 6 && upstreamPage <= 2) {
+    const isTrendingRequest = norm === "/mostwatch/7d" || norm === "/mostwatch" || norm === "/popular";
+    if (!isTrendingRequest && mlbdPlayable.length < 6 && upstreamPage <= 2) {
       try {
         let mbItems = [];
         if (!/^(?:\/collection\/|\/category\/)/i.test(category)) {
@@ -2498,8 +2503,9 @@ function mergeBatchIntoUnifiedPool(pool, rawItems, { preserveOrder = false, allo
 async function buildUnifiedCatalogPayload(category, page, query) {
   const safePage = Math.max(1, Math.floor(Number(page) || 1));
   const norm = String(category || "/").toLowerCase().replace(/\/+$/, "") || "/";
-  const isMlbdOnlyCategory = /^\/(?:language\/(?:dual-audio|gujrati|kannada|marathi|malaysian|vietnamese|german|italian|portuguese|others)|genre\/(?:biographical|historical|musical|sports|superhero|survival|suspense)|category\/|collection\/|collections)/i.test(category);
-  const preserveOrder = norm === "/top-rated" || norm === "/upcoming" || norm === "/top10";
+  const isTrendingCat = norm === "/mostwatch/7d" || norm === "/mostwatch" || norm === "/popular";
+  const isMlbdOnlyCategory = isTrendingCat || /^\/(?:language\/(?:dual-audio|gujrati|kannada|marathi|malaysian|vietnamese|german|italian|portuguese|others)|genre\/(?:biographical|historical|musical|sports|superhero|survival|suspense)|category\/|collection\/|collections)/i.test(category);
+  const preserveOrder = isTrendingCat || norm === "/top-rated" || norm === "/upcoming" || norm === "/top10";
   const poolKey = buildUnifiedCatalogPoolKey(norm, query);
   const pool = getOrCreateUnifiedCatalogPool(poolKey);
   const targetCount = safePage * CATALOG_PAGE_SIZE;
@@ -2546,7 +2552,13 @@ async function buildUnifiedCatalogPayload(category, page, query) {
       if (batch.meta && typeof batch.meta === "object") {
         pool.lastMeta = {
           ...(batch.meta.heading ? { heading: batch.meta.heading } : {}),
-          ...(batch.meta.source ? { source: batch.meta.source } : {})
+          ...(batch.meta.source ? { source: batch.meta.source } : {}),
+          ...(batch.meta.activeMirror ? { activeMirror: batch.meta.activeMirror } : {}),
+          ...(batch.meta.upstreamPath ? { upstreamPath: batch.meta.upstreamPath } : {}),
+          ...(batch.meta.contentSource ? { contentSource: batch.meta.contentSource } : {}),
+          ...(typeof batch.meta.isArchiveFallback === "boolean" ? { isArchiveFallback: batch.meta.isArchiveFallback } : {}),
+          ...(typeof batch.meta.liveCount === "number" ? { liveCount: batch.meta.liveCount } : {}),
+          ...(typeof batch.meta.archiveCount === "number" ? { archiveCount: batch.meta.archiveCount } : {})
         };
       }
       mergeBatchIntoUnifiedPool(pool, batch.rawItems, {
@@ -2680,12 +2692,26 @@ async function buildMergedHomePayload(query = new URLSearchParams()) {
   let mlbdFreshNewItems = [];
   if (mlbdRes.status === "fulfilled" && mlbdRes.value?.ok) {
     const mlbd = mlbdRes.value;
+    const rankTrendingItems = list => {
+      const arr = Array.isArray(list) ? list : [];
+      return arr
+        .map((item, idx) => ({
+          item,
+          idx,
+          score: (isDirectlyStreamable(item) ? 4 : 0) + (hasCardPoster(item) ? 2 : 0),
+          views: Number(item?.views) || 0
+        }))
+        .sort((a, b) => (b.score - a.score) || (b.views - a.views) || (a.idx - b.idx))
+        .map(x => x.item);
+    };
     const cleanMlbdSecs = (mlbd.sections || [])
       .filter(s => !isNigerianContent(null, s?.title))
       .map(s => {
         const validItems = (s.items || []).filter(x => !isNigerianContent(x, s?.title) && hasPlayableStream(x));
         const postered = validItems.filter(hasCardPoster);
-        const curatedItems = (postered.length >= 4 ? rankHomeItems(postered) : rankHomeItems(validItems)).slice(0, 28).map(compactHomeCard);
+        const isMostWatchSec = /^\/mostwatch/i.test(String(s?.categoryPath || ""));
+        const sorter = isMostWatchSec ? rankTrendingItems : rankHomeItems;
+        const curatedItems = (postered.length >= 4 ? sorter(postered) : sorter(validItems)).slice(0, 28).map(compactHomeCard);
         return { ...s, items: curatedItems };
       })
       .filter(s => s.items.length > 0);
@@ -2693,7 +2719,7 @@ async function buildMergedHomePayload(query = new URLSearchParams()) {
     const newSec = cleanMlbdSecs.find(s => /latest\s*release|new|\b\/new\b/i.test(`${s.title || ""} ${s.categoryPath || ""}`));
     mlbdFreshNewItems = newSec ? newSec.items : (cleanMlbdSecs[0]?.items || []);
     payload.mlbdSections = cleanMlbdSecs;
-    payload.mlbdTrending = rankHomeItems((mlbd.trending || []).filter(x => !isNigerianContent(x) && hasPlayableStream(x))).slice(0, 28).map(compactHomeCard);
+    payload.mlbdTrending = rankTrendingItems((mlbd.trending || []).filter(x => !isNigerianContent(x) && hasPlayableStream(x))).slice(0, 28).map(compactCatalogCard);
     payload.mlbdCategories = mlbd.categories || [];
     const existingCats = new Set((payload.categories || []).map(c => c?.path));
     payload.categories = [

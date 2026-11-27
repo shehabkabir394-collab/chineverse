@@ -23,7 +23,9 @@ export async function onRequest({ request, env }) {
     const q = String(url.searchParams.get("q") || "");
     const page = Math.max(1, Number(url.searchParams.get("page")) || 1);
     const data = await getMlbdCatalog({ path: pathParam, q, page });
-    if (!q && Array.isArray(data?.items)) {
+    const normPath = pathParam.toLowerCase().replace(/\/+$/, "") || "/";
+    const preserveOrder = normPath === "/mostwatch/7d" || normPath === "/mostwatch" || normPath === "/popular" || normPath === "/top10" || normPath === "/top-rated";
+    if (!q && !preserveOrder && Array.isArray(data?.items)) {
       data.items = sortByReleaseNewest(data.items);
     }
     return json(data, 200, "public, max-age=90");

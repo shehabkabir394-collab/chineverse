@@ -754,7 +754,7 @@ function ensureTrailingSlashPath(pathWithQuery) {
   const qIdx = raw.indexOf("?");
   const p = qIdx >= 0 ? raw.slice(0, qIdx) : raw;
   const q = qIdx >= 0 ? raw.slice(qIdx) : "";
-  if (!p || p === "/" || p === "/new" || /^\/(?:movie|series|drama|anime|p|updates)\//i.test(p)) {
+  if (!p || p === "/" || p === "/new" || p === "/mostwatch/7d" || /^\/(?:movie|series|drama|anime|p|updates)\//i.test(p)) {
     return raw;
   }
   return (p.endsWith("/") ? p : p + "/") + q;
@@ -1431,9 +1431,11 @@ export function extractCardsFromHtml(html, baseOrigin = activeResolvedOrigin, op
       year: yr,
       rating: ratingMatch ? ratingMatch[1] : "",
       viewsText: views,
+      views: parseViewsCount(views),
       uploadTime,
       isPinned,
       isAdult,
+      fromArchive: false,
       ...(uploadedAtMs > 0 ? { uploadedAtMs } : {}),
       hasResource: !/upcoming|release soon/i.test(quality + " " + title),
       isHindiDubbed: /hindi|dual/i.test(`${language} ${title}`),
@@ -2638,7 +2640,8 @@ async function getMlbdComCatalog({ path = "/", q = "", page = 1 } = {}) {
   const pageNum = Math.max(1, Number(page) || 1);
   const cleanQ = String(q || "").trim();
   const normCat = String(path || "/").toLowerCase().replace(/\/+$/, "") || "/";
-  const sortMode = normCat === "/top-rated" ? "rating" : (normCat === "/popular" || normCat.startsWith("/mostwatch") || normCat === "/top10") ? "popular" : "latest";
+  const isTrendingFallback = normCat === "/mostwatch/7d" || normCat === "/mostwatch" || normCat === "/popular";
+  const sortMode = normCat === "/top-rated" ? "rating" : (isTrendingFallback || normCat === "/top10") ? "popular" : "latest";
   const archiveRes = queryMlbdArchive({
     q: cleanQ,
     category: normCat,
@@ -2667,7 +2670,7 @@ async function getMlbdComCatalog({ path = "/", q = "", page = 1 } = {}) {
       Number(b.it.year || 0) - Number(a.it.year || 0)
     );
     liveItems = scored.map(x => x.it);
-  } else {
+  } else if (!isTrendingFallback) {
     const targetPages = pageNum === 1 ? mapCategoryToMlbdComUrls(path).slice(0, 3) : [];
     if (targetPages.length) {
       const settled = await Promise.allSettled(
@@ -2677,7 +2680,7 @@ async function getMlbdComCatalog({ path = "/", q = "", page = 1 } = {}) {
         if (r.status !== "fulfilled") continue;
         const cards = extractMlbdComCards(r.value.html, r.value.tp);
         for (const c of cards) {
-          if (!isNigerianContent(c) && (matchesMlbdCategoryItem(c, path) || ["/", "/new", "/popular", "/top10", "/recently-updated"].includes(normCat))) {
+          if (!isNigerianContent(c) && (matchesMlbdCategoryItem(c, path) || ["/", "/new", "/top10", "/recently-updated"].includes(normCat))) {
             liveItems.push(c);
           }
         }
@@ -2710,7 +2713,7 @@ async function getMlbdComCatalog({ path = "/", q = "", page = 1 } = {}) {
     merged.push(it);
   };
 
-  if (cleanQ) {
+  if (cleanQ || isTrendingFallback) {
     for (const it of archiveRes.items) pushUnique(it);
     for (const it of liveItems) pushUnique(it);
   } else {
@@ -2727,14 +2730,20 @@ async function getMlbdComCatalog({ path = "/", q = "", page = 1 } = {}) {
     await enrichMlbdItemsWithPosters(slice, 18, 6);
   }
   const maxPage = Math.max(1, Math.ceil(totalCount / perPage));
+  const archiveCount = slice.filter(x => x?.fromArchive === true).length;
+  const liveCount = slice.length - archiveCount;
 
   return {
     ok: true,
     source: "movielinkbd",
     activeMirror: "https://movielinkbd.com",
     path,
-    upstreamPath: cleanQ ? "/search" : mapCategoryToMlbdComUrls(path)[0] || "/",
-    heading: cleanQ ? `Search: ${cleanQ}` : "All Movies & Series",
+    upstreamPath: cleanQ ? "/search" : (isTrendingFallback ? "/mostwatch/7d" : mapCategoryToMlbdComUrls(path)[0] || "/"),
+    heading: cleanQ ? `Search: ${cleanQ}` : (isTrendingFallback ? "Trending Now (Archive Fallback)" : "All Movies & Series"),
+    contentSource: liveCount > 0 && archiveCount > 0 ? "portal+archive" : archiveCount > 0 ? "archive" : "portal",
+    isArchiveFallback: archiveCount > 0 || isTrendingFallback,
+    liveCount,
+    archiveCount,
     items: slice,
     page: pageNum,
     maxPage,
@@ -2919,12 +2928,20 @@ export async function getMlbdHomeFeed() {
     }
 
     const top10Sec = sections.find(s => /top\s*10/i.test(s.title));
-    const trendingSec = sections.find(s => s !== top10Sec && /new|popular|recently/i.test(s.title)) || sections.find(s => s !== top10Sec) || sections[0];
+    const mostWatchSec = sections.find(s => s !== top10Sec && /^\/mostwatch/i.test(String(s?.categoryPath || "")));
+    let trending = Array.isArray(mostWatchSec?.items) ? mostWatchSec.items.filter(x => x && x.fromArchive !== true) : [];
+    if (trending.length < 10) {
+      const liveTrendingCat = await getMlbdCatalog({ path: "/mostwatch/7d", page: 1 }).catch(() => null);
+      if (liveTrendingCat && !liveTrendingCat.isArchiveFallback && Array.isArray(liveTrendingCat.items) && liveTrendingCat.items.length) {
+        trending = liveTrendingCat.items.filter(x => x && x.fromArchive !== true);
+      }
+    }
     const allItems = sections.flatMap(s => s.items);
     const deduped = [...new Map(allItems.map(it => [it.path, it])).values()];
-    const top10Set = new Set((top10Sec?.items || []).map(it => it.path));
-    const nonTop10 = deduped.filter(it => !top10Set.has(it.path));
-    const trending = trendingSec?.items?.length ? trendingSec.items : (nonTop10.length ? nonTop10.slice(0, 24) : deduped.slice(0, 24));
+    if (!trending.length) {
+      const trendingSec = sections.find(s => s !== top10Sec && /popular|most\s*watch/i.test(s.title)) || top10Sec || sections[0];
+      trending = (trendingSec?.items || []).filter(x => x && x.fromArchive !== true);
+    }
     const banners = deduped.filter(it => it.poster).slice(0, 10);
 
     return setCached(
@@ -2985,24 +3002,55 @@ export async function getMlbdHomeFeed() {
   }
 }
 
+export function isMlbdTrendingPath(rawPath = "/") {
+  const norm = normalizeUpstreamPath(rawPath)
+    .toLowerCase()
+    .replace(/\/page\/\d+\/?$/i, "")
+    .replace(/\/+$/, "") || "/";
+  return norm === "/mostwatch/7d" || norm === "/mostwatch" || norm === "/popular";
+}
+
+export function resolveMlbdUpstreamCatalogPath({ path = "/", q = "", page = 1 } = {}) {
+  const pageNum = Math.max(1, Math.min(400, Number(page) || 1));
+  const cleanQuery = String(q || "").trim();
+  const basePath = normalizeUpstreamPath(path);
+
+  if (cleanQuery || basePath === "/search" || basePath.startsWith("/search?")) {
+    const searchTerm = cleanQuery || new URL("https://x.test" + basePath).searchParams.get("q") || "";
+    return pageNum > 1
+      ? `/search/page/${pageNum}/?q=${encodeURIComponent(searchTerm)}`
+      : `/search/?q=${encodeURIComponent(searchTerm)}`;
+  }
+  if (isMlbdTrendingPath(basePath)) {
+    return pageNum > 1 ? `/mostwatch/7d/page/${pageNum}/` : "/mostwatch/7d";
+  }
+  if (basePath === "/" || basePath === "/new" || basePath === "/all") {
+    return pageNum > 1 ? `/new/page/${pageNum}/` : "/new";
+  }
+  const cleanBase = basePath.replace(/\/page\/\d+\/?$/i, "").replace(/\/+$/, "") || "/";
+  return pageNum > 1 ? `${cleanBase}/page/${pageNum}/` : `${cleanBase}/`;
+}
+
+export function orderMlbdTrendingItems(items = []) {
+  return (Array.isArray(items) ? items : [])
+    .map((item, idx) => ({
+      item,
+      idx,
+      views: Number(item?.views) || parseViewsCount(item?.viewsText || "")
+    }))
+    .sort((a, b) => (b.views - a.views) || (a.idx - b.idx))
+    .map(x => x.item);
+}
+
 export async function getMlbdCatalog({ path = "/", q = "", page = 1 } = {}) {
   await ensureMlbdArchiveLoaded();
   const pageNum = Math.max(1, Math.min(400, Number(page) || 1));
   const cleanQuery = String(q || "").trim();
   const basePath = normalizeUpstreamPath(path);
-
-  let upstreamPath = "/";
-  if (cleanQuery || basePath === "/search" || basePath.startsWith("/search?")) {
-    const searchTerm = cleanQuery || new URL("https://x.test" + basePath).searchParams.get("q") || "";
-    upstreamPath = pageNum > 1
-      ? `/search/page/${pageNum}/?q=${encodeURIComponent(searchTerm)}`
-      : `/search/?q=${encodeURIComponent(searchTerm)}`;
-  } else if (basePath === "/" || basePath === "/new" || basePath === "/all") {
-    upstreamPath = pageNum > 1 ? `/new/page/${pageNum}/` : "/new";
-  } else {
-    const cleanBase = basePath.replace(/\/page\/\d+\/?$/i, "").replace(/\/+$/, "") || "/";
-    upstreamPath = pageNum > 1 ? `${cleanBase}/page/${pageNum}/` : `${cleanBase}/`;
-  }
+  const isTrendingRoute = !cleanQuery && isMlbdTrendingPath(basePath);
+  const normBase = basePath.toLowerCase().replace(/\/page\/\d+\/?$/i, "").replace(/\/+$/, "") || "/";
+  const preserveRankingOrder = !cleanQuery && (isTrendingRoute || normBase === "/top10" || normBase === "/top-rated");
+  const upstreamPath = resolveMlbdUpstreamCatalogPath({ path: basePath, q: cleanQuery, page: pageNum });
 
   const cacheKey = `catalog:${upstreamPath}`;
   const cached = getCached(cacheKey);
@@ -3010,16 +3058,34 @@ export async function getMlbdCatalog({ path = "/", q = "", page = 1 } = {}) {
 
   try {
     const pageData = await mlbdFetchPage(upstreamPath, { ttlMs: 90000 });
-    const items = sortMlbdNewestFirst(extractCardsFromHtml(pageData.html, pageData.origin));
+    const rawLiveItems = extractCardsFromHtml(pageData.html, pageData.origin)
+      .filter(item => item && item.fromArchive !== true);
+
+    if (isTrendingRoute && rawLiveItems.length === 0) {
+      throw new Error("Live /mostwatch/7d returned zero trending items");
+    }
+
+    const items = isTrendingRoute
+      ? orderMlbdTrendingItems(rawLiveItems)
+      : preserveRankingOrder
+        ? rawLiveItems
+        : sortMlbdNewestFirst(rawLiveItems);
+
     const pagination = extractPagination(pageData.html, pageNum);
     const titleMatch = pageData.html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
 
     let finalItems = items;
-    if (finalItems.length < 10 && pageNum === 1) {
+    let archiveSupplementItems = [];
+    // Keep live trending strictly separate from archive fallback; only supplement sparse non-trending category pages
+    if (!isTrendingRoute && finalItems.length < 10 && pageNum === 1) {
       const archExtra = queryMlbdArchive({ q: cleanQuery, category: basePath, includeAdult: true, limit: 30 }).items;
       const seen = new Set(finalItems.map(x => x.path));
-      finalItems = [...finalItems, ...archExtra.filter(x => !seen.has(x.path))].slice(0, 30);
+      archiveSupplementItems = archExtra.filter(x => x && !seen.has(x.path));
+      finalItems = [...finalItems, ...archiveSupplementItems].slice(0, 30);
     }
+
+    const archiveCount = finalItems.filter(x => x?.fromArchive === true).length;
+    const liveCount = finalItems.length - archiveCount;
 
     return setCached(
       cacheKey,
@@ -3027,9 +3093,13 @@ export async function getMlbdCatalog({ path = "/", q = "", page = 1 } = {}) {
         ok: true,
         source: "movielinkbd",
         activeMirror: pageData.origin,
-        path: basePath,
+        path: isTrendingRoute ? "/mostwatch/7d" : basePath,
         upstreamPath,
-        heading: titleMatch ? stripSiteBrandFromLabel(stripTags(titleMatch[1])) : "",
+        heading: titleMatch ? stripSiteBrandFromLabel(stripTags(titleMatch[1])) : (isTrendingRoute ? "Trending Now" : ""),
+        contentSource: archiveCount > 0 ? "live+archive" : "live",
+        isArchiveFallback: false,
+        liveCount,
+        archiveCount,
         items: finalItems,
         ...pagination
       },
@@ -3047,23 +3117,30 @@ export async function getMlbdCatalog({ path = "/", q = "", page = 1 } = {}) {
       const cpRoute = cleanQuery ? "search" : "catalog";
       const cpParams = cleanQuery
         ? { q: cleanQuery, page: String(pageNum), source: "movielinkbd" }
-        : { category: basePath, page: String(pageNum), source: "movielinkbd" };
+        : { category: isTrendingRoute ? "/mostwatch/7d" : basePath, page: String(pageNum), source: "movielinkbd" };
       const cp = await fetchCinePulseApi(cpRoute, cpParams, { timeoutMs: 12000 });
       const rawCp = cp.data?.separated && cp.data?.movielinkbd ? cp.data.movielinkbd : cp.data;
       if (cp.ok && Array.isArray(rawCp?.items) && rawCp.items.length > 0) {
         mlbdCinePulseHasContent = true;
         const norm = normalizeCinePulsePayload(cpRoute, rawCp);
+        const cpItems = (norm.items || []).map(it => ({ ...it, fromArchive: false }));
         return setCached(cacheKey, {
           ...norm,
           ok: true,
           source: "movielinkbd",
           activeMirror: rawCp.activeMirror || "CinePulse Gateway",
-          path: basePath,
+          path: isTrendingRoute ? "/mostwatch/7d" : basePath,
+          upstreamPath,
+          contentSource: "cinepulse-live",
+          isArchiveFallback: false,
+          liveCount: cpItems.length,
+          archiveCount: 0,
+          items: cpItems,
           page: pageNum
         }, 90000);
       }
     }
-    const portalCat = await getMlbdComCatalog({ path: basePath, q: cleanQuery, page: pageNum });
+    const portalCat = await getMlbdComCatalog({ path: isTrendingRoute ? "/mostwatch/7d" : basePath, q: cleanQuery, page: pageNum });
     return setCached(cacheKey, portalCat, 90000);
   }
 }

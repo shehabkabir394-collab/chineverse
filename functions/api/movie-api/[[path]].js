@@ -350,6 +350,12 @@ export async function onRequest({ request, env, params }) {
     if (legacy === "catalog") {
       const catPath = String(query.get("category") || query.get("path") || "/");
       const page = Math.max(1, Number(query.get("page")) || 1);
+      const normCatPath = catPath.toLowerCase().replace(/\/+$/, "") || "/";
+      const isTrendingCat = normCatPath === "/mostwatch/7d" || normCatPath === "/mostwatch" || normCatPath === "/popular";
+      if (isTrendingCat) {
+        const mlbdTrending = await getMlbdCatalog({ path: catPath, page });
+        return json({ ...mlbdTrending, ok: true }, 200, "public, max-age=60");
+      }
       const isMlbdOnlyCategory = /^\/(?:language\/(?:dual-audio|gujrati|kannada|marathi|malaysian|vietnamese|german|italian|portuguese|others)|genre\/(?:biographical|historical|musical|sports|superhero|survival|suspense)|category\/|collection\/|collections)/i.test(catPath);
       if (isMlbdOnlyCategory) {
         try {
@@ -382,10 +388,12 @@ export async function onRequest({ request, env, params }) {
         seen.add(key);
         merged.push(item);
       }
+      const normCat = catPath.toLowerCase().replace(/\/+$/, "") || "/";
+      const preserveOrder = normCat === "/mostwatch/7d" || normCat === "/mostwatch" || normCat === "/popular" || normCat === "/top10" || normCat === "/top-rated";
       return json({
         ...mbPayload,
         ok: true,
-        items: sortByReleaseNewest(merged),
+        items: preserveOrder ? merged : sortByReleaseNewest(merged),
         maxPage: Math.max(
           Number(mbPayload?.maxPage || 1),
           Number(mlbdRes.status === "fulfilled" ? mlbdRes.value?.maxPage || 1 : 1)
