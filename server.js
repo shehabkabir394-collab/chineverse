@@ -34,11 +34,13 @@ import {
 } from "./movielinkbd-api.js";
 import { buildPosterSvg, handleMockMovieApi } from "./mock-catalog.js";
 import {
+  CATALOG_PAGE_SIZE,
   isNigerianContent,
   isMusicOrClipSubject,
   expandSearchQueryVariants,
   scoreSearchMatch,
-  collectTitleSuggestions
+  collectTitleSuggestions,
+  paginateCatalogItems
 } from "./lib/catalog-rules.js";
 import {
   CINEPULSE_UPSTREAM,
@@ -2172,7 +2174,7 @@ function normalizeCatalogDedupeKey(item) {
   const normTitle = rawTitle
     .toLowerCase()
     .replace(/\b(?:hdrip|web-dl|webrip|hdtc|camrip|bluray|dvdrip|1080p|720p|480p|x264|x265|hevc|the best quality|full movie|dual audio|hindi org|uncut)\b/gi, " ")
-    .replace(/[^a-z0-9]+/g, "");
+    .replace(/[^a-z0-9\u0980-\u09ff]+/g, "");
   const kind = item.isSeries ? "s" : (item.isAnime ? "a" : "m");
   if (normTitle.length >= 3) return `${kind}:${normTitle}`;
   return String(item.path || item.subjectId || item.id || normTitle).trim().toLowerCase();
@@ -2311,9 +2313,56 @@ function getRecentUploadsPoolForCategory(categoryPath = "/") {
   return candidates.filter(x => matchesCatalogRecentCategory(x, norm));
 }
 
-async function buildUnifiedCatalogPayload(category, page, query) {
-  const norm = String(category || "/").toLowerCase().replace(/\/+$/, "") || "/";
-  const isMlbdOnlyCategory = /^\/(?:language\/(?:dual-audio|gujrati|kannada|marathi|malaysian|vietnamese|german|italian|portuguese|others)|genre\/(?:biographical|historical|musical|sports|superhero|survival|suspense)|category\/|collection\/|collections)/i.test(category);
+const UNIFIED_CATALOG_POOL_TTL_MS = 300000;
+const UNIFIED_CATALOG_POOL_MAX = 60;
+const MAX_UPSTREAM_STEPS_PER_REQ = 4;
+const unifiedCatalogPools = new Map();
+
+function buildUnifiedCatalogPoolKey(normCat, query) {
+  const extraPairs = [];
+  for (const k of ["channelId", "genre", "country", "year", "sort", "classify"]) {
+    const v = query?.get?.(k);
+    if (v != null && String(v).trim() !== "") {
+      extraPairs.push(`${k}=${String(v).trim().toLowerCase()}`);
+    }
+  }
+  return extraPairs.length ? `${normCat}|${extraPairs.join("&")}` : normCat;
+}
+
+function getOrCreateUnifiedCatalogPool(poolKey) {
+  const now = Date.now();
+  const existing = unifiedCatalogPools.get(poolKey);
+  if (existing && now - existing.createdAt < UNIFIED_CATALOG_POOL_TTL_MS) {
+    // Touch LRU order
+    unifiedCatalogPools.delete(poolKey);
+    unifiedCatalogPools.set(poolKey, existing);
+    return existing;
+  }
+  if (existing) unifiedCatalogPools.delete(poolKey);
+  while (unifiedCatalogPools.size >= UNIFIED_CATALOG_POOL_MAX) {
+    const oldestKey = unifiedCatalogPools.keys().next().value;
+    if (!oldestKey) break;
+    unifiedCatalogPools.delete(oldestKey);
+  }
+  const fresh = {
+    createdAt: now,
+    updatedAt: now,
+    items: [],
+    keyIndex: new Map(),
+    fetchedUpstreamPage: 0,
+    mbExhausted: false,
+    mlbdExhausted: false,
+    mbMaxPage: 1,
+    mlbdMaxPage: 1,
+    mbTotalCount: 0,
+    lastMeta: {},
+    inFlight: null
+  };
+  unifiedCatalogPools.set(poolKey, fresh);
+  return fresh;
+}
+
+async function fetchUnifiedCatalogUpstreamBatch({ category, norm, upstreamPage, query, isMlbdOnlyCategory, fetchMb, fetchMlbd }) {
   const catKeywordFallback = c => {
     const low = String(c || "").toLowerCase();
     if (low.includes("mcu") || low.includes("marvel")) return "Marvel";
@@ -2325,70 +2374,251 @@ async function buildUnifiedCatalogPayload(category, page, query) {
     return slug || "Movie";
   };
 
-  if (page === 1 && !mergedHomeCache?.payload && mergedHomeInFlight) {
+  if (upstreamPage === 1 && !mergedHomeCache?.payload && mergedHomeInFlight) {
     await Promise.race([mergedHomeInFlight.catch(() => null), new Promise(r => setTimeout(r, 2500))]);
   }
-  const recentInjected = page === 1 ? getRecentUploadsPoolForCategory(norm) : [];
+  const recentInjected = upstreamPage === 1 ? getRecentUploadsPoolForCategory(norm) : [];
+  const upQuery = new URLSearchParams(query);
+  upQuery.set("page", String(upstreamPage));
 
   if (isMlbdOnlyCategory) {
     let mlbdPlayable = [];
     let mlbdMeta = {};
+    let mlbdMaxPage = upstreamPage;
+    let mlbdExhausted = true;
     try {
-      const mlbdCat = await getMlbdCatalog({ path: category, page });
+      const mlbdCat = await getMlbdCatalog({ path: category, page: upstreamPage });
       mlbdMeta = mlbdCat || {};
       if (Array.isArray(mlbdCat?.items)) {
         mlbdPlayable = mlbdCat.items.filter(x => x && !isNigerianContent(x) && x.hasResource !== false);
       }
+      mlbdMaxPage = Math.max(1, Number(mlbdCat?.maxPage || mlbdCat?.totalPages || 1));
+      const mlbdHasMore = Boolean(mlbdCat?.hasMore || upstreamPage < mlbdMaxPage);
+      mlbdExhausted = mlbdPlayable.length === 0 ? true : !mlbdHasMore;
     } catch (err) {
       console.warn(`[MLBD catalog error] ${category}:`, err?.message || err);
     }
-    if (mlbdPlayable.length < 6) {
+
+    if (mlbdPlayable.length < 6 && upstreamPage <= 2) {
       try {
         let mbItems = [];
         if (!/^(?:\/collection\/|\/category\/)/i.test(category)) {
-          const mbFallback = await handleMovieBoxRoute("catalog", query).catch(() => null);
+          const mbFallback = await handleMovieBoxRoute("catalog", upQuery).catch(() => null);
           if (mbFallback?.ok && Array.isArray(mbFallback.items)) mbItems = mbFallback.items;
         }
         if (mbItems.length < 6) {
           const kw = catKeywordFallback(category);
-          const mbSearch = await handleMovieBoxRoute("search", new URLSearchParams({ q: kw, page: String(page) })).catch(() => null);
+          const mbSearch = await handleMovieBoxRoute("search", new URLSearchParams({ q: kw, page: String(upstreamPage) })).catch(() => null);
           if (Array.isArray(mbSearch?.items)) mbItems = [...mbItems, ...mbSearch.items];
         }
         mlbdPlayable.push(...mbItems.filter(item => item && !isNigerianContent(item) && !isMusicOrClipSubject(item) && item.hasResource !== false));
       } catch {}
     }
-    const sorted = sortCatalogNewestFirst(dedupeCatalogItems([...recentInjected, ...mlbdPlayable])).map(compactCatalogCard);
-    if (sorted.length > 0) {
-      return { ...mlbdMeta, ok: true, items: sorted, page, maxPage: Math.max(page, Number(mlbdMeta?.maxPage || 1)) };
-    }
-    return { ok: true, items: [], maxPage: 1, page };
+
+    return {
+      rawItems: [...recentInjected, ...mlbdPlayable],
+      mbExhausted: true,
+      mlbdExhausted,
+      mbMaxPage: 1,
+      mlbdMaxPage,
+      mbTotalCount: 0,
+      meta: mlbdMeta
+    };
   }
 
   const [mbRes, mlbdRes] = await Promise.allSettled([
-    handleMovieBoxRoute("catalog", query),
-    getMlbdCatalog({ path: category, page })
+    fetchMb ? handleMovieBoxRoute("catalog", upQuery) : Promise.resolve({ ok: true, items: [], hasMore: false }),
+    fetchMlbd ? getMlbdCatalog({ path: category, page: upstreamPage }) : Promise.resolve({ ok: true, items: [], hasMore: false })
   ]);
+
   const mbPayload = mbRes.status === "fulfilled" && mbRes.value?.ok ? mbRes.value : { ok: true, items: [] };
   const mbRaw = (Array.isArray(mbPayload?.items) ? mbPayload.items : []).filter(x => x && !isNigerianContent(x) && x.hasResource !== false);
-  const mlbdRaw = (mlbdRes.status === "fulfilled" && Array.isArray(mlbdRes.value?.items) ? mlbdRes.value.items : [])
+  const mlbdPayload = mlbdRes.status === "fulfilled" ? mlbdRes.value : null;
+  const mlbdRaw = (Array.isArray(mlbdPayload?.items) ? mlbdPayload.items : [])
     .filter(x => x && !isNigerianContent(x) && x.hasResource !== false);
 
-  const merged = dedupeCatalogItems([...recentInjected, ...mlbdRaw, ...mbRaw]);
-  const ordered = (norm === "/top-rated" || norm === "/upcoming")
-    ? merged
-    : sortCatalogNewestFirst(merged);
-  const compactItems = ordered.map(compactCatalogCard);
-  const maxPage = Math.max(
-    Number(mbPayload?.maxPage || mbPayload?.totalPages || 1),
-    Number(mlbdRes.status === "fulfilled" ? (mlbdRes.value?.maxPage || mlbdRes.value?.totalPages || 1) : 1)
-  );
+  const mbPages = Math.max(1, Number(mbPayload?.totalPages || mbPayload?.maxPage || 1));
+  const mbHasMoreFlag = Boolean(mbPayload?.hasMore || mbPayload?.pager?.hasMore || upstreamPage < mbPages);
+  const mbNextExhausted = !fetchMb || (mbRaw.length === 0 ? true : !mbHasMoreFlag);
+  const mbTotalCount = Number(mbPayload?.pager?.totalCount || mbPayload?.totalCount || 0);
+
+  const mlbdPages = Math.max(1, Number(mlbdPayload?.maxPage || mlbdPayload?.totalPages || 1));
+  const mlbdHasMoreFlag = Boolean(mlbdPayload?.hasMore || upstreamPage < mlbdPages);
+  const mlbdNextExhausted = !fetchMlbd || (mlbdRaw.length === 0 ? true : !mlbdHasMoreFlag);
+
   return {
-    ...mbPayload,
+    rawItems: [...recentInjected, ...mlbdRaw, ...mbRaw],
+    mbExhausted: mbNextExhausted,
+    mlbdExhausted: mlbdNextExhausted,
+    mbMaxPage: mbPages,
+    mlbdMaxPage: mlbdPages,
+    mbTotalCount,
+    meta: mbPayload
+  };
+}
+
+function mergeBatchIntoUnifiedPool(pool, rawItems, { preserveOrder = false, allowResortWhole = false } = {}) {
+  const dedupedBatch = dedupeCatalogItems(rawItems);
+  const newOnes = [];
+  for (const item of dedupedBatch) {
+    const key = normalizeCatalogDedupeKey(item);
+    if (!key) continue;
+    const existingIdx = pool.keyIndex.get(key);
+    if (existingIdx !== undefined) {
+      pool.items[existingIdx] = compactCatalogCard(pickBetterCatalogItem(pool.items[existingIdx], item));
+    } else {
+      newOnes.push(item);
+    }
+  }
+  if (!newOnes.length) return;
+
+  if (pool.items.length === 0 || allowResortWhole) {
+    const combined = [...pool.items, ...newOnes];
+    const ordered = preserveOrder ? combined : sortCatalogNewestFirst(combined);
+    pool.items = ordered.map(compactCatalogCard);
+    pool.keyIndex = new Map();
+    pool.items.forEach((it, idx) => {
+      const k = normalizeCatalogDedupeKey(it);
+      if (k && !pool.keyIndex.has(k)) pool.keyIndex.set(k, idx);
+    });
+    return;
+  }
+
+  const orderedNew = preserveOrder ? newOnes : sortCatalogNewestFirst(newOnes);
+  for (const rawNew of orderedNew) {
+    const k = normalizeCatalogDedupeKey(rawNew);
+    if (!k || pool.keyIndex.has(k)) continue;
+    const compact = compactCatalogCard(rawNew);
+    pool.keyIndex.set(k, pool.items.length);
+    pool.items.push(compact);
+  }
+}
+
+async function buildUnifiedCatalogPayload(category, page, query) {
+  const safePage = Math.max(1, Math.floor(Number(page) || 1));
+  const norm = String(category || "/").toLowerCase().replace(/\/+$/, "") || "/";
+  const isMlbdOnlyCategory = /^\/(?:language\/(?:dual-audio|gujrati|kannada|marathi|malaysian|vietnamese|german|italian|portuguese|others)|genre\/(?:biographical|historical|musical|sports|superhero|survival|suspense)|category\/|collection\/|collections)/i.test(category);
+  const preserveOrder = norm === "/top-rated" || norm === "/upcoming" || norm === "/top10";
+  const poolKey = buildUnifiedCatalogPoolKey(norm, query);
+  const pool = getOrCreateUnifiedCatalogPool(poolKey);
+  const targetCount = safePage * CATALOG_PAGE_SIZE;
+
+  const runInPool = async fn => {
+    while (pool.inFlight) {
+      await pool.inFlight.catch(() => null);
+    }
+    const p = fn();
+    pool.inFlight = p;
+    try {
+      return await p;
+    } finally {
+      if (pool.inFlight === p) pool.inFlight = null;
+    }
+  };
+
+  let deepFallbackItems = null;
+  await runInPool(async () => {
+    let steps = 0;
+    while (
+      pool.items.length < targetCount &&
+      (!pool.mbExhausted || !pool.mlbdExhausted) &&
+      steps < MAX_UPSTREAM_STEPS_PER_REQ
+    ) {
+      const nextUpPage = pool.fetchedUpstreamPage + 1;
+      const prevLen = pool.items.length;
+      const batch = await fetchUnifiedCatalogUpstreamBatch({
+        category,
+        norm,
+        upstreamPage: nextUpPage,
+        query,
+        isMlbdOnlyCategory,
+        fetchMb: nextUpPage === 1 || !pool.mbExhausted,
+        fetchMlbd: nextUpPage === 1 || !pool.mlbdExhausted
+      });
+      pool.fetchedUpstreamPage = nextUpPage;
+      pool.updatedAt = Date.now();
+      pool.mbExhausted = batch.mbExhausted;
+      pool.mlbdExhausted = batch.mlbdExhausted;
+      pool.mbMaxPage = Math.max(pool.mbMaxPage, batch.mbMaxPage || 1);
+      pool.mlbdMaxPage = Math.max(pool.mlbdMaxPage, batch.mlbdMaxPage || 1);
+      if (batch.mbTotalCount > 0) pool.mbTotalCount = Math.max(pool.mbTotalCount, batch.mbTotalCount);
+      if (batch.meta && typeof batch.meta === "object") {
+        pool.lastMeta = {
+          ...(batch.meta.heading ? { heading: batch.meta.heading } : {}),
+          ...(batch.meta.source ? { source: batch.meta.source } : {})
+        };
+      }
+      mergeBatchIntoUnifiedPool(pool, batch.rawItems, {
+        preserveOrder,
+        allowResortWhole: safePage === 1 && prevLen < CATALOG_PAGE_SIZE
+      });
+      steps++;
+    }
+
+    // Deep page bookmark fallback if sequential pooling hit per-request step cap
+    if (pool.items.length < targetCount && (!pool.mbExhausted || !pool.mlbdExhausted)) {
+      const batch = await fetchUnifiedCatalogUpstreamBatch({
+        category,
+        norm,
+        upstreamPage: safePage,
+        query,
+        isMlbdOnlyCategory,
+        fetchMb: !pool.mbExhausted,
+        fetchMlbd: !pool.mlbdExhausted
+      });
+      const deduped = dedupeCatalogItems(batch.rawItems).filter(it => {
+        const k = normalizeCatalogDedupeKey(it);
+        return k && !pool.keyIndex.has(k);
+      });
+      const ordered = preserveOrder ? deduped : sortCatalogNewestFirst(deduped);
+      deepFallbackItems = ordered.slice(0, CATALOG_PAGE_SIZE).map(compactCatalogCard);
+    }
+  });
+
+  const upstreamHasMore = !pool.mbExhausted || !pool.mlbdExhausted;
+  let estimatedTotalCount = pool.items.length;
+  if (upstreamHasMore) {
+    const mlbdRemPages = pool.mlbdExhausted ? 0 : Math.max(1, pool.mlbdMaxPage - pool.fetchedUpstreamPage);
+    const mlbdRemEst = mlbdRemPages * 25;
+    const mbRemEst = pool.mbExhausted
+      ? 0
+      : pool.mbTotalCount > 0
+        ? Math.max(0, pool.mbTotalCount - pool.fetchedUpstreamPage * 24)
+        : Math.max(1, pool.mbMaxPage - pool.fetchedUpstreamPage) * 30;
+    const combinedRem = (mlbdRemEst > 0 && mbRemEst > 0)
+      ? Math.round(Math.max(mlbdRemEst, mbRemEst) + Math.min(mlbdRemEst, mbRemEst) * 0.65)
+      : mlbdRemEst + mbRemEst;
+    estimatedTotalCount = pool.items.length + Math.max(CATALOG_PAGE_SIZE, combinedRem);
+  }
+
+  const paged = paginateCatalogItems(pool.items, safePage, CATALOG_PAGE_SIZE, {
+    upstreamHasMore,
+    estimatedTotalCount
+  });
+  const finalItems = deepFallbackItems && paged.items.length === 0 ? deepFallbackItems : paged.items;
+
+  return {
+    ...pool.lastMeta,
     ok: true,
-    items: compactItems,
-    totalPages: maxPage,
-    maxPage,
-    hasMore: page < maxPage
+    category,
+    items: finalItems,
+    page: paged.page,
+    perPage: paged.perPage,
+    pageSize: paged.pageSize,
+    totalCount: paged.totalCount,
+    totalItems: paged.totalItems,
+    isExactTotal: paged.isExactTotal,
+    totalPages: paged.totalPages,
+    maxPage: paged.maxPage,
+    hasMore: paged.hasMore,
+    pager: {
+      page: String(paged.page),
+      perPage: paged.perPage,
+      totalCount: paged.totalCount,
+      totalPages: paged.totalPages,
+      hasMore: paged.hasMore,
+      nextPage: paged.hasMore ? String(paged.page + 1) : ""
+    }
   };
 }
 

@@ -16,15 +16,15 @@
  const selected=params.get("category")||"", letter=(params.get("letter")||"").toUpperCase(), page=Math.max(1,Number(params.get("page"))||1), viewAllCats=params.get("view")==="categories";
  const root=$("#catalogGrid"),status=$("#catalogStatus"),pager=$("#catalogPager"),nav=$("#catalogCategories"),az=$("#catalogAZ"),search=$("#catalogSearch"),heading=$("#catalogHeading");
  const allCatsPanel=$("#catalogAllCatsPanel"),allCatsToggle=$("#catalogAllCatsToggle");
- const pageSize=24;
+ const pageSize=30;
  const CATS_CACHE_KEY="cv_categories_cache_v1", CATS_TTL=60*60*1000;
  const OPTS_CACHE_KEY="cv_filter_opts_cache_v1", OPTS_TTL=6*60*60*1000;
- const CATALOG_CACHE_KEY="cv_catalog_cache_v1", CATALOG_TTL=15*60*1000;
+ const CATALOG_CACHE_KEY="cv_catalog_cache_v2", CATALOG_TTL=15*60*1000;
  let data=null,all=[],apiCatalogMode=false,apiMeta=null,allApiCategories=[],apiSearchQuery="";
  const readLocal=(k,ttl)=>{try{const r=JSON.parse(localStorage.getItem(k)||"null");if(r&&r.ts&&Date.now()-r.ts<ttl)return r.val;}catch{}return null;};
  const writeLocal=(k,val)=>{try{localStorage.setItem(k,JSON.stringify({ts:Date.now(),val}));}catch{}};
  const readCatalogCache=key=>{try{const m=JSON.parse(localStorage.getItem(CATALOG_CACHE_KEY)||"{}");const e=m[key];if(e&&e.ts&&Date.now()-e.ts<CATALOG_TTL&&Array.isArray(e.items))return e;}catch{}return null;};
- const writeCatalogCache=(key,payload)=>{if(!payload||!Array.isArray(payload.items)||!payload.items.length)return;try{const m=JSON.parse(localStorage.getItem(CATALOG_CACHE_KEY)||"{}");delete m[key];m[key]={ts:Date.now(),items:payload.items.slice(0,36),maxPage:payload.maxPage||payload.totalPages||1};const keys=Object.keys(m);while(keys.length>10)delete m[keys.shift()];localStorage.setItem(CATALOG_CACHE_KEY,JSON.stringify(m));}catch{}};
+ const writeCatalogCache=(key,payload)=>{if(!payload||!Array.isArray(payload.items)||!payload.items.length)return;try{const m=JSON.parse(localStorage.getItem(CATALOG_CACHE_KEY)||"{}");delete m[key];const perPage=Math.max(1,Math.min(pageSize,Number(payload.perPage||payload.pageSize)||pageSize));m[key]={ts:Date.now(),items:payload.items.slice(0,perPage),perPage,pageSize:perPage,totalCount:Number(payload.totalCount||payload.totalItems||0),totalItems:Number(payload.totalItems||payload.totalCount||0),totalPages:Number(payload.totalPages||payload.maxPage||1),maxPage:Number(payload.maxPage||payload.totalPages||1),isExactTotal:Boolean(payload.isExactTotal),hasMore:Boolean(payload.hasMore)};const keys=Object.keys(m);while(keys.length>10)delete m[keys.shift()];localStorage.setItem(CATALOG_CACHE_KEY,JSON.stringify(m));}catch{}};
  const isNigerian=(item,sectionTitle="")=>{
   const sec=String(sectionTitle||"").trim();
   if(sec&&/\b(?:nollywood|must-watch\s*black\s*shows?|black\s*cinema|black\s*shows?|nigeria|nigerian|ghana)\b|bet\+/i.test(sec))return true;
@@ -311,20 +311,43 @@
   if(!data)return;
   const q=norm(search?.value||"");
   const keepSearchOrder=Boolean(apiSearchQuery&&q&&q===apiSearchQuery);
+  const hasLocalSubFilter=Boolean(
+   letter ||
+   norm($("#catalogLanguageFilter")?.value||"") ||
+   norm($("#catalogTypeFilter")?.value||"") ||
+   norm($("#catalogGenreFilter")?.value||"") ||
+   (q&&!keepSearchOrder)
+  );
   const matched=all.filter(item=>!isNigerian(item)&&matches(item));
-  const filtered=keepSearchOrder?matched:matched.sort(categoryPriority);
+  const keepServerOrder=keepSearchOrder||(apiCatalogMode&&!hasLocalSubFilter&&selected!=="/top-rated");
+  const filtered=keepServerOrder?matched:matched.sort(categoryPriority);
+  const effectivePageSize=apiCatalogMode
+   ? Math.max(1,Math.min(pageSize,Number(apiMeta?.perPage||apiMeta?.pageSize)||pageSize))
+   : pageSize;
+  const apiTotalCount=Math.max(0,Number(apiMeta?.totalCount||apiMeta?.totalItems||0));
   const pages=apiCatalogMode
-   ? Math.max(1,Number(apiMeta?.maxPage||apiMeta?.totalPages||apiMeta?.pages)||1)
-   : Math.max(1,Math.ceil(filtered.length/pageSize));
-  const safePage=Math.min(page,pages);
-  const start=(safePage-1)*pageSize;
-  const items=apiCatalogMode?filtered:filtered.slice(start,start+pageSize);
+   ? Math.max(1,Number(apiMeta?.maxPage||apiMeta?.totalPages||apiMeta?.pages)||(apiTotalCount>0?Math.ceil(apiTotalCount/effectivePageSize):1))
+   : Math.max(1,Math.ceil(filtered.length/effectivePageSize));
+  const safePage=Math.max(1,Math.min(page,pages));
+  const start=(safePage-1)*effectivePageSize;
+  const items=apiCatalogMode
+   ? filtered.slice(0,effectivePageSize)
+   : filtered.slice(start,start+effectivePageSize);
   root.innerHTML=items.map((item,idx)=>card(item,idx)).join("")||'<p class="muted">এই Category-তে কোনো title পাওয়া যায়নি। অন্য Category নির্বাচন করো।</p>';
   const c=(data.categories||[]).find(x=>[x.path,x.slug,x.label,x.name,x.title].some(v=>norm(v)===norm(selected)));
   heading.textContent=selected?stripCatBrand(customLabels[selected]||c?.label||c?.name||c?.title||selected)||selected:"All Movies & Dramas A–Z";
-  status.textContent=apiCatalogMode
-   ? "Page "+safePage+" of "+pages+" · Showing "+items.length+" titles"
-   : filtered.length+" titles · Page "+safePage+" of "+pages+" · Showing "+(filtered.length?start+1:0)+"–"+Math.min(start+pageSize,filtered.length);
+  if(apiCatalogMode){
+   if(hasLocalSubFilter){
+    status.textContent="Page "+safePage+" of "+pages+" · Filtered "+items.length+" titles on this page";
+   }else{
+    const rangeStr=items.length?(start+1)+"–"+(start+items.length):"0";
+    const totalCount=Math.max(items.length,apiTotalCount);
+    const totalLabel=totalCount>0?(apiMeta?.isExactTotal===false?totalCount+"+":String(totalCount))+" titles · ":"";
+    status.textContent=totalLabel+"Page "+safePage+" of "+pages+" · Showing "+rangeStr;
+   }
+  }else{
+   status.textContent=filtered.length+" titles · Page "+safePage+" of "+pages+" · Showing "+(filtered.length?start+1:0)+"–"+Math.min(start+effectivePageSize,filtered.length);
+  }
 
   const pageNumbers=[...new Set([1,safePage-1,safePage,safePage+1,pages].filter(n=>n>=1&&n<=pages))].sort((a,b)=>a-b);
   let html="";
@@ -472,7 +495,7 @@
     };
     const directApiPath=!selected?"/all":(customPaths[selected]||(selected.startsWith("/")?selected:""));
     if(directApiPath){
-     const safePageNum=Math.max(1,Math.min(100,page));
+     const safePageNum=Math.max(1,Math.min(1000,page));
      const cacheKey=`${directApiPath.toLowerCase()}:${safePageNum}`;
      const cachedPage=readCatalogCache(cacheKey);
      const cachedCats=allApiCategories.length?allApiCategories:(readLocal(CATS_CACHE_KEY,CATS_TTL)||[]);
@@ -515,7 +538,7 @@
      const category=(data.categories||[]).find(x=>[x.path,x.slug,x.label,x.name,x.title].some(v=>norm(v)===norm(selected)));
      const apiPath=text(category?.path)||"/all";
      if(apiPath&&(apiPath!=="/"||selected==="/")){
-      const {res:cr,data:pagePayload}=await fetchJsonSafe("/api/movie-api/catalog?category="+encodeURIComponent(apiPath)+"&page="+Math.max(1,Math.min(100,page)),{headers:{Accept:"application/json"},cache:"default"});
+      const {res:cr,data:pagePayload}=await fetchJsonSafe("/api/movie-api/catalog?category="+encodeURIComponent(apiPath)+"&page="+Math.max(1,Math.min(1000,page)),{headers:{Accept:"application/json"},cache:"default"});
       if(!cr.ok||pagePayload.ok!==true)throw new Error(pagePayload.error||"Movie Catalog API unavailable");
       all=dedupeCatalogItems(pagePayload.items,apiPath==="/language/hindi-dubbed");
       apiCatalogMode=true;

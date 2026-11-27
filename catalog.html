@@ -19,7 +19,7 @@
   <script>
     (function(){
       try{
-        var p=new URLSearchParams(location.search),q=p.get("q")||"",sel=p.get("category")||"",pg=Math.max(1,Math.min(100,Number(p.get("page"))||1)),url="";
+        var p=new URLSearchParams(location.search),q=p.get("q")||"",sel=p.get("category")||"",pg=Math.max(1,Math.min(1000,Number(p.get("page"))||1)),url="";
         if(q){url="/api/movie-api/search?q="+encodeURIComponent(q)+"&page="+pg+(localStorage.getItem("cv_family_safe_v1")==="1"?"&safe=1":"");}
         else{
           var m={"cv:movie":"/type/movies","cv:anime":"/anime","cv:drama":"/drama","cv:kdrama":"/language/korean","cv:cdrama":"/language/chinese","cv:south":"/southIndian","cv:bollywood":"/bollywood","cv:hollywood":"/language/english"};
@@ -36,7 +36,7 @@
   <link rel="stylesheet" href="css/cineverse-app-redesign.css?v=20261125-ui-3">
   <link rel="stylesheet" href="css/movie-api-account.css?v=20261125-ui-3">
   <link rel="stylesheet" href="css/liquid-glass-theme.css?v=20261127-fast-2">
-  <script defer src="js/movie-api-catalog.js?v=20261127-fast-2"></script>
+  <script defer src="js/movie-api-catalog.js?v=20261127-pag-30"></script>
   <script defer src="js/movie-api-discovery.js?v=20261127-fast-2"></script>
   <script defer src="js/movie-api-account.js?v=20261125-ui-3"></script>
 </head>
