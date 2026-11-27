@@ -2,4 +2,4 @@ User-agent: *
 Allow: /
 Disallow: /admin.html
 
-Sitemap: https://chineverse.pages.dev/sitemap.xml
+Sitemap: https://moviestreambd.fun/sitemap.xml
