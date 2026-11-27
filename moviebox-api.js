@@ -188,6 +188,7 @@ function getTokenSecret() {
 const cache = new Map();
 const inFlightFetches = new Map();
 const subjectIndex = new Map();
+const SUBJECT_INDEX_MAX_ENTRIES = 1500;
 let lastGoodHomeFeed = null;
 
 export const CATEGORIES = [
@@ -591,11 +592,21 @@ export function normalizeSubject(raw, extra = {}) {
     cover: poster
   };
 
+  const setBoundedSubjectIndex = (k, val) => {
+    if (!k) return;
+    if (subjectIndex.has(k)) subjectIndex.delete(k);
+    subjectIndex.set(k, val);
+    while (subjectIndex.size > SUBJECT_INDEX_MAX_ENTRIES) {
+      const oldestKey = subjectIndex.keys().next().value;
+      if (!oldestKey) break;
+      subjectIndex.delete(oldestKey);
+    }
+  };
   if (subjectId) {
-    subjectIndex.set(subjectId, item);
+    setBoundedSubjectIndex(subjectId, item);
   }
   if (detailPath) {
-    subjectIndex.set(detailPath.toLowerCase(), item);
+    setBoundedSubjectIndex(detailPath.toLowerCase(), item);
   }
   return item;
 }

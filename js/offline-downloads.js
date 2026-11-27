@@ -360,7 +360,7 @@
     }
   }
 
-  async function cleanupStaleOpfsFiles() {
+  async function cleanupStaleOpfsFiles(maxAgeMs = 5 * 60 * 1000) {
     try {
       if (!navigator.storage?.getDirectory) return;
       const root = await navigator.storage.getDirectory();
@@ -368,7 +368,7 @@
       for await (const [name, handle] of root.entries()) {
         if (name.startsWith("cv-dl-") && handle.kind === "file") {
           const tsMatch = name.match(/^cv-dl-(\d+)-/);
-          if (tsMatch && now - Number(tsMatch[1]) > 6 * 3600 * 1000) {
+          if (tsMatch && now - Number(tsMatch[1]) > maxAgeMs) {
             await root.removeEntry(name).catch(() => {});
           }
         }
@@ -384,7 +384,28 @@
     document.body.appendChild(a);
     a.click();
     a.remove();
-    setTimeout(() => URL.revokeObjectURL(u), 240000);
+    setTimeout(() => URL.revokeObjectURL(u), 45000);
+  }
+
+  function triggerDirectStreamSave(url, filename) {
+    const a = document.createElement("a");
+    a.href = url;
+    if (filename) a.download = filename;
+    a.rel = "noopener";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+
+  async function hasFreeBrowserStorage(minBytes = 64 * 1024 * 1024) {
+    try {
+      if (!navigator.storage?.estimate) return true;
+      const est = await navigator.storage.estimate();
+      const quota = Number(est.quota || 0);
+      const usage = Number(est.usage || 0);
+      if (quota > 0 && quota - usage < minBytes) return false;
+    } catch {}
+    return true;
   }
 
   async function downloadToDevice({ url, filename, onProgress, signal }) {
@@ -395,29 +416,46 @@
     let memChunks = null;
 
     if (!directWriter) {
-      try {
-        if (navigator.storage?.getDirectory) {
-          opfsRoot = await navigator.storage.getDirectory();
-          opfsName = `cv-dl-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.mp4`;
-          const fh = await opfsRoot.getFileHandle(opfsName, { create: true });
-          if (typeof fh.createWritable === "function") {
-            opfsWriter = await fh.createWritable();
-          } else {
-            await opfsRoot.removeEntry(opfsName).catch(() => {});
-            opfsRoot = null;
+      await cleanupStaleOpfsFiles(5 * 60 * 1000);
+      const enoughForOpfs = await hasFreeBrowserStorage(96 * 1024 * 1024);
+      if (enoughForOpfs) {
+        try {
+          if (navigator.storage?.getDirectory) {
+            opfsRoot = await navigator.storage.getDirectory();
+            opfsName = `cv-dl-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.mp4`;
+            const fh = await opfsRoot.getFileHandle(opfsName, { create: true });
+            if (typeof fh.createWritable === "function") {
+              opfsWriter = await fh.createWritable();
+            } else {
+              await opfsRoot.removeEntry(opfsName).catch(() => {});
+              opfsRoot = null;
+              opfsName = "";
+            }
           }
+        } catch {
+          opfsRoot = null;
+          opfsWriter = null;
+          opfsName = "";
         }
-      } catch {
-        opfsRoot = null;
-        opfsWriter = null;
       }
     }
 
     if (!directWriter && !opfsWriter) {
+      const probedSize = await probeTotalLength(url, signal).catch(() => 0);
+      if (!probedSize || probedSize > 250 * 1024 * 1024) {
+        triggerDirectStreamSave(url, filename);
+        return { size: probedSize, streamedToDisk: true };
+      }
       memChunks = [];
     }
 
     const activeWriter = directWriter || opfsWriter;
+    const cleanupOpfsNow = () => {
+      if (opfsRoot && opfsName) {
+        opfsRoot.removeEntry(opfsName).catch(() => {});
+      }
+    };
+    window.addEventListener("pagehide", cleanupOpfsNow, { once: true });
 
     try {
       const result = await resumableRangeDownload({
@@ -445,7 +483,7 @@
         triggerBlobSave(file, filename);
         setTimeout(() => {
           opfsRoot.removeEntry(opfsName).catch(() => {});
-        }, 240000);
+        }, 30000);
         return { size: file.size || result.downloadedBytes, streamedToDisk: false };
       }
 
@@ -454,9 +492,10 @@
       triggerBlobSave(blob, filename);
       return { size: blob.size, streamedToDisk: false };
     } catch (err) {
+      window.removeEventListener("pagehide", cleanupOpfsNow);
       if (directWriter) await directWriter.abort().catch(() => {});
       if (opfsWriter) await opfsWriter.abort().catch(() => {});
-      if (opfsRoot && opfsName) await opfsRoot.removeEntry(opfsName).catch(() => {});
+      cleanupOpfsNow();
       throw err;
     }
   }
@@ -593,6 +632,11 @@
       if (existing && existing.status === "complete" && existing.totalBytes > 0 && existingBytes >= existing.totalBytes) {
         emitChange({ id, status: "complete", downloadedBytes: existingBytes, totalBytes: existing.totalBytes });
         return existing;
+      }
+
+      const enoughSpace = await hasFreeBrowserStorage(48 * 1024 * 1024);
+      if (!enoughSpace) {
+        throw new Error("Browser storage nearly full — delete old offline videos or use regular Download.");
       }
 
       const now = Date.now();
@@ -828,6 +872,22 @@
     };
   }
 
+  async function clearAllDownloads() {
+    for (const [id, active] of activeJobs.entries()) {
+      try { active.abortController.abort(); } catch {}
+      activeJobs.delete(id);
+    }
+    try {
+      const db = await openDb();
+      const tx = db.transaction(["videos", "chunks"], "readwrite");
+      tx.objectStore("videos").clear();
+      tx.objectStore("chunks").clear();
+      await txDone(tx);
+    } catch {}
+    await cleanupStaleOpfsFiles(0);
+    emitChange({ clearedAll: true });
+  }
+
   cleanupStaleOpfsFiles();
 
   window.CineVerseOffline = {
@@ -839,6 +899,7 @@
     pauseDownload,
     resumeDownload,
     deleteDownload,
+    clearAllDownloads,
     getDownload,
     listDownloads,
     findDownloadForEpisode,

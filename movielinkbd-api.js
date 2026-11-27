@@ -155,7 +155,7 @@ function registerPosterInCache(item) {
   if (!posterRegistry.has(searchKey)) {
     posterRegistry.set(searchKey, entry);
   }
-  if (posterRegistry.size > 16000) {
+  if (posterRegistry.size > 3000) {
     const oldest = posterRegistry.keys().next().value;
     if (oldest) posterRegistry.delete(oldest);
   }
@@ -185,7 +185,7 @@ function registerMlbdItem(item) {
   if (item.poster) {
     registerPosterInCache(item);
   }
-  if (mlbdItemRegistry.size > 16000) {
+  if (mlbdItemRegistry.size > 3000) {
     const oldest = mlbdItemRegistry.keys().next().value;
     if (oldest) mlbdItemRegistry.delete(oldest);
   }

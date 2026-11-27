@@ -141,7 +141,10 @@
     return `
       <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:11px 14px;margin-bottom:14px;border-radius:12px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);font-size:12px;color:#cbd5e1">
         <span>📥 <b>Offline Library:</b> ${est.completeCount} ready · ${offlineItems.length} total (${esc(usedText)}${esc(quotaText)})</span>
-        <span style="color:#86efac">Works offline without internet</span>
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="color:#86efac">Works offline without internet</span>
+          <button type="button" class="cv-saved-mini-btn remove" data-offline-clear-all="1" style="padding:4px 10px">Clear Storage</button>
+        </div>
       </div>
       <div class="cv-poster-grid" style="margin-bottom:22px">${cards}</div>
     `;
@@ -290,6 +293,13 @@
       } catch (err) {
         showToast(err?.message || "Export failed");
       }
+      return;
+    }
+    const clearAllBtn = e.target.closest("[data-offline-clear-all]");
+    if (clearAllBtn && window.CineVerseOffline?.clearAllDownloads) {
+      await window.CineVerseOffline.clearAllDownloads();
+      showToast("Cleared all offline storage");
+      render();
       return;
     }
     const delOffBtn = e.target.closest("[data-offline-delete]");

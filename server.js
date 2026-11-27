@@ -156,17 +156,26 @@ function convertSrtToVtt(rawText) {
   return `WEBVTT\n\n${cues.join("\n\n")}\n`;
 }
 
-const IMAGE_CACHE_MAX_ENTRIES = 600;
+const IMAGE_CACHE_MAX_ENTRIES = 250;
 const IMAGE_CACHE_MAX_BYTES = 1.5 * 1024 * 1024;
+const IMAGE_CACHE_MAX_TOTAL_BYTES = 32 * 1024 * 1024;
 const IMAGE_CACHE_TTL_MS = 6 * 3600 * 1000;
 const imageCache = new Map();
 const imageInFlight = new Map();
+let imageCacheTotalBytes = 0;
+
+function deleteCachedImageEntry(key) {
+  const existing = imageCache.get(key);
+  if (!existing) return;
+  imageCacheTotalBytes = Math.max(0, imageCacheTotalBytes - (existing.body?.length || 0));
+  imageCache.delete(key);
+}
 
 function getCachedImageEntry(url) {
   const entry = imageCache.get(url);
   if (!entry) return null;
   if (entry.expiresAt <= Date.now()) {
-    imageCache.delete(url);
+    deleteCachedImageEntry(url);
     return null;
   }
   imageCache.delete(url);
@@ -176,15 +185,21 @@ function getCachedImageEntry(url) {
 
 function setCachedImageEntry(url, contentType, bodyBuffer) {
   if (!bodyBuffer || !bodyBuffer.length || bodyBuffer.length > IMAGE_CACHE_MAX_BYTES) return;
-  if (imageCache.size >= IMAGE_CACHE_MAX_ENTRIES) {
+  deleteCachedImageEntry(url);
+  while (
+    imageCache.size >= IMAGE_CACHE_MAX_ENTRIES ||
+    (imageCacheTotalBytes + bodyBuffer.length > IMAGE_CACHE_MAX_TOTAL_BYTES && imageCache.size > 0)
+  ) {
     const oldestKey = imageCache.keys().next().value;
-    if (oldestKey) imageCache.delete(oldestKey);
+    if (!oldestKey) break;
+    deleteCachedImageEntry(oldestKey);
   }
   imageCache.set(url, {
     contentType,
     body: bodyBuffer,
     expiresAt: Date.now() + IMAGE_CACHE_TTL_MS
   });
+  imageCacheTotalBytes += bodyBuffer.length;
 }
 
 function isPublicImageCdn(url) {
@@ -598,11 +613,13 @@ async function proxyMediaStream(req, res, targetUrl, extraHeaders = {}, forceDow
   if (req.get("if-range")) headers.set("if-range", req.get("if-range"));
 
   const abortController = new AbortController();
-  res.on("close", () => {
+  const abortStream = () => {
     if (!res.writableFinished) {
       abortController.abort();
     }
-  });
+  };
+  res.on("close", abortStream);
+  req.on("aborted", abortStream);
 
   let upstream;
   let activeHeaders;
@@ -666,6 +683,7 @@ async function proxyMediaStream(req, res, targetUrl, extraHeaders = {}, forceDow
   }
 
   if (!upstream.ok && upstream.status !== 206) {
+    try { await upstream.body?.cancel(); } catch {}
     const errContentRange = upstream.headers.get("content-range");
     if (errContentRange) res.setHeader("content-range", errContentRange);
     return res.status(upstream.status).type("text/plain").send("Media upstream unavailable");
@@ -712,16 +730,18 @@ async function proxyMediaStream(req, res, targetUrl, extraHeaders = {}, forceDow
     return res.end();
   }
 
-  if (!forceDownload) {
+  if (!forceDownload || clientRange) {
     const nodeStream = Readable.fromWeb(upstream.body);
-    res.on("close", () => {
+    const cleanupStream = () => {
       if (!res.writableFinished) {
         abortController.abort();
         try {
           nodeStream.destroy();
         } catch {}
       }
-    });
+    };
+    res.on("close", cleanupStream);
+    res.on("error", cleanupStream);
     nodeStream.on("error", () => {
       if (!res.headersSent) res.status(502).end();
       else res.end();
