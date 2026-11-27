@@ -2298,7 +2298,7 @@ function matchesCatalogRecentCategory(item, categoryPath = "/") {
 
 function getRecentUploadsPoolForCategory(categoryPath = "/") {
   const norm = String(categoryPath || "/").toLowerCase().replace(/\/+$/, "") || "/";
-  if (/^\/(?:top-rated|upcoming|popular|mostwatch(?:\/.*)?|adult18plus|midnight|genre\/(?:adult|erotic|hot))$/.test(norm)) {
+  if (/^\/(?:new|latest|top-rated|upcoming|popular|mostwatch(?:\/.*)?|adult18plus|midnight|genre\/(?:adult|erotic|hot))$/.test(norm)) {
     return [];
   }
   const home = mergedHomeCache?.payload;
@@ -2405,7 +2405,8 @@ async function fetchUnifiedCatalogUpstreamBatch({ category, norm, upstreamPage, 
     }
 
     const isTrendingRequest = norm === "/mostwatch/7d" || norm === "/mostwatch" || norm === "/popular";
-    if (!isTrendingRequest && mlbdPlayable.length < 6 && upstreamPage <= 2) {
+    const isLatestRequest = norm === "/new" || norm === "/latest";
+    if (!isTrendingRequest && !isLatestRequest && mlbdPlayable.length < 6 && upstreamPage <= 2) {
       try {
         let mbItems = [];
         if (!/^(?:\/collection\/|\/category\/)/i.test(category)) {
@@ -2464,7 +2465,13 @@ async function fetchUnifiedCatalogUpstreamBatch({ category, norm, upstreamPage, 
 }
 
 function mergeBatchIntoUnifiedPool(pool, rawItems, { preserveOrder = false, allowResortWhole = false } = {}) {
-  const dedupedBatch = dedupeCatalogItems(rawItems);
+  const arr = Array.isArray(rawItems) ? rawItems : [];
+  const hasLiveInPool = pool.items.some(x => x && x.fromArchive !== true);
+  const hasLiveInBatch = arr.some(x => x && x.fromArchive !== true);
+  const separatedBatch = (hasLiveInPool || hasLiveInBatch)
+    ? arr.filter(x => x && x.fromArchive !== true)
+    : arr;
+  const dedupedBatch = dedupeCatalogItems(separatedBatch);
   const newOnes = [];
   for (const item of dedupedBatch) {
     const key = normalizeCatalogDedupeKey(item);
@@ -2503,8 +2510,9 @@ function mergeBatchIntoUnifiedPool(pool, rawItems, { preserveOrder = false, allo
 async function buildUnifiedCatalogPayload(category, page, query) {
   const safePage = Math.max(1, Math.floor(Number(page) || 1));
   const norm = String(category || "/").toLowerCase().replace(/\/+$/, "") || "/";
+  const isLatestCat = norm === "/new" || norm === "/latest";
   const isTrendingCat = norm === "/mostwatch/7d" || norm === "/mostwatch" || norm === "/popular";
-  const isMlbdOnlyCategory = isTrendingCat || /^\/(?:language\/(?:dual-audio|gujrati|kannada|marathi|malaysian|vietnamese|german|italian|portuguese|others)|genre\/(?:biographical|historical|musical|sports|superhero|survival|suspense)|category\/|collection\/|collections)/i.test(category);
+  const isMlbdOnlyCategory = isLatestCat || isTrendingCat || /^\/(?:language\/(?:dual-audio|gujrati|kannada|marathi|malaysian|vietnamese|german|italian|portuguese|others)|genre\/(?:biographical|historical|musical|sports|superhero|survival|suspense)|category\/|collection\/|collections)/i.test(category);
   const preserveOrder = isTrendingCat || norm === "/top-rated" || norm === "/upcoming" || norm === "/top10";
   const poolKey = buildUnifiedCatalogPoolKey(norm, query);
   const pool = getOrCreateUnifiedCatalogPool(poolKey);
@@ -2716,10 +2724,14 @@ async function buildMergedHomePayload(query = new URLSearchParams()) {
       })
       .filter(s => s.items.length > 0);
 
-    const newSec = cleanMlbdSecs.find(s => /latest\s*release|new|\b\/new\b/i.test(`${s.title || ""} ${s.categoryPath || ""}`));
-    mlbdFreshNewItems = newSec ? newSec.items : (cleanMlbdSecs[0]?.items || []);
+    const explicitLatestSec = cleanMlbdSecs.find(s => /^\/new$/i.test(String(s?.categoryPath || "").replace(/\/+$/, "")));
+    const liveMlbdLatest = Array.isArray(mlbd.latest) && mlbd.latest.length
+      ? mlbd.latest.filter(x => x && x.fromArchive !== true && !isNigerianContent(x) && hasPlayableStream(x))
+      : (explicitLatestSec?.items || []).filter(x => x && x.fromArchive !== true);
+    mlbdFreshNewItems = liveMlbdLatest.slice(0, 28).map(compactCatalogCard);
     payload.mlbdSections = cleanMlbdSecs;
-    payload.mlbdTrending = rankTrendingItems((mlbd.trending || []).filter(x => !isNigerianContent(x) && hasPlayableStream(x))).slice(0, 28).map(compactCatalogCard);
+    payload.mlbdLatest = mlbdFreshNewItems;
+    payload.mlbdTrending = rankTrendingItems((mlbd.trending || []).filter(x => x && x.fromArchive !== true && !isNigerianContent(x) && hasPlayableStream(x))).slice(0, 28).map(compactCatalogCard);
     payload.mlbdCategories = mlbd.categories || [];
     const existingCats = new Set((payload.categories || []).map(c => c?.path));
     payload.categories = [
@@ -2782,14 +2794,13 @@ async function buildMergedHomePayload(query = new URLSearchParams()) {
     }).slice(0, 28);
   }
 
-  // Build unified Recently Uploaded pool (newest movies & dramas at the very top & front)
+  // Build unified Recently Uploaded pool (newest movies & dramas, excluding trending)
   const recentPoolRaw = [
     ...mlbdFreshNewItems,
     ...(payload.mlbdBangla || []).slice(0, 12),
     ...(payload.curated?.recentlyAdded || []),
     ...(payload.curated?.latestMovies || []),
-    ...(payload.curated?.recentlyUpdated || []),
-    ...(payload.mlbdTrending || []).slice(0, 12)
+    ...(payload.curated?.recentlyUpdated || [])
   ];
   payload.recentlyUploaded = dedupeCatalogItems(
     recentPoolRaw.filter(x => x && !isNigerianContent(x) && !isMusicOrClipSubject(x) && hasPlayableStream(x) && hasCardPoster(x))

@@ -934,10 +934,13 @@
     const mlbdDirectAvailable = homeData.mlbdDirectAvailable !== false;
     const isPlayableCard = x => Boolean(x && x.hasResource !== false && (mlbdDirectAvailable || x.source !== "movielinkbd" || x.mbSubjectId));
     const mlbdSections = Array.isArray(homeData.mlbdSections) ? homeData.mlbdSections : [];
-    const mlbdFreshSec = mlbdSections.find(sec => /latest\s*release|new|\b\/new\b/i.test(`${sec?.title || ""} ${sec?.categoryPath || ""}`));
+    const mlbdFreshSec = mlbdSections.find(sec => /^\/new$/i.test(String(sec?.categoryPath || "").replace(/\/+$/, "")));
+    const mlbdLatestList = Array.isArray(homeData.mlbdLatest) && homeData.mlbdLatest.length
+      ? homeData.mlbdLatest
+      : (mlbdFreshSec?.items || []);
     const bannersRaw = [
       ...(Array.isArray(homeData.recentlyUploaded) ? homeData.recentlyUploaded : []),
-      ...(mlbdFreshSec?.items || []),
+      ...mlbdLatestList,
       ...(Array.isArray(homeData.mlbdBangla) ? homeData.mlbdBangla : []),
       ...(Array.isArray(homeData.mlbdTrending) ? homeData.mlbdTrending : []),
       ...(homeData.curated?.recentlyAdded || []),
@@ -957,7 +960,7 @@
     const sectionsPool = (Array.isArray(homeData.sections) ? homeData.sections : []).flatMap(s => s.items || []);
     const allPool = dedupeList([
       ...(Array.isArray(homeData.recentlyUploaded) ? homeData.recentlyUploaded : []),
-      ...(mlbdFreshSec?.items || []),
+      ...mlbdLatestList,
       ...(Array.isArray(homeData.mlbdBangla) ? homeData.mlbdBangla : []),
       ...(Array.isArray(homeData.mlbdTrending) ? homeData.mlbdTrending : []),
       ...(curated.recentlyAdded || []),
@@ -1012,8 +1015,8 @@
 
     const recentlyUploadedItems = prioritizePostered(
       dedupeList([
+        ...mlbdLatestList,
         ...(Array.isArray(homeData.recentlyUploaded) ? homeData.recentlyUploaded : []),
-        ...(mlbdFreshSec?.items || []),
         ...(Array.isArray(homeData.mlbdBangla) ? homeData.mlbdBangla : []),
         ...(curated.recentlyAdded || []),
         ...(curated.latestMovies || []),
@@ -1081,7 +1084,9 @@
       },
       {
         title: "🔥 Trending Now",
-        items: sortNewestFirst(dedupeList(curated.trending?.length ? curated.trending : homeData.trending)),
+        items: (Array.isArray(homeData.mlbdTrending) && homeData.mlbdTrending.length)
+          ? dedupeList([...homeData.mlbdTrending, ...(curated.trending || []), ...(homeData.trending || [])])
+          : sortNewestFirst(dedupeList(curated.trending?.length ? curated.trending : homeData.trending)),
         moreHref: "catalog.html?category=%2Fmostwatch%2F7d"
       },
       {
@@ -1471,6 +1476,7 @@
         mlbdDirectAvailable: payload.mlbdDirectAvailable !== false,
         banners: trimList(payload.banners, 8),
         recentlyUploaded: trimList(payload.recentlyUploaded, 20),
+        mlbdLatest: trimList(payload.mlbdLatest, 20),
         trending: trimList(payload.trending, 18),
         mlbdBangla: trimList(payload.mlbdBangla, 16),
         mlbdTrending: trimList(payload.mlbdTrending, 16),

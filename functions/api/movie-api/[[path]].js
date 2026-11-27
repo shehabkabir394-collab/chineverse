@@ -350,11 +350,12 @@ export async function onRequest({ request, env, params }) {
     if (legacy === "catalog") {
       const catPath = String(query.get("category") || query.get("path") || "/");
       const page = Math.max(1, Number(query.get("page")) || 1);
-      const normCatPath = catPath.toLowerCase().replace(/\/+$/, "") || "/";
+      const normCatPath = catPath.toLowerCase().replace(/\/page\/\d+\/?$/i, "").replace(/\/+$/, "") || "/";
       const isTrendingCat = normCatPath === "/mostwatch/7d" || normCatPath === "/mostwatch" || normCatPath === "/popular";
-      if (isTrendingCat) {
-        const mlbdTrending = await getMlbdCatalog({ path: catPath, page });
-        return json({ ...mlbdTrending, ok: true }, 200, "public, max-age=60");
+      const isLatestCat = normCatPath === "/new" || normCatPath === "/latest";
+      if (isTrendingCat || isLatestCat) {
+        const mlbdRouteRes = await getMlbdCatalog({ path: catPath, page });
+        return json({ ...mlbdRouteRes, ok: true }, 200, "public, max-age=60");
       }
       const isMlbdOnlyCategory = /^\/(?:language\/(?:dual-audio|gujrati|kannada|marathi|malaysian|vietnamese|german|italian|portuguese|others)|genre\/(?:biographical|historical|musical|sports|superhero|survival|suspense)|category\/|collection\/|collections)/i.test(catPath);
       if (isMlbdOnlyCategory) {
