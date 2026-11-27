@@ -29,12 +29,12 @@ import {
 
 export const MLBD_MIRRORS = [
   { id: "primary", name: "Primary", baseUrl: "https://rnztvk.movielinkbd.de", priority: 1 },
-  { id: "mirror1", name: "Mirror 1", baseUrl: "https://5njsa5.movielinkbd.de", priority: 2 },
-  { id: "mirror2", name: "Mirror 2", baseUrl: "https://74wyzj.movielinkbd.de", priority: 3 },
-  { id: "mirror3", name: "Mirror 3", baseUrl: "https://xuysbd.movielinkbd.de", priority: 4 },
-  { id: "portal", name: "Portal", baseUrl: "https://movielinkbd.com", priority: 5 },
-  { id: "alt-one", name: "Alt .one", baseUrl: "https://movielinkbd.one", priority: 6 },
-  { id: "alt-tv", name: "Alt .tv", baseUrl: "https://movielinkbd.tv", priority: 7 },
+  { id: "alt-tv", name: "MovieLinkBD .tv", baseUrl: "https://movielinkbd.tv", priority: 2 },
+  { id: "mirror1", name: "Mirror 1", baseUrl: "https://5njsa5.movielinkbd.de", priority: 3 },
+  { id: "mirror2", name: "Mirror 2", baseUrl: "https://74wyzj.movielinkbd.de", priority: 4 },
+  { id: "mirror3", name: "Mirror 3", baseUrl: "https://xuysbd.movielinkbd.de", priority: 5 },
+  { id: "portal", name: "Portal", baseUrl: "https://movielinkbd.com", priority: 6 },
+  { id: "alt-one", name: "Alt .one", baseUrl: "https://movielinkbd.one", priority: 7 },
   { id: "alt-shop", name: "Alt .shop", baseUrl: "https://movielinkbd.shop", priority: 8 }
 ];
 
