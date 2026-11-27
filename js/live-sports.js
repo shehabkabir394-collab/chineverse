@@ -201,7 +201,9 @@
       i +
       '">' +
       (logo
-        ? '<img loading="lazy" referrerpolicy="no-referrer" src="' +
+        ? '<img ' +
+          (i < 4 ? 'loading="eager" ' : 'loading="lazy" ') +
+          'decoding="async" referrerpolicy="no-referrer" src="' +
           esc(logo) +
           '" alt="' +
           esc(name) +
@@ -407,39 +409,30 @@
     status.textContent = "এই ব্রাউজারে HLS লাইভ স্ট্রিম সমর্থিত নয়।";
   }
 
-  async function load() {
-    status.textContent = "Live Sports চ্যানেল লোড হচ্ছে…";
-    grid.innerHTML = "";
-    try {
-      const r = await fetch("/api/movie-api/sports", { cache: "no-store" });
-      const data = await r.json();
-      if (!r.ok) throw Error(data.error || "HTTP " + r.status);
-      items = findArray(data);
-      if (!items.length) {
-        status.textContent = "API connected, কিন্তু channel list পাওয়া যায়নি।";
-        return;
+  function renderSportsList(list, { autoSelectRequested = false } = {}) {
+    items = list;
+    grid.innerHTML = items.map(card).join("");
+    const liveCount = items.filter(x => x.live).length;
+    status.textContent =
+      items.length + "টি ম্যাচ পাওয়া গেছে (" + liveCount + "টি ● LIVE)। LIVE ম্যাচে ক্লিক করে দেখুন।";
+    grid.onclick = e => {
+      const c = e.target.closest("[data-index]");
+      if (c) {
+        grid.querySelectorAll(".sports-card.active").forEach(el => el.classList.remove("active"));
+        c.classList.add("active");
+        play(items[Number(c.dataset.index)]);
       }
-      grid.innerHTML = items.map(card).join("");
-      const liveCount = items.filter(x => x.live).length;
-      status.textContent =
-        items.length + "টি ম্যাচ পাওয়া গেছে (" + liveCount + "টি ● LIVE)। LIVE ম্যাচে ক্লিক করে দেখুন।";
-      grid.onclick = e => {
-        const c = e.target.closest("[data-index]");
-        if (c) {
-          grid.querySelectorAll(".sports-card.active").forEach(el => el.classList.remove("active"));
-          c.classList.add("active");
-          play(items[Number(c.dataset.index)]);
-        }
-      };
-      grid.onkeydown = e => {
-        if ((e.key === "Enter" || e.key === " ") && e.target.matches("[data-index]")) {
-          e.preventDefault();
-          grid.querySelectorAll(".sports-card.active").forEach(el => el.classList.remove("active"));
-          e.target.classList.add("active");
-          play(items[Number(e.target.dataset.index)]);
-        }
-      };
+    };
+    grid.onkeydown = e => {
+      if ((e.key === "Enter" || e.key === " ") && e.target.matches("[data-index]")) {
+        e.preventDefault();
+        grid.querySelectorAll(".sports-card.active").forEach(el => el.classList.remove("active"));
+        e.target.classList.add("active");
+        play(items[Number(e.target.dataset.index)]);
+      }
+    };
 
+    if (autoSelectRequested) {
       const requestedMatch = (new URLSearchParams(location.search).get("match") || "").trim().toLowerCase();
       if (requestedMatch) {
         const matchIdx = items.findIndex(item => {
@@ -460,8 +453,37 @@
           }
         }
       }
+    }
+  }
+
+  async function load() {
+    let paintedCached = false;
+    try {
+      const cached = JSON.parse(localStorage.getItem("cv_sports_cache_v1") || "null");
+      if (cached && cached.ts && Date.now() - cached.ts < 3 * 60 * 1000 && Array.isArray(cached.channels) && cached.channels.length) {
+        renderSportsList(cached.channels, { autoSelectRequested: false });
+        paintedCached = true;
+      }
+    } catch {}
+    if (!paintedCached) {
+      status.textContent = "Live Sports চ্যানেল লোড হচ্ছে…";
+      grid.innerHTML = "";
+    }
+    try {
+      const r = await fetch("/api/movie-api/sports");
+      const data = await r.json();
+      if (!r.ok) throw Error(data.error || "HTTP " + r.status);
+      const freshItems = findArray(data);
+      if (!freshItems.length) {
+        if (!paintedCached) status.textContent = "API connected, কিন্তু channel list পাওয়া যায়নি।";
+        return;
+      }
+      try {
+        localStorage.setItem("cv_sports_cache_v1", JSON.stringify({ ts: Date.now(), channels: freshItems.slice(0, 32) }));
+      } catch {}
+      renderSportsList(freshItems, { autoSelectRequested: true });
     } catch (e) {
-      status.textContent = "Live Sports লোড হয়নি: " + e.message;
+      if (!paintedCached) status.textContent = "Live Sports লোড হয়নি: " + e.message;
     }
   }
 

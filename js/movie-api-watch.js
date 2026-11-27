@@ -753,17 +753,36 @@
     const se = Number(ep.seasonNumber ?? ep.se ?? 0) || 0;
     const epNum = ep.ep != null ? Number(ep.ep) : Number(ep.episodeNumber ?? ep.number ?? 1);
 
-    try {
-      const qs = new URLSearchParams({
+    const streamCache = (window.__cvEpStreamCache = window.__cvEpStreamCache || new Map());
+    const buildStreamQs = (targetEpIdx, optsObj = {}) => {
+      const targetEp = episodes[targetEpIdx];
+      const tSe = Number(targetEp?.seasonNumber ?? targetEp?.se ?? 0) || 0;
+      const tEpNum = targetEp?.ep != null ? Number(targetEp.ep) : Number(targetEp?.episodeNumber ?? targetEp?.number ?? 1);
+      return new URLSearchParams({
         path: String(path || watchDetail?.path || ""),
         subjectId: String(watchDetail?.subjectId || watchDetail?.id || ""),
         detailPath: String(watchDetail?.detailPath || ""),
         title: String(watchDetail?.title || ""),
-        se: String(se),
-        ep: String(epNum),
-        ...(manualDubSelected || opts.dubLock ? { dubLock: "1" } : {})
+        se: String(tSe),
+        ep: String(tEpNum),
+        ...(manualDubSelected || optsObj.dubLock ? { dubLock: "1" } : {})
       });
-      const { res: r, data: payload } = await safeFetchJson(`/api/movie-api/stream?${qs.toString()}`, { cache: "no-store" });
+    };
+
+    try {
+      const qs = buildStreamQs(idx, opts);
+      const cacheKey = qs.toString();
+      let r, payload;
+      const cachedStream = !opts.retryCount && streamCache.get(cacheKey);
+      if (cachedStream && Date.now() - cachedStream.at < 120000) {
+        r = { ok: true };
+        payload = cachedStream.payload;
+      } else {
+        ({ res: r, data: payload } = await safeFetchJson(`/api/movie-api/stream?${cacheKey}`, { cache: "no-store" }));
+        if (r?.ok && Array.isArray(payload?.sources) && payload.sources.length) {
+          streamCache.set(cacheKey, { payload, at: Date.now() });
+        }
+      }
       if (reqId !== streamReqId) return;
 
       const streamRoot = payload.stream || payload.data?.stream || payload.result?.stream || payload.data || payload.result || payload;
@@ -827,7 +846,12 @@
           provider: s.provider || s.source || "MovieBox Direct",
           format: String(s.format || ""),
           mime,
-          audioLanguage: s.audioLanguage || s.audio_language || ""
+          audioLanguage: s.audioLanguage || s.audio_language || "",
+          ...(s.serverOk !== undefined ? { serverOk: s.serverOk } : {}),
+          ...(s.serverLatencyMs != null ? { serverLatencyMs: Number(s.serverLatencyMs) } : {}),
+          ...(s.serverBps != null ? { serverBps: Number(s.serverBps) } : {}),
+          ...(s.autoSelected ? { autoSelected: true } : {}),
+          ...(s.autoFast ? { autoFast: true } : {})
         }];
       }).values())].filter(s => isPlayableStreamUrl(s.url) && !/\.mpd(?:$|[?#])/i.test(s.url) && !/\bdash\b|dash\+xml/i.test(s.format + " " + s.mime));
 
@@ -932,9 +956,10 @@
       if (streamMsg) {
         const uniqueQ = [...new Set(sources.map(s => s.quality))];
         const upcomingTitle = isWatchUpcoming(watchDetail);
+        const fastLabel = sources.some(s => s.autoFast) ? "⚡ Auto Fast Server · " : sources.length > 1 ? "Auto Server · " : "";
         streamMsg.textContent = streamRoot?.isTrailer
           ? (upcomingTitle ? "Upcoming title · Playing Official Trailer" : "Full video unavailable on server · Playing Official Trailer")
-          : `${uniqueQ.join(" · ")}${subtitles.length ? ` · ${subtitles.length} subtitles` : ""}`;
+          : `${fastLabel}${uniqueQ.join(" · ")}${subtitles.length ? ` · ${subtitles.length} subtitles` : ""}`;
       }
 
       const historyMeta = {
@@ -978,6 +1003,22 @@
         syncPlayerUiState();
       } else if (video) {
         video.controls = true;
+      }
+
+      if (episodes[idx + 1] && getPlaybackMode() !== "data-saver") {
+        const nextKey = buildStreamQs(idx + 1, opts).toString();
+        if (!streamCache.has(nextKey)) {
+          setTimeout(() => {
+            if (reqId !== streamReqId || streamCache.has(nextKey) || getPlaybackMode() === "data-saver") return;
+            safeFetchJson(`/api/movie-api/stream?${nextKey}`, { cache: "no-store", priority: "low" })
+              .then(({ res: nr, data: np }) => {
+                if (nr?.ok && Array.isArray(np?.sources) && np.sources.length) {
+                  streamCache.set(nextKey, { payload: np, at: Date.now() });
+                }
+              })
+              .catch(() => {});
+          }, 3500);
+        }
       }
     } catch (err) {
       if (reqId === streamReqId) {
@@ -1100,6 +1141,14 @@
       items = Array.isArray(d?.items) ? d.items : [];
     } catch {}
 
+    if (!items.length) {
+      try {
+        const cachedHome = JSON.parse(localStorage.getItem("cv_home_cache_v2") || "null")?.data;
+        if (cachedHome) {
+          items = [...(cachedHome?.recentlyUploaded || []), ...(cachedHome?.curated?.hindiMovies || []), ...(cachedHome?.curated?.hindiSeries || []), ...(cachedHome?.trending || [])];
+        }
+      } catch {}
+    }
     if (!items.length) {
       try {
         const { data: hd } = await safeFetchJson("/api/movie-api/home");
@@ -1300,6 +1349,32 @@
     }
   }
 
+  const WATCH_DETAIL_CACHE_KEY = "cv_watch_detail_v1";
+  const WATCH_DETAIL_TTL_MS = 3 * 60 * 1000;
+  function readCachedWatchDetail(targetPath) {
+    try {
+      const m = JSON.parse(sessionStorage.getItem(WATCH_DETAIL_CACHE_KEY) || "{}");
+      const hit = m[targetPath];
+      if (hit && hit.ts && Date.now() - hit.ts < WATCH_DETAIL_TTL_MS && hit.detail && hit.detail.hasResource !== false && Array.isArray(hit.detail.episodes) && hit.detail.episodes.length > 0) {
+        return hit.detail;
+      }
+    } catch {}
+    return null;
+  }
+  function writeCachedWatchDetail(targetPath, d) {
+    if (!targetPath || !d || d.hasResource === false || !Array.isArray(d.episodes) || !d.episodes.length) return;
+    try {
+      const m = JSON.parse(sessionStorage.getItem(WATCH_DETAIL_CACHE_KEY) || "{}");
+      delete m[targetPath];
+      m[targetPath] = { ts: Date.now(), detail: d };
+      const ks = Object.keys(m);
+      while (ks.length > 8) delete m[ks.shift()];
+      sessionStorage.setItem(WATCH_DETAIL_CACHE_KEY, JSON.stringify(m));
+    } catch {}
+  }
+
+  let commentsLoaded = false;
+
   async function load() {
     if (offlineId) {
       await loadOfflinePlayback();
@@ -1312,13 +1387,34 @@
     }
 
     try {
-      const { res: r, data } = await safeFetchJson(
-        `/api/movie-api/details?path=${encodeURIComponent(path)}&title=${encodeURIComponent(requestedTitle)}`,
-        { cache: "no-store" }
-      );
-      if (!r.ok || !data?.detail) throw new Error(data?.error || "Title details unavailable.");
+      let d = readCachedWatchDetail(path);
+      const reqUrl = `/api/movie-api/details?path=${encodeURIComponent(path)}&title=${encodeURIComponent(requestedTitle)}`;
+      const fetchDetailsFresh = async () => {
+        const pre = window.__cvWatchDetailPreload;
+        if (pre && pre.url === reqUrl && pre.promise) {
+          window.__cvWatchDetailPreload = null;
+          const payload = await pre.promise;
+          return { res: { ok: Boolean(payload?.detail) }, data: payload };
+        }
+        return await safeFetchJson(reqUrl, { cache: "no-store" });
+      };
 
-      const d = data.detail;
+      if (!d) {
+        const { res: r, data } = await fetchDetailsFresh();
+        if (!r.ok || !data?.detail) throw new Error(data?.error || "Title details unavailable.");
+        d = data.detail;
+        writeCachedWatchDetail(path, d);
+        if (d.path && d.path !== path) writeCachedWatchDetail(d.path, d);
+      } else {
+        // Revalidate in background in case new episodes were added; do not block playback start
+        fetchDetailsFresh().then(({ res: rr, data: fresh }) => {
+          if (rr?.ok && fresh?.detail) {
+            writeCachedWatchDetail(path, fresh.detail);
+            if (fresh.detail.path && fresh.detail.path !== path) writeCachedWatchDetail(fresh.detail.path, fresh.detail);
+          }
+        }).catch(() => {});
+      }
+
       if (d.path && d.path !== path) {
         path = d.path;
         const nextUrl = `watch.html?path=${encodeURIComponent(path)}&title=${encodeURIComponent(d.title || requestedTitle || "")}${params.get("episode") ? `&episode=${encodeURIComponent(params.get("episode"))}` : ""}`;
@@ -1604,6 +1700,10 @@
           $("#cvForYouPanel").hidden = target !== "foryou";
           $("#cvCastPanel").hidden = target !== "cast";
           $("#cvReviewsPanel").hidden = target !== "reviews";
+          if (target === "reviews" && !commentsLoaded) {
+            commentsLoaded = true;
+            loadComments(d);
+          }
           return;
         }
         const castCard = e.target.closest("[data-staff-id]");
@@ -1623,8 +1723,13 @@
 
       const startEpIdx = initialEpIdx;
       playEpisode(startEpIdx);
-      loadRelated(d);
-      loadComments(d);
+      setTimeout(() => loadRelated(d), 300);
+      setTimeout(() => {
+        if (!commentsLoaded) {
+          commentsLoaded = true;
+          loadComments(d);
+        }
+      }, 1100);
     } catch (err) {
       statusEl.hidden = false;
       statusEl.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center;padding:8px 0">

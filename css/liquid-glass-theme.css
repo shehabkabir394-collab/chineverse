@@ -2164,18 +2164,30 @@ body.cv-modal-open {
   contain-intrinsic-size: auto 340px;
 }
 
-.cv-poster-grid > .cv-card:nth-child(n+13) {
+.cv-poster-grid > .cv-card:nth-child(n+13),
+.grid > .movie-card:nth-child(n+13) {
   content-visibility: auto;
-  contain-intrinsic-size: 160px 260px;
+  contain-intrinsic-size: 165px 280px;
+}
+
+.sports-grid > .sports-card:nth-child(n+9) {
+  content-visibility: auto;
+  contain-intrinsic-size: 190px 140px;
 }
 
 .cv-card,
 .cv-match-card,
-.cv-cat-card {
+.cv-cat-card,
+.movie-card,
+.sports-card,
+.ms-episode-button,
+.cv-all-cat-item {
   contain: layout style paint;
 }
 
-.cv-card-thumb img {
+.cv-card-thumb img,
+.movie-api-poster img,
+.sports-card img {
   content-visibility: auto;
 }
 
@@ -2185,7 +2197,14 @@ body.cv-modal-open {
   .cv-more-dropdown,
   .cv-details-backdrop,
   .cv-bottom-bar,
-  .cv-me-panel {
+  .cv-me-panel,
+  .catalog-chip,
+  .catalog-letter,
+  .cv-all-cats-panel,
+  .ms-download-card,
+  .cv-resources-panel,
+  .cv-watch-tab-btn,
+  .cv-util-pill {
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
   }
@@ -2196,12 +2215,15 @@ body.cv-modal-open {
   .cv-card-thumb,
   .cv-cat-card,
   .cv-platform-logo,
-  .cv-match-btn {
+  .cv-match-btn,
+  .movie-card,
+  .sports-card {
     transition: none !important;
   }
   .cv-card:hover .cv-card-thumb,
   .cv-cat-card:hover,
-  .cv-platform-logo:hover {
+  .cv-platform-logo:hover,
+  .movie-card:hover {
     transform: none !important;
   }
   .cv-spotlight {
@@ -2210,7 +2232,8 @@ body.cv-modal-open {
 }
 
 @media (hover: none) {
-  .cv-card:hover .cv-card-thumb {
+  .cv-card:hover .cv-card-thumb,
+  .movie-card:hover {
     transform: none !important;
   }
 }

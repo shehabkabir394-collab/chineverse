@@ -17,7 +17,14 @@
  const root=$("#catalogGrid"),status=$("#catalogStatus"),pager=$("#catalogPager"),nav=$("#catalogCategories"),az=$("#catalogAZ"),search=$("#catalogSearch"),heading=$("#catalogHeading");
  const allCatsPanel=$("#catalogAllCatsPanel"),allCatsToggle=$("#catalogAllCatsToggle");
  const pageSize=24;
+ const CATS_CACHE_KEY="cv_categories_cache_v1", CATS_TTL=60*60*1000;
+ const OPTS_CACHE_KEY="cv_filter_opts_cache_v1", OPTS_TTL=6*60*60*1000;
+ const CATALOG_CACHE_KEY="cv_catalog_cache_v1", CATALOG_TTL=15*60*1000;
  let data=null,all=[],apiCatalogMode=false,apiMeta=null,allApiCategories=[],apiSearchQuery="";
+ const readLocal=(k,ttl)=>{try{const r=JSON.parse(localStorage.getItem(k)||"null");if(r&&r.ts&&Date.now()-r.ts<ttl)return r.val;}catch{}return null;};
+ const writeLocal=(k,val)=>{try{localStorage.setItem(k,JSON.stringify({ts:Date.now(),val}));}catch{}};
+ const readCatalogCache=key=>{try{const m=JSON.parse(localStorage.getItem(CATALOG_CACHE_KEY)||"{}");const e=m[key];if(e&&e.ts&&Date.now()-e.ts<CATALOG_TTL&&Array.isArray(e.items))return e;}catch{}return null;};
+ const writeCatalogCache=(key,payload)=>{if(!payload||!Array.isArray(payload.items)||!payload.items.length)return;try{const m=JSON.parse(localStorage.getItem(CATALOG_CACHE_KEY)||"{}");delete m[key];m[key]={ts:Date.now(),items:payload.items.slice(0,36),maxPage:payload.maxPage||payload.totalPages||1};const keys=Object.keys(m);while(keys.length>10)delete m[keys.shift()];localStorage.setItem(CATALOG_CACHE_KEY,JSON.stringify(m));}catch{}};
  const isNigerian=(item,sectionTitle="")=>{
   const sec=String(sectionTitle||"").trim();
   if(sec&&/\b(?:nollywood|must-watch\s*black\s*shows?|black\s*cinema|black\s*shows?|nigeria|nigerian|ghana)\b|bet\+/i.test(sec))return true;
@@ -288,15 +295,16 @@
   }
   return true;
  }
- function card(item){
+ function card(item,idx=99){
   const image=posterOf(item),p=/^(?:https?:\/\/|\/\/|\/api\/)/i.test(image)?image:"";
   const rawP=/^(?:https?:\/\/|\/\/)/i.test(String(item?.rawPoster||""))?String(item.rawPoster):"";
   const fbAttr=rawP&&rawP!==p?' data-fallback-src="'+esc(rawP)+'"':"";
+  const loadAttr=(idx<6?'loading="eager"':'loading="lazy"')+(idx<4?' fetchpriority="high"':'');
   const title=text(item.title)||"Untitled",path=pathOf(item),b=badge(item);
   if(selected==="/upcoming"||isUpcomingUnreleased(item)){
-   return '<article class="movie-card movie-api-card cv-card-upcoming" aria-label="'+esc(title)+' (Coming Soon)" title="'+esc(title)+' — Coming Soon"><div class="movie-api-poster">'+(p?'<img loading="lazy" decoding="async" referrerpolicy="no-referrer" src="'+esc(p)+'"'+fbAttr+' alt="'+esc(title)+'" data-poster-img="1">':'<span class="movie-api-placeholder">MOVIESTREAM BD</span>')+'</div></article>';
+   return '<article class="movie-card movie-api-card cv-card-upcoming" aria-label="'+esc(title)+' (Coming Soon)" title="'+esc(title)+' — Coming Soon"><div class="movie-api-poster">'+(p?'<img '+loadAttr+' decoding="async" referrerpolicy="no-referrer" src="'+esc(p)+'"'+fbAttr+' alt="'+esc(title)+'" data-poster-img="1">':'<span class="movie-api-placeholder">MOVIESTREAM BD</span>')+'</div></article>';
   }
-  return '<article class="movie-card movie-api-card"><button class="movie-api-poster" type="button" data-path="'+esc(path)+'" data-title="'+esc(title)+'" '+(!path?"disabled":"")+' aria-label="Open '+esc(title)+'">'+(p?'<img loading="lazy" decoding="async" referrerpolicy="no-referrer" src="'+esc(p)+'"'+fbAttr+' alt="'+esc(title)+'" data-poster-img="1">':'<span class="movie-api-placeholder">MOVIESTREAM BD</span>')+'<span class="quality">'+esc(item.quality||item.typeBadge||"HD")+'</span>'+(b?'<span class="movie-api-language-badge">'+b+'</span>':"")+'<span class="overlay">▶<small>View details &amp; watch</small></span></button><div class="movie-info"><h3>'+esc(title)+'</h3><p>'+esc(item.language||item.country||item.typeBadge||"")+'</p></div></article>';
+  return '<article class="movie-card movie-api-card"><button class="movie-api-poster" type="button" data-path="'+esc(path)+'" data-title="'+esc(title)+'" '+(!path?"disabled":"")+' aria-label="Open '+esc(title)+'">'+(p?'<img '+loadAttr+' decoding="async" referrerpolicy="no-referrer" src="'+esc(p)+'"'+fbAttr+' alt="'+esc(title)+'" data-poster-img="1">':'<span class="movie-api-placeholder">MOVIESTREAM BD</span>')+'<span class="quality">'+esc(item.quality||item.typeBadge||"HD")+'</span>'+(b?'<span class="movie-api-language-badge">'+b+'</span>':"")+'<span class="overlay">▶<small>View details &amp; watch</small></span></button><div class="movie-info"><h3>'+esc(title)+'</h3><p>'+esc(item.language||item.country||item.typeBadge||"")+'</p></div></article>';
  }
  function link(extra){const p=new URLSearchParams();if(selected)p.set("category",selected);if(letter)p.set("letter",letter);if(search?.value.trim())p.set("q",search.value.trim());Object.entries(extra||{}).forEach(([k,v])=>{if(v)p.set(k,String(v));else p.delete(k)});return "catalog.html?"+p.toString();}
  function render(){
@@ -311,7 +319,7 @@
   const safePage=Math.min(page,pages);
   const start=(safePage-1)*pageSize;
   const items=apiCatalogMode?filtered:filtered.slice(start,start+pageSize);
-  root.innerHTML=items.map(card).join("")||'<p class="muted">এই Category-তে কোনো title পাওয়া যায়নি। অন্য Category নির্বাচন করো।</p>';
+  root.innerHTML=items.map((item,idx)=>card(item,idx)).join("")||'<p class="muted">এই Category-তে কোনো title পাওয়া যায়নি। অন্য Category নির্বাচন করো।</p>';
   const c=(data.categories||[]).find(x=>[x.path,x.slug,x.label,x.name,x.title].some(v=>norm(v)===norm(selected)));
   heading.textContent=selected?stripCatBrand(customLabels[selected]||c?.label||c?.name||c?.title||selected)||selected:"All Movies & Dramas A–Z";
   status.textContent=apiCatalogMode
@@ -379,25 +387,47 @@
   const letters="ABCDEFGHIJKLMNOPQRSTUVWXYZ#".split("");
   az.innerHTML=letters.map(l=>'<a class="catalog-letter '+(letter===l?"active":"")+'" href="'+esc(link({letter:l,page:1}))+'">'+l+'</a>').join("");
  }
+ function applyFilterOptions(d){
+  if(!d||d.ok!==true)return;
+  const fill=(id,values)=>{const el=$(id);if(!el)return;const current=el.value;el.length=1;[...new Set((Array.isArray(values)?values:[]).map(v=>typeof v==="string"?v:(v.label||v.name||v.value||v.title||"")).filter(Boolean))].forEach(v=>{const o=document.createElement("option");o.value=v;o.textContent=v;el.appendChild(o);});el.value=current;};
+  fill("#catalogLanguageFilter",d.languages||d.language||d.audioLanguages);
+  fill("#catalogTypeFilter",d.types||d.type||d.mediaTypes);
+  fill("#catalogGenreFilter",d.genres||d.genre);
+ }
  async function loadFilterOptions(){
+  const cached=readLocal(OPTS_CACHE_KEY,OPTS_TTL);
+  if(cached)applyFilterOptions(cached);
   try{
    const r=await fetch("/api/movie-api/filter-options");const d=await r.json();if(!r.ok||d.ok!==true)return;
-   const fill=(id,values)=>{const el=$(id);if(!el)return;const current=el.value;[...new Set((Array.isArray(values)?values:[]).map(v=>typeof v==="string"?v:(v.label||v.name||v.value||v.title||"")).filter(Boolean))].forEach(v=>{const o=document.createElement("option");o.value=v;o.textContent=v;el.appendChild(o);});el.value=current;};
-   fill("#catalogLanguageFilter",d.languages||d.language||d.audioLanguages);
-   fill("#catalogTypeFilter",d.types||d.type||d.mediaTypes);
-   fill("#catalogGenreFilter",d.genres||d.genre);
+   applyFilterOptions(d);writeLocal(OPTS_CACHE_KEY,d);
   }catch{}
  }
  ["#catalogLanguageFilter","#catalogTypeFilter","#catalogGenreFilter"].forEach(id=>$(id)?.addEventListener("change",render));
  async function ensureCategories(){
   if(allApiCategories.length)return allApiCategories;
+  const cached=readLocal(CATS_CACHE_KEY,CATS_TTL);
+  if(Array.isArray(cached)&&cached.length){
+   allApiCategories=cached;
+   fetch("/api/movie-api/categories",{headers:{Accept:"application/json"},cache:"default"})
+    .then(r=>r.json()).then(d=>{if(d?.ok&&Array.isArray(d.categories)&&d.categories.length){allApiCategories=d.categories;writeLocal(CATS_CACHE_KEY,d.categories);if(data){data.categories=d.categories;renderNav();}}})
+    .catch(()=>{});
+   return allApiCategories;
+  }
   try{
    const r=await fetch("/api/movie-api/categories",{headers:{Accept:"application/json"},cache:"default"});
    const d=await r.json();
-   if(r.ok&&d?.ok&&Array.isArray(d.categories)){allApiCategories=d.categories;return allApiCategories;}
+   if(r.ok&&d?.ok&&Array.isArray(d.categories)){allApiCategories=d.categories;writeLocal(CATS_CACHE_KEY,d.categories);return allApiCategories;}
   }catch{}
   return [];
  }
+ const dedupeCatalogItems=(items,isHindi)=> {
+  const unique=new Map();
+  (Array.isArray(items)?items:[]).forEach(item=>{
+   const key=pathOf(item)||norm(item.title);
+   if(key&&!unique.has(key))unique.set(key,{...item,_sections:[],_sources:["catalog"]});
+  });
+  return [...unique.values()].filter(item=>!isNigerian(item)).map(item=>isHindi?({...item,_hindiCatalog:true}):item);
+ };
  async function load(){
   const q=params.get("q")||"";
   if(search)search.value=q;
@@ -406,12 +436,20 @@
   try{
    const catsPromise=ensureCategories();
    if(q){
-    /* Search directly. Do not wait for homepage data or download every Hindi catalog page. */
     const cats=await catsPromise;
     data={categories:cats};
     status.textContent="Searching movies and dramas…";
     const safeQs = localStorage.getItem("cv_family_safe_v1")==="1" ? "&safe=1" : "";
-    const {res:response,data:payload}=await fetchJsonSafe("/api/movie-api/search?q="+encodeURIComponent(q)+"&page="+page+safeQs,{headers:{Accept:"application/json"},cache:"default"});
+    const reqUrl="/api/movie-api/search?q="+encodeURIComponent(q)+"&page="+page+safeQs;
+    const pre=window.__cvCatalogPreload;
+    let response,payload;
+    if(pre&&pre.url===reqUrl&&pre.promise){
+     window.__cvCatalogPreload=null;
+     payload=await pre.promise;
+     response={ok:Boolean(payload&&payload.ok!==false),status:200};
+    }else{
+     ({res:response,data:payload}=await fetchJsonSafe(reqUrl,{headers:{Accept:"application/json"},cache:"default"}));
+    }
     if(!response.ok||payload.ok!==true)throw new Error(payload.error||"Movie Search API unavailable");
     const unique=new Map();
     (Array.isArray(payload.items)?payload.items:[]).filter(item=>!isNigerian(item)).forEach(item=>{
@@ -432,23 +470,38 @@
      "cv:bollywood":"/bollywood",
      "cv:hollywood":"/language/english"
     };
-    const directApiPath=customPaths[selected]||(selected.startsWith("/")?selected:"");
+    const directApiPath=!selected?"/all":(customPaths[selected]||(selected.startsWith("/")?selected:""));
     if(directApiPath){
-     status.textContent="Loading "+(stripCatBrand(customLabels[selected]||selected)||"Catalog")+" · Page "+page+"…";
-     const [{res:cr,data:pagePayload},cats]=await Promise.all([
-      fetchJsonSafe("/api/movie-api/catalog?category="+encodeURIComponent(directApiPath)+"&page="+Math.max(1,Math.min(100,page)),{headers:{Accept:"application/json"},cache:"default"}),
-      catsPromise
-     ]);
-     if(!cr.ok||pagePayload.ok!==true)throw new Error(pagePayload.error||"Movie Catalog API unavailable");
+     const safePageNum=Math.max(1,Math.min(100,page));
+     const cacheKey=`${directApiPath.toLowerCase()}:${safePageNum}`;
+     const cachedPage=readCatalogCache(cacheKey);
+     const cachedCats=allApiCategories.length?allApiCategories:(readLocal(CATS_CACHE_KEY,CATS_TTL)||[]);
+     let paintedCached=false;
+     if(cachedPage){
+      allApiCategories=cachedCats;
+      data={categories:cachedCats};
+      all=dedupeCatalogItems(cachedPage.items,directApiPath==="/language/hindi-dubbed");
+      apiCatalogMode=true;
+      apiMeta=cachedPage;
+      renderNav();
+      render();
+      paintedCached=true;
+     }else{
+      status.textContent="Loading "+(stripCatBrand(customLabels[selected]||selected)||"All Movies & Dramas")+" · Page "+page+"…";
+     }
+     const reqUrl="/api/movie-api/catalog?category="+encodeURIComponent(directApiPath)+"&page="+safePageNum;
+     const pre=window.__cvCatalogPreload;
+     const catalogFetchPromise=(pre&&pre.url===reqUrl&&pre.promise)
+      ? pre.promise.then(d=>{window.__cvCatalogPreload=null;return {res:{ok:Boolean(d&&d.ok===true),status:200},data:d};})
+      : fetchJsonSafe(reqUrl,{headers:{Accept:"application/json"},cache:"default"});
+     const [{res:cr,data:pagePayload},cats]=await Promise.all([catalogFetchPromise,catsPromise]);
+     if(!cr.ok||pagePayload.ok!==true){if(!paintedCached)throw new Error(pagePayload.error||"Movie Catalog API unavailable");return;}
+     writeCatalogCache(cacheKey,pagePayload);
      data={categories:cats};
-     const unique=new Map();
-     (Array.isArray(pagePayload.items)?pagePayload.items:[]).forEach(item=>{
-      const key=pathOf(item)||norm(item.title);
-      if(key&&!unique.has(key))unique.set(key,{...item,_sections:[],_sources:["catalog"]});
-     });
-     all=[...unique.values()].filter(item=>!isNigerian(item)).map(item=>directApiPath==="/language/hindi-dubbed"?({...item,_hindiCatalog:true}):item);
+     all=dedupeCatalogItems(pagePayload.items,directApiPath==="/language/hindi-dubbed");
      apiCatalogMode=true;
      apiMeta=pagePayload;
+     if(paintedCached&&window.scrollY>160)return;
     }else{
      status.textContent="Loading Movie API catalog…";
      const [{res:response,data:payload},cats]=await Promise.all([
@@ -460,17 +513,11 @@
      if(cats.length)data.categories=cats;
      else if(Array.isArray(payload.categories)&&payload.categories.length)allApiCategories=payload.categories;
      const category=(data.categories||[]).find(x=>[x.path,x.slug,x.label,x.name,x.title].some(v=>norm(v)===norm(selected)));
-     const apiPath=text(category?.path)||(!selected?"/all":"");
+     const apiPath=text(category?.path)||"/all";
      if(apiPath&&(apiPath!=="/"||selected==="/")){
-      status.textContent="Loading "+(stripCatBrand(category?.label||customLabels[selected]||"All Content")||"All Content")+" · Page "+page+"…";
       const {res:cr,data:pagePayload}=await fetchJsonSafe("/api/movie-api/catalog?category="+encodeURIComponent(apiPath)+"&page="+Math.max(1,Math.min(100,page)),{headers:{Accept:"application/json"},cache:"default"});
       if(!cr.ok||pagePayload.ok!==true)throw new Error(pagePayload.error||"Movie Catalog API unavailable");
-      const unique=new Map();
-      (Array.isArray(pagePayload.items)?pagePayload.items:[]).forEach(item=>{
-       const key=pathOf(item)||norm(item.title);
-       if(key&&!unique.has(key))unique.set(key,{...item,_sections:[],_sources:["catalog"]});
-      });
-      all=[...unique.values()].filter(item=>!isNigerian(item)).map(item=>apiPath==="/language/hindi-dubbed"?({...item,_hindiCatalog:true}):item);
+      all=dedupeCatalogItems(pagePayload.items,apiPath==="/language/hindi-dubbed");
       apiCatalogMode=true;
       apiMeta=pagePayload;
      }else{

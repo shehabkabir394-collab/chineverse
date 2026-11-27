@@ -895,19 +895,40 @@
     }
   });
 
+  function readCachedDownloadDetail(targetPath) {
+    try {
+      const m = JSON.parse(sessionStorage.getItem("cv_watch_detail_v1") || "{}");
+      const hit = m[targetPath];
+      if (hit && hit.ts && Date.now() - hit.ts < 3 * 60 * 1000 && hit.detail && hit.detail.hasResource !== false && Array.isArray(hit.detail.episodes) && hit.detail.episodes.length > 0) {
+        return hit.detail;
+      }
+    } catch {}
+    return null;
+  }
+
   async function load() {
     if (!/^\/(?:mb|mlbd|movie|series|drama|anime)\/[a-zA-Z0-9_./-]{1,300}$/i.test(path)) {
       $("#downloadStatus").textContent = "Invalid title link.";
       return;
     }
     try {
-      const r = await fetch(
-        `/api/movie-api/details?path=${encodeURIComponent(path)}&title=${encodeURIComponent(requestedTitle)}`,
-        { cache: "default" }
-      );
-      const data = await r.json();
-      if (!r.ok || !data.detail) throw new Error(data.error || "Title details unavailable.");
-      detail = data.detail;
+      const reqUrl = `/api/movie-api/details?path=${encodeURIComponent(path)}&title=${encodeURIComponent(requestedTitle)}`;
+      let loadedDetail = readCachedDownloadDetail(path);
+      if (!loadedDetail) {
+        const pre = window.__cvDownloadDetailPreload;
+        let data = null;
+        if (pre && pre.url === reqUrl && pre.promise) {
+          window.__cvDownloadDetailPreload = null;
+          data = await pre.promise;
+        } else {
+          const r = await fetch(reqUrl, { cache: "default" });
+          data = await r.json();
+          if (!r.ok && !data?.detail) throw new Error(data?.error || "Title details unavailable.");
+        }
+        if (!data?.detail) throw new Error(data?.error || "Title details unavailable.");
+        loadedDetail = data.detail;
+      }
+      detail = loadedDetail;
       if (detail.path && detail.path !== activePath) {
         activePath = detail.path;
       }

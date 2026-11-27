@@ -74,10 +74,11 @@
     const quotaText = est.quota > 0 ? ` / ${fmtBytes(est.quota)} available` : "";
 
     const cards = offlineItems
-      .map(item => {
+      .map((item, idx) => {
         const poster = safeImg(item.posterDataUrl || item.rawPoster);
         const rawFb = /^(?:https?:\/\/|\/\/)/i.test(String(item.rawPoster || "")) ? String(item.rawPoster) : "";
         const fbAttr = rawFb && rawFb !== poster ? ` data-fallback-src="${esc(rawFb)}"` : "";
+        const loadAttr = (idx < 6 ? 'loading="eager"' : 'loading="lazy"') + (idx < 4 ? ' fetchpriority="high"' : "");
         const isComplete = item.status === "complete";
         const isDownloading = item.status === "downloading" || Boolean(window.CineVerseOffline?.isActive?.(item.id));
         const total = Number(item.totalBytes || 0);
@@ -104,7 +105,7 @@
               <div class="cv-card-thumb">
                 ${
                   poster
-                    ? `<img loading="lazy" decoding="async" src="${esc(poster)}"${fbAttr} data-poster-img="1" alt="${esc(item.title || "")}"><div class="cv-card-fallback" hidden>${esc(item.title || "")}</div>`
+                    ? `<img ${loadAttr} decoding="async" src="${esc(poster)}"${fbAttr} data-poster-img="1" alt="${esc(item.title || "")}"><div class="cv-card-fallback" hidden>${esc(item.title || "")}</div>`
                     : `<div class="cv-card-fallback">${esc(item.title || "")}</div>`
                 }
                 <div class="cv-card-top">
@@ -207,10 +208,11 @@
     const watchlistGrid = visible.length
       ? `<div class="cv-poster-grid">
           ${visible
-            .map(item => {
+            .map((item, idx) => {
               const poster = safeImg(item.poster || item.rawPoster);
               const rawFb = /^(?:https?:\/\/|\/\/)/i.test(String(item.rawPoster || "")) ? String(item.rawPoster) : "";
               const fbAttr = rawFb && rawFb !== poster ? ` data-fallback-src="${esc(rawFb)}"` : "";
+              const loadAttr = (idx < 6 ? 'loading="eager"' : 'loading="lazy"') + (idx < 4 ? ' fetchpriority="high"' : "");
               const href = item.path
                 ? `watch.html?path=${encodeURIComponent(item.path)}&title=${encodeURIComponent(item.title || "")}`
                 : "./";
@@ -221,7 +223,7 @@
                     <div class="cv-card-thumb">
                       ${
                         poster
-                          ? `<img loading="lazy" decoding="async" referrerpolicy="no-referrer" src="${esc(poster)}"${fbAttr} data-poster-img="1" alt="${esc(item.title || "")}"><div class="cv-card-fallback" hidden>${esc(item.title || "")}</div>`
+                          ? `<img ${loadAttr} decoding="async" referrerpolicy="no-referrer" src="${esc(poster)}"${fbAttr} data-poster-img="1" alt="${esc(item.title || "")}"><div class="cv-card-fallback" hidden>${esc(item.title || "")}</div>`
                           : `<div class="cv-card-fallback">${esc(item.title || "")}</div>`
                       }
                       <div class="cv-card-top">
@@ -248,6 +250,7 @@
   }
 
   async function render() {
+    renderSync();
     if (window.CineVerseOffline) {
       try {
         const [list, est] = await Promise.all([
@@ -256,9 +259,9 @@
         ]);
         offlineItemsCache = Array.isArray(list) ? list : [];
         storageEstimateCache = est || storageEstimateCache;
+        renderSync();
       } catch {}
     }
-    renderSync();
   }
 
   $("#cvFolderTabs")?.addEventListener("click", e => {

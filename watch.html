@@ -15,14 +15,26 @@
     gtag('js', new Date());
     gtag('config', 'G-VK18GBQVWP');
   </script>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <script>
+    (function(){
+      try{
+        var p=new URLSearchParams(location.search),path=p.get("path")||"",title=p.get("title")||"";
+        if(!p.get("offline")&&/^\/(?:mb|mlbd|movie|series|drama|anime)\/[a-zA-Z0-9_./-]{1,300}$/i.test(path)){
+          var url="/api/movie-api/details?path="+encodeURIComponent(path)+"&title="+encodeURIComponent(title);
+          window.__cvWatchDetailPreload={url:url,promise:fetch(url,{cache:"no-store"}).then(function(r){return r.json();}).catch(function(){return null;})};
+        }
+      }catch(e){}
+    })();
+  </script>
   <link rel="stylesheet" href="css/watch-enhancements.css?v=20261126-fix-2">
   <link rel="stylesheet" href="css/cineverse-app-redesign.css?v=20261125-ui-3">
   <link rel="stylesheet" href="css/movie-api-account.css?v=20261125-ui-3">
-  <link rel="stylesheet" href="css/liquid-glass-theme.css?v=20261126-mlbd-1">
-  <script defer src="js/player.js?v=20261125-offline-1"></script>
+  <link rel="stylesheet" href="css/liquid-glass-theme.css?v=20261127-fast-2">
+  <script defer src="js/player.js?v=20261127-fast-3"></script>
   <script defer src="js/offline-downloads.js?v=20261125-offline-1"></script>
-  <script defer src="js/movie-api-watch.js?v=20261126-mlbd-1"></script>
-  <script defer src="js/movie-api-discovery.js?v=20261126-mlbd-1"></script>
+  <script defer src="js/movie-api-watch.js?v=20261127-fast-3"></script>
+  <script defer src="js/movie-api-discovery.js?v=20261127-fast-2"></script>
   <script defer src="js/movie-api-account.js?v=20261125-ui-3"></script>
 </head>
 <body>

@@ -1225,6 +1225,53 @@
     }
   }
 
+  const TAB_CACHE_KEY = "cv_tab_cache_v1";
+  const TAB_CACHE_TTL_MS = 5 * 60 * 1000;
+  function readTabCache(key) {
+    try {
+      const m = JSON.parse(sessionStorage.getItem(TAB_CACHE_KEY) || "{}");
+      const hit = m[key];
+      if (hit && hit.ts && Date.now() - hit.ts < TAB_CACHE_TTL_MS && Array.isArray(hit.items)) return hit;
+    } catch {}
+    return null;
+  }
+  function writeTabCache(key, items, hasMore) {
+    if (!Array.isArray(items) || !items.length) return;
+    try {
+      const m = JSON.parse(sessionStorage.getItem(TAB_CACHE_KEY) || "{}");
+      delete m[key];
+      m[key] = { ts: Date.now(), items: items.slice(0, 36), hasMore: Boolean(hasMore) };
+      const ks = Object.keys(m);
+      while (ks.length > 8) delete m[ks.shift()];
+      sessionStorage.setItem(TAB_CACHE_KEY, JSON.stringify(m));
+    } catch {}
+  }
+
+  function paintFilteredTab(tabKey, label, items, appendPage, hasMore) {
+    statusEl.hidden = true;
+    sectionsRoot.innerHTML = `
+      <section class="cv-section">
+        <div class="cv-section-header">
+          <div class="cv-section-title-group">
+            <h2 class="cv-section-title">${esc(label)}</h2>
+            <span class="cv-section-sub tabular-nums">· ${items.length} titles</span>
+          </div>
+          <a class="cv-more-link" href="${tabKey === "trending" ? "catalog.html?category=%2Fmostwatch%2F7d" : `catalog.html?category=${encodeURIComponent(tabKey)}`}">View A–Z ›</a>
+        </div>
+        ${items.length ? `<div class="cv-poster-grid">${items.map((item, idx) => cardMarkup(item, idx < 6, idx < 4)).join("")}</div>` : `<div class="cv-status-banner">No titles found in ${esc(label)}.</div>`}
+        ${hasMore ? `<div style="display:flex;justify-content:center;padding:20px 0 6px"><button type="button" class="cv-btn-glass" id="cvTabLoadMore">Load More Titles</button></div>` : ""}
+      </section>
+    `;
+    const loadMoreBtn = $("#cvTabLoadMore");
+    if (loadMoreBtn) {
+      loadMoreBtn.onclick = () => {
+        loadMoreBtn.disabled = true;
+        loadMoreBtn.textContent = "Loading…";
+        renderFilteredTab(tabKey, label, appendPage + 1, items);
+      };
+    }
+  }
+
   async function renderFilteredTab(tabKey, label, appendPage = 1, existingItems = []) {
     isHomeView = false;
     clearInterval(spotlightTimer);
@@ -1232,10 +1279,18 @@
     catSection.hidden = true;
     if (platformEl) platformEl.hidden = true;
     if (liveSportsEl) liveSportsEl.hidden = true;
+
+    let paintedCached = false;
     if (appendPage === 1) {
-      statusEl.hidden = false;
-      statusEl.textContent = `Loading ${label}…`;
-      sectionsRoot.innerHTML = "";
+      const cached = readTabCache(tabKey);
+      if (cached) {
+        paintFilteredTab(tabKey, label, sortNewestFirst(dedupeList(cached.items)), 1, cached.hasMore);
+        paintedCached = true;
+      } else {
+        statusEl.hidden = false;
+        statusEl.textContent = `Loading ${label}…`;
+        sectionsRoot.innerHTML = "";
+      }
     }
 
     try {
@@ -1245,34 +1300,19 @@
           : `/api/movie-api/catalog?category=${encodeURIComponent(tabKey)}&page=${appendPage}`;
       const r = await fetch(endpoint);
       const d = await r.json();
+      if (isHomeView) return;
       const incoming = (Array.isArray(d?.items) ? d.items : []).filter(x => x && !isNigerian(x));
       const merged = dedupeList([...existingItems, ...incoming]);
       const items = sortNewestFirst(merged);
       const hasMore = Boolean(d?.hasMore || (d?.maxPage && appendPage < Number(d.maxPage)) || incoming.length >= 18);
-      statusEl.hidden = true;
-      sectionsRoot.innerHTML = `
-        <section class="cv-section">
-          <div class="cv-section-header">
-            <div class="cv-section-title-group">
-              <h2 class="cv-section-title">${esc(label)}</h2>
-              <span class="cv-section-sub tabular-nums">· ${items.length} titles</span>
-            </div>
-            <a class="cv-more-link" href="${tabKey === "trending" ? "catalog.html?category=%2Fmostwatch%2F7d" : `catalog.html?category=${encodeURIComponent(tabKey)}`}">View A–Z ›</a>
-          </div>
-          ${items.length ? `<div class="cv-poster-grid">${items.map(cardMarkup).join("")}</div>` : `<div class="cv-status-banner">No titles found in ${esc(label)}.</div>`}
-          ${hasMore ? `<div style="display:flex;justify-content:center;padding:20px 0 6px"><button type="button" class="cv-btn-glass" id="cvTabLoadMore">Load More Titles</button></div>` : ""}
-        </section>
-      `;
-      const loadMoreBtn = $("#cvTabLoadMore");
-      if (loadMoreBtn) {
-        loadMoreBtn.onclick = () => {
-          loadMoreBtn.disabled = true;
-          loadMoreBtn.textContent = "Loading…";
-          renderFilteredTab(tabKey, label, appendPage + 1, items);
-        };
+      if (appendPage === 1 && items.length) {
+        writeTabCache(tabKey, items, hasMore);
+      }
+      if (!paintedCached || window.scrollY < 160) {
+        paintFilteredTab(tabKey, label, items, appendPage, hasMore);
       }
     } catch {
-      statusEl.textContent = `Could not load ${label}. Please try again.`;
+      if (!paintedCached) statusEl.textContent = `Could not load ${label}. Please try again.`;
     }
   }
 
@@ -1357,10 +1397,18 @@
 
   async function loadSportsPreview() {
     try {
-      const r = await fetch("/api/movie-api/sports", { cache: "no-store" });
+      const c = JSON.parse(localStorage.getItem("cv_sports_cache_v1") || "null");
+      if (c && c.ts && Date.now() - c.ts < 3 * 60 * 1000 && Array.isArray(c.channels) && c.channels.length) {
+        sportsChannels = c.channels;
+        renderLiveSportsSection();
+      }
+    } catch {}
+    try {
+      const r = await fetch("/api/movie-api/sports");
       const d = await r.json();
       if (r.ok && d?.ok && Array.isArray(d.channels) && d.channels.length) {
         sportsChannels = d.channels;
+        try { localStorage.setItem("cv_sports_cache_v1", JSON.stringify({ ts: Date.now(), channels: d.channels.slice(0, 24) })); } catch {}
         renderLiveSportsSection();
       }
     } catch {}
@@ -1368,9 +1416,16 @@
 
   async function loadAllCategories() {
     try {
+      const c = JSON.parse(localStorage.getItem("cv_categories_cache_v1") || "null");
+      if (c && c.ts && Date.now() - c.ts < 60 * 60 * 1000 && Array.isArray(c.val) && c.val.length) {
+        renderMoreCategories(c.val);
+      }
+    } catch {}
+    try {
       const r = await fetch("/api/movie-api/categories");
       const d = await r.json();
       if (r.ok && d?.ok && Array.isArray(d.categories) && d.categories.length) {
+        try { localStorage.setItem("cv_categories_cache_v1", JSON.stringify({ ts: Date.now(), val: d.categories })); } catch {}
         renderMoreCategories(d.categories);
       }
     } catch {}

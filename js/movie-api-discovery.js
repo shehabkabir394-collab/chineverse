@@ -707,5 +707,66 @@
     }, true);
   }
 
+  function bindSpeculativePrefetch() {
+    const prefetched = new Set();
+    let lastAt = 0;
+    const isSaver = () => {
+      try {
+        if (navigator.connection?.saveData) return true;
+        if (localStorage.getItem("cv_playback_quality_mode_v1") === "data-saver") return true;
+      } catch {}
+      return false;
+    };
+    const maybePrefetch = target => {
+      if (isSaver()) return;
+      const now = Date.now();
+      if (now - lastAt < 120) return;
+      const a = target?.closest?.("a[href]");
+      if (!a) return;
+      const rawHref = a.getAttribute("href") || "";
+      if (!rawHref || rawHref.startsWith("#") || /^(?:https?:|mailto:|tel:|javascript:)/i.test(rawHref)) return;
+      let u;
+      try { u = new URL(rawHref, location.href); } catch { return; }
+      if (u.origin !== location.origin) return;
+
+      if (u.pathname.endsWith("/watch.html") || u.pathname === "/watch.html") {
+        const p = u.searchParams.get("path") || "";
+        const t = u.searchParams.get("title") || "";
+        if (!/^\/(?:mb|mlbd|movie|series|drama|anime)\//i.test(p)) return;
+        const cacheKey = `watch:${p}`;
+        if (prefetched.has(cacheKey)) return;
+        prefetched.add(cacheKey);
+        lastAt = now;
+        fetch(`/api/movie-api/details?path=${encodeURIComponent(p)}&title=${encodeURIComponent(t)}`, { priority: "low" })
+          .then(r => (r.ok ? r.json() : null))
+          .then(d => {
+            if (d?.ok && d?.detail && d.detail.hasResource !== false && Array.isArray(d.detail.episodes) && d.detail.episodes.length > 0) {
+              try {
+                const m = JSON.parse(sessionStorage.getItem("cv_watch_detail_v1") || "{}");
+                delete m[p];
+                m[p] = { ts: Date.now(), detail: d.detail };
+                const ks = Object.keys(m);
+                while (ks.length > 8) delete m[ks.shift()];
+                sessionStorage.setItem("cv_watch_detail_v1", JSON.stringify(m));
+              } catch {}
+            }
+          })
+          .catch(() => {});
+      } else if (u.pathname.endsWith("/catalog.html") || u.pathname === "/catalog.html") {
+        if (u.searchParams.has("q")) return;
+        const cat = u.searchParams.get("category") || "/all";
+        const pg = Math.max(1, Number(u.searchParams.get("page")) || 1);
+        const cacheKey = `cat:${cat}:${pg}`;
+        if (prefetched.has(cacheKey)) return;
+        prefetched.add(cacheKey);
+        lastAt = now;
+        fetch(`/api/movie-api/catalog?category=${encodeURIComponent(cat)}&page=${pg}`, { priority: "low" }).catch(() => {});
+      }
+    };
+    document.addEventListener("pointerdown", e => maybePrefetch(e.target), { passive: true, capture: true });
+    document.addEventListener("mouseenter", e => maybePrefetch(e.target), { passive: true, capture: true });
+  }
+
   bindTriggers();
+  bindSpeculativePrefetch();
 })();

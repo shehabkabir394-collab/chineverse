@@ -105,12 +105,49 @@
 
     let currentMeta = historyMeta ? { ...historyMeta } : { path: "", title, poster: "", isSeries: false, se: 0, ep: 0 };
 
+    const FAST_HOST_KEY = "cv_fast_srv_v1";
+    const readClientServerScores = () => {
+      try {
+        const raw = JSON.parse(sessionStorage.getItem(FAST_HOST_KEY) || "{}");
+        const now = Date.now();
+        const clean = {};
+        for (const [k, v] of Object.entries(raw || {})) {
+          if (v && now - Number(v.at || 0) < 180000) clean[k] = v;
+        }
+        return clean;
+      } catch {
+        return {};
+      }
+    };
+    const writeClientServerScore = (urlKey, latencyMs, ok = true) => {
+      if (!urlKey) return;
+      try {
+        const cur = readClientServerScores();
+        cur[urlKey] = { latencyMs: Number(latencyMs) || 500, ok: Boolean(ok), at: Date.now() };
+        const keys = Object.keys(cur);
+        if (keys.length > 24) delete cur[keys[0]];
+        sessionStorage.setItem(FAST_HOST_KEY, JSON.stringify(cur));
+      } catch {}
+    };
+    const sourceServerKey = rawUrl => {
+      try {
+        const u = new URL(String(rawUrl || ""), location.origin);
+        return `${u.pathname}:${u.searchParams.get("res") || ""}:${String(u.searchParams.get("t") || u.searchParams.get("mb") || "").slice(0, 12)}`;
+      } catch {
+        return String(rawUrl || "").slice(0, 48);
+      }
+    };
+
     const qualityNumber = x => Number(String(x?.quality || "").match(/\d+/)?.[0] || 0);
     const normalizeQualityLabel = raw => {
       const s = String(raw || "Auto").trim();
       const m = /^(\d{3,4})\s*p?$/i.exec(s);
       return m ? `${m[1]}p` : s || "Auto";
     };
+    const isHlsSource = s =>
+      /\.m3u8(?:$|[?#])/i.test(String(s?.url || "")) ||
+      /\/api\/(?:sports-hls|mlbd-hls)\//i.test(String(s?.url || "")) ||
+      /mpegurl|m3u8|hls/i.test(String(s?.mime || s?.type || ""));
     const normalizeSources = list =>
       [...list]
         .filter(x => {
@@ -119,25 +156,27 @@
           if (/\bdash\b|dash\+xml/i.test(String(x.format || x.mime || x.type || ""))) return false;
           return true;
         })
-        .map(x => ({
+        .map((x, idx) => ({
           ...x,
+          _origIdx: idx,
           quality: normalizeQualityLabel(x.quality),
           mime: String(x.mime || x.type || "")
-        }))
-        .sort((a, b) => qualityNumber(a) - qualityNumber(b));
+        }));
 
     const dedupeByQuality = list => {
       const byQ = new Map();
-      for (const s of list) {
+      for (const s of [...list].sort((a, b) => qualityNumber(a) - qualityNumber(b))) {
         const key = String(s.quality || "Auto").toLowerCase();
         const prev = byQ.get(key);
-        const isHls = /\.m3u8(?:$|[?#])/i.test(s.url) || /mpegurl|m3u8|hls/i.test(s.mime);
-        const prevIsHls = prev ? (/\.m3u8(?:$|[?#])/i.test(prev.url) || /mpegurl|m3u8|hls/i.test(prev.mime)) : false;
-        if (!prev || (prevIsHls && !isHls)) {
+        const isHls = isHlsSource(s);
+        const prevIsHls = prev ? isHlsSource(prev) : false;
+        const sLat = Number(s.serverLatencyMs || 500);
+        const pLat = prev ? Number(prev.serverLatencyMs || 500) : 9999;
+        if (!prev || (prev.serverOk === false && s.serverOk !== false) || (prevIsHls && !isHls && s.serverOk !== false) || sLat + 120 < pLat) {
           byQ.set(key, s);
         }
       }
-      return [...byQ.values()];
+      return [...byQ.values()].sort((a, b) => qualityNumber(a) - qualityNumber(b));
     };
 
     let allSources = normalizeSources(sources);
@@ -158,28 +197,54 @@
       return String(rawUrl || "");
     };
 
-    const best = () => {
-      if (!ordered.length) return null;
-      if (playbackMode === "data-saver") {
-        return (
-          ordered.find(x => x.quality === "360p") ||
-          ordered.find(x => x.quality === "480p") ||
-          ordered.find(x => qualityNumber(x) > 0 && qualityNumber(x) <= 480) ||
-          ordered[0]
-        );
-      }
+    const scoreCandidateForPlayback = (s, clientScores) => {
+      if (!s || !s.url) return -999999;
+      if (s.serverOk === false) return -50000;
       const c = navigator.connection || {};
       const down = Number(c.downlink) || 0;
-      const verySlow = /2g|slow-2g/i.test(c.effectiveType || "") || (down > 0 && down < 1.2);
-      if (verySlow) {
-        return ordered.find(x => x.quality === "480p") || ordered[0];
+      const verySlow = /2g|slow-2g/i.test(c.effectiveType || "") || (down > 0 && down < 1.5);
+      const moderateSlow = verySlow || /3g/i.test(c.effectiveType || "") || (down > 0 && down < 3.2);
+      const qNum = qualityNumber(s);
+      const isHls = isHlsSource(s);
+      const cs = clientScores?.[sourceServerKey(s.url)];
+      const lat = cs ? Number(cs.latencyMs || 500) : Number(s.serverLatencyMs || 450);
+      if (cs && cs.ok === false) return -40000;
+
+      if (playbackMode === "data-saver") {
+        let sc = 0;
+        if (qNum > 0 && qNum <= 480) sc += 5000 + qNum;
+        else if (isHls) sc += 4000;
+        else sc += Math.max(0, 2000 - qNum);
+        return sc - lat;
       }
-      return (
-        ordered[ordered.length - 1] ||
-        ordered.find(x => x.quality === "1080p") ||
-        ordered.find(x => x.quality === "720p") ||
-        ordered[0]
-      );
+
+      const fastTier = lat <= 420 ? 3 : lat <= 850 ? 2 : 1;
+      let sc = fastTier * 10000 + Math.max(0, 1200 - lat);
+      if (s.autoSelected && !cs) sc += 600;
+      if (moderateSlow) {
+        // On slower mobile connections, adaptive HLS or 720p/480p avoids buffering
+        if (isHls) sc += 2600;
+        else if (qNum > 0 && qNum <= 720) sc += 2200 + qNum;
+        else sc += 800;
+      } else {
+        if (qNum >= 1080) sc += 1800;
+        else if (isHls) sc += 1650;
+        else if (qNum >= 720) sc += 1400;
+        else sc += qNum;
+      }
+      return sc;
+    };
+
+    const rankAllCandidates = (pool = allSources, excludeSet = null) => {
+      const clientScores = readClientServerScores();
+      const filtered = (Array.isArray(pool) ? pool : []).filter(x => x && x.url && (!excludeSet || !excludeSet.has(x.url)));
+      const base = filtered.length ? filtered : pool;
+      return [...base].sort((a, b) => scoreCandidateForPlayback(b, clientScores) - scoreCandidateForPlayback(a, clientScores));
+    };
+
+    const best = () => {
+      if (!allSources.length) return null;
+      return rankAllCandidates(allSources)[0] || ordered[0] || allSources[0];
     };
 
     const initial = best();
@@ -210,9 +275,14 @@
     let sourceToken = 0;
     let activeSource = null;
     let failedSources = new Set();
+    let slowSources = new Set();
     let retriedUrls = new Set();
     let userSelectedAudio = false;
     let userMutedByToggle = false;
+    let stallWatchTimer = 0;
+    let stallTimestamps = [];
+    let lastProgressTime = 0;
+    let lastProgressAt = 0;
 
     // Cinema Ambient Mode backdrop behind .cv-player-stage
     const stageEl = wrap.closest(".cv-player-stage") || wrap.parentElement;
@@ -706,12 +776,15 @@
       }
       if (token !== sourceToken) return;
       failedSources.add(failed.url);
-      const remaining = allSources.filter(x => x && x.url && !failedSources.has(x.url));
+      writeClientServerScore(sourceServerKey(failed.url), 9999, false);
+      const exclude = new Set([...failedSources, ...slowSources]);
+      let remaining = rankAllCandidates(allSources, exclude);
+      if (!remaining.length) remaining = rankAllCandidates(allSources, failedSources);
       const sameQ = remaining.find(x => x.quality === failed.quality);
-      const next = sameQ || remaining.find(x => x.quality === "720p") || remaining.find(x => x.quality === "480p") || remaining[remaining.length - 1] || remaining[0];
+      const next = sameQ || remaining[0];
       if (next) {
-        console.warn("Video source failed; trying another source", { quality: failed.quality, code, probeInfo });
-        setSource(next, false, true);
+        console.warn("Video source failed; switching to fastest backup server", { quality: failed.quality, code, probeInfo });
+        setSource(next, true, true);
         return;
       }
       const isHtmlAuth = probeInfo && /text\/html/i.test(String(probeInfo.contentType || ""));
@@ -841,8 +914,8 @@
       if (!hlsInstance) return;
       const isSaver = playbackMode === "data-saver";
       if (hlsInstance.config) {
-        hlsInstance.config.maxBufferLength = isSaver ? 10 : 30;
-        hlsInstance.config.maxMaxBufferLength = isSaver ? 18 : 60;
+        hlsInstance.config.maxBufferLength = isSaver ? 10 : 40;
+        hlsInstance.config.maxMaxBufferLength = isSaver ? 18 : 90;
         hlsInstance.config.backBufferLength = isSaver ? 30 : 90;
         hlsInstance.config.capLevelToPlayerSize = isSaver;
       }
@@ -873,6 +946,65 @@
           hlsInstance.autoLevelCapping = -1;
         }
       }
+    }
+
+    async function raceFastestServerSource(candidates, fallbackSrc) {
+      if (!Array.isArray(candidates) || candidates.length < 2 || playbackMode === "data-saver") {
+        return fallbackSrc || candidates?.[0] || null;
+      }
+      const pool = candidates.slice(0, 3);
+      const clientScores = readClientServerScores();
+      const firstScore = clientScores[sourceServerKey(pool[0].url)];
+      if ((firstScore && firstScore.ok && firstScore.latencyMs <= 320) || (pool[0]?.serverOk && Number(pool[0]?.serverLatencyMs || 999) <= 280)) {
+        return pool[0];
+      }
+      const ac = new AbortController();
+      const timeout = setTimeout(() => ac.abort(), 750);
+      try {
+        const probes = pool.map(src => {
+          const isHls = isHlsSource(src);
+          const t0 = performance.now();
+          const hdrs = isHls ? {} : { Range: "bytes=0-16383" };
+          return fetch(src.url, { method: "GET", headers: hdrs, credentials: "same-origin", signal: ac.signal })
+            .then(async r => {
+              const ms = Math.max(1, Math.round(performance.now() - t0));
+              try { await r.body?.cancel(); } catch {}
+              const ok = r.ok || r.status === 206;
+              writeClientServerScore(sourceServerKey(src.url), ok ? ms : 9999, ok);
+              if (!ok) throw new Error("not ok");
+              return { src, ms };
+            });
+        });
+        const fastest = await Promise.any(probes);
+        clearTimeout(timeout);
+        ac.abort();
+        return fastest?.src || fallbackSrc || pool[0];
+      } catch {
+        clearTimeout(timeout);
+        return fallbackSrc || pool[0];
+      }
+    }
+
+    function switchToFasterServer(reason = "buffering") {
+      if (!allSources.length || !activeSource) return false;
+      if (activeHls && Array.isArray(activeHls.levels) && activeHls.levels.length > 1) {
+        const curLvl = activeHls.currentLevel >= 0 ? activeHls.currentLevel : activeHls.levels.length - 1;
+        if (curLvl > 0) {
+          activeHls.nextLevel = curLvl - 1;
+          showOsd("⚡", "Adjusting Quality", Math.max(25, Math.round(((curLvl) / activeHls.levels.length) * 100)), 0, 100, "#38bdf8");
+          return true;
+        }
+      }
+      slowSources.add(activeSource.url);
+      writeClientServerScore(sourceServerKey(activeSource.url), 4500, true);
+      const exclude = new Set([...failedSources, ...slowSources]);
+      const candidates = rankAllCandidates(allSources, exclude);
+      const next = candidates.find(x => x.url !== activeSource.url);
+      if (!next) return false;
+      console.warn(`Auto-switching to faster server (${reason})`, { from: activeSource.quality, to: next.quality, provider: next.provider });
+      showOsd("⚡", "Fast Server", 100, 0, 100, "#10b981");
+      setSource(next, true, !video.paused, video.currentTime || 0);
+      return true;
     }
 
     async function setSource(src, keep = true, autoplay = false, seekOverride = null) {
@@ -918,6 +1050,10 @@
         if (was || autoplay) safePlayWithFallback();
       };
 
+      clearTimeout(stallWatchTimer);
+      lastProgressTime = video.currentTime || 0;
+      lastProgressAt = Date.now();
+
       if (isHls) {
         const ua = navigator.userAgent || "";
         const isSafari = /Safari/i.test(ua) && !/Chrome|Chromium|CriOS|Edg|Android/i.test(ua);
@@ -930,11 +1066,16 @@
               activeHls = new Hls({
                 enableWorker: true,
                 lowLatencyMode: false,
-                maxBufferLength: isSaver ? 10 : 30,
-                maxMaxBufferLength: isSaver ? 18 : 60,
+                startLevel: -1,
+                maxBufferLength: isSaver ? 10 : 40,
+                maxMaxBufferLength: isSaver ? 18 : 90,
+                maxBufferHole: 0.5,
                 backBufferLength: isSaver ? 30 : 90,
                 capLevelToPlayerSize: isSaver,
-                ...(isSaver ? { abrEwmaDefaultEstimate: 400000 } : {})
+                nudgeMaxRetry: 5,
+                fragLoadingTimeOut: 12000,
+                manifestLoadingTimeOut: 10000,
+                abrEwmaDefaultEstimate: isSaver ? 400000 : 2500000
               });
               activeHls.on(Hls.Events.MEDIA_ATTACHED, () => {
                 if (token === sourceToken) activeHls.loadSource(src.url);
@@ -950,7 +1091,14 @@
                 if (token === sourceToken) emitState();
               });
               activeHls.on(Hls.Events.ERROR, (_, data) => {
-                if (data.fatal && token === sourceToken) {
+                if (token !== sourceToken) return;
+                if (!data.fatal && (data.details === "bufferStalledError" || data.details === "fragLoadTimeOut" || data.details === "fragLoadError")) {
+                  if (activeHls && activeHls.currentLevel > 0) {
+                    activeHls.nextLevel = activeHls.currentLevel - 1;
+                  }
+                  return;
+                }
+                if (data.fatal) {
                   $(".cv-buffer").hidden = true;
                   video.dispatchEvent(new Event("error"));
                 }
@@ -964,7 +1112,7 @@
         }
       }
 
-      video.preload = "metadata";
+      video.preload = playbackMode === "data-saver" ? "metadata" : "auto";
       video.src = isHls ? src.url : applySaverUrlFlag(src.url);
       video.addEventListener("loadedmetadata", ready, { once: true });
       if (autoplay) {
@@ -972,7 +1120,18 @@
       }
     }
 
-    setSource(initial, false, true);
+    if (initial) {
+      if (allSources.length > 1 && playbackMode !== "data-saver") {
+        const mountTok = ++sourceToken;
+        raceFastestServerSource(rankAllCandidates(allSources), initial).then(win => {
+          if (mountTok === sourceToken && !activeSource) {
+            setSource(win || initial, false, true);
+          }
+        });
+      } else {
+        setSource(initial, false, true);
+      }
+    }
     quality.value = "auto";
 
     quality.addEventListener("change", () => {
@@ -1170,6 +1329,14 @@
 
     let saveAt = 0;
     video.addEventListener("timeupdate", () => {
+      if (Math.abs(video.currentTime - lastProgressTime) > 0.25) {
+        lastProgressTime = video.currentTime;
+        lastProgressAt = Date.now();
+        clearTimeout(stallWatchTimer);
+        if (stallTimestamps.length && Date.now() - stallTimestamps[stallTimestamps.length - 1] > 15000) {
+          stallTimestamps = [];
+        }
+      }
       if (video.duration) {
         seek.value = Math.round((video.currentTime / video.duration) * 1000);
         time.textContent = fmt(video.currentTime) + " / " + fmt(video.duration);
@@ -1313,9 +1480,39 @@
       scheduleHide(1200);
     });
 
-    video.addEventListener("waiting", () => ($(".cv-buffer").hidden = false));
-    video.addEventListener("playing", () => ($(".cv-buffer").hidden = true));
-    video.addEventListener("canplay", () => ($(".cv-buffer").hidden = true));
+    const onBufferingEvent = () => {
+      $(".cv-buffer").hidden = false;
+      if (video.paused || video.ended || !activeSource) return;
+      const now = Date.now();
+      stallTimestamps = stallTimestamps.filter(ts => now - ts < 25000);
+      stallTimestamps.push(now);
+      if (stallTimestamps.length >= 3 && allSources.length > 1) {
+        stallTimestamps = [];
+        if (switchToFasterServer("frequent-buffering")) return;
+      }
+      clearTimeout(stallWatchTimer);
+      const snapshotPos = video.currentTime;
+      const curTok = sourceToken;
+      stallWatchTimer = setTimeout(() => {
+        if (curTok !== sourceToken || video.paused || video.ended) return;
+        if (Math.abs(video.currentTime - snapshotPos) < 0.35 && video.readyState < 3) {
+          switchToFasterServer("stalled-4s");
+        }
+      }, 4200);
+    };
+    video.addEventListener("waiting", onBufferingEvent);
+    video.addEventListener("stalled", onBufferingEvent);
+    video.addEventListener("playing", () => {
+      clearTimeout(stallWatchTimer);
+      $(".cv-buffer").hidden = true;
+      if (activeSource?.url) {
+        writeClientServerScore(sourceServerKey(activeSource.url), Math.min(350, Number(activeSource.serverLatencyMs || 280)), true);
+      }
+    });
+    video.addEventListener("canplay", () => {
+      clearTimeout(stallWatchTimer);
+      $(".cv-buffer").hidden = true;
+    });
     video.addEventListener("loadedmetadata", () => {
       if (saved > 15 && saved < video.duration - 2 && video.currentTime < 5) {
         const oldBtn = wrap.querySelector(".cv-resume");
@@ -1404,6 +1601,9 @@
       allSources = normalizeSources(next);
       ordered = dedupeByQuality(allSources);
       failedSources.clear();
+      slowSources.clear();
+      stallTimestamps = [];
+      clearTimeout(stallWatchTimer);
       retriedUrls.clear();
       activeSource = null;
       errorNotice.hidden = true;
@@ -1420,13 +1620,23 @@
       quality.innerHTML =
         '<option value="auto">Auto</option>' +
         ordered.map(x => '<option value="' + esc(x.quality) + '">' + esc(x.quality) + "</option>").join("");
-      if (ordered.length) {
+      if (allSources.length) {
+        const ranked = rankAllCandidates(allSources);
         const chosen =
           preferredQuality !== "auto"
-            ? ordered.find(x => x.quality === preferredQuality) || best() || ordered[0]
-            : best() || ordered[0];
-        setSource(chosen, false, shouldAutoplay, seekTo);
-        quality.value = preferredQuality === "auto" ? "auto" : chosen.quality;
+            ? ranked.find(x => x.quality === preferredQuality) || best() || ranked[0]
+            : best() || ranked[0];
+        if (preferredQuality === "auto" && ranked.length > 1 && playbackMode !== "data-saver") {
+          const raceTok = ++sourceToken;
+          raceFastestServerSource(ranked, chosen).then(win => {
+            if (raceTok !== sourceToken) return;
+            setSource(win || chosen, false, shouldAutoplay, seekTo);
+            quality.value = "auto";
+          });
+        } else {
+          setSource(chosen, false, shouldAutoplay, seekTo);
+          quality.value = preferredQuality === "auto" ? "auto" : chosen.quality;
+        }
       }
       emitState();
     }

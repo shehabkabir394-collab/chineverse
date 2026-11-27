@@ -2041,7 +2041,7 @@ export function mapCategoryToMlbdComUrls(rawPath = "/") {
     return ["/", "/movies", "/web-series"];
   }
   if (p === "/all" || p === "/collections") {
-    return DEFAULT_MLBD_COM_CONTENT_PATHS;
+    return ["/", "/movies", "/web-series", ...DEFAULT_MLBD_COM_CONTENT_PATHS.filter(x => x !== "/" && x !== "/movies" && x !== "/web-series")];
   }
   if (p === "/type/movies") return ["/movies", "/", "/hindi-movies", "/south-indian-movies", "/action-movies", "/animation-movies", "/browse/english", "/browse/bangla", "/browse/hindi", "/browse/hindi-dubbed"];
   if (p === "/type/series" || p === "/drama" || p === "/ongoing") return ["/web-series", "/korean-drama", "/browse/genre-drama", "/browse/turkish", "/browse/bangla", "/browse/chinese"];
@@ -2264,13 +2264,19 @@ async function getMlbdComCatalog({ path = "/", q = "", page = 1 } = {}) {
     merged.push(it);
   };
 
-  for (const it of archiveRes.items) pushUnique(it);
-  for (const it of liveItems) pushUnique(it);
+  if (cleanQ) {
+    for (const it of archiveRes.items) pushUnique(it);
+    for (const it of liveItems) pushUnique(it);
+  } else {
+    for (const it of liveItems) pushUnique(it);
+    for (const it of archiveRes.items) pushUnique(it);
+  }
 
+  const orderedMerged = (!cleanQ && sortMode === "latest") ? sortMlbdNewestFirst(merged) : merged;
   const perPage = 30;
-  const totalCount = Math.max(merged.length, archiveRes.total || 0);
+  const totalCount = Math.max(orderedMerged.length, archiveRes.total || 0);
   const startIdx = (pageNum - 1) * perPage;
-  const slice = merged.slice(startIdx, startIdx + perPage);
+  const slice = orderedMerged.slice(startIdx, startIdx + perPage);
   if (slice.some(x => !x.poster)) {
     await enrichMlbdItemsWithPosters(slice, 12, 6);
   }
@@ -2507,9 +2513,7 @@ export async function getMlbdCatalog({ path = "/", q = "", page = 1 } = {}) {
     upstreamPath = pageNum > 1
       ? `/search/page/${pageNum}/?q=${encodeURIComponent(searchTerm)}`
       : `/search/?q=${encodeURIComponent(searchTerm)}`;
-  } else if (basePath === "/") {
-    upstreamPath = pageNum > 1 ? `/new/page/${pageNum}/` : "/new";
-  } else if (basePath === "/new") {
+  } else if (basePath === "/" || basePath === "/new" || basePath === "/all") {
     upstreamPath = pageNum > 1 ? `/new/page/${pageNum}/` : "/new";
   } else {
     const cleanBase = basePath.replace(/\/page\/\d+\/?$/i, "").replace(/\/+$/, "") || "/";

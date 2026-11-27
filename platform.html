@@ -15,15 +15,26 @@
     gtag('config', 'G-VK18GBQVWP');
   </script>
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <script>
+    (function(){
+      try{
+        var p=new URLSearchParams(location.search),name=(p.get("name")||"").trim(),pg=Math.max(1,Number(p.get("page"))||1);
+        if(name){
+          var url="/api/movie-api/platform?name="+encodeURIComponent(name)+"&page="+pg;
+          window.__cvPlatformPreload={url:url,promise:fetch(url,{headers:{Accept:"application/json"}}).then(function(r){return r.json();}).catch(function(){return null;})};
+        }
+      }catch(e){}
+    })();
+  </script>
   <link rel="stylesheet" href="css/style.css?v=20261124-90hz-3">
   <link rel="stylesheet" href="css/movie-api.css?v=20261124-90hz-3">
   <link rel="stylesheet" href="css/movie-api-catalog.css?v=20261124-90hz-3">
   <link rel="stylesheet" href="css/platform-explorer.css?v=20261124-90hz-3">
   <link rel="stylesheet" href="css/cineverse-app-redesign.css?v=20261124-90hz-3">
   <link rel="stylesheet" href="css/movie-api-account.css?v=20261124-90hz-3">
-  <link rel="stylesheet" href="css/liquid-glass-theme.css?v=20261124-90hz-3">
-  <script defer src="js/movie-api-platform.js?v=20261126-fix-2"></script>
-  <script defer src="js/movie-api-discovery.js?v=20261124-90hz-3"></script>
+  <link rel="stylesheet" href="css/liquid-glass-theme.css?v=20261127-fast-2">
+  <script defer src="js/movie-api-platform.js?v=20261127-fast-2"></script>
+  <script defer src="js/movie-api-discovery.js?v=20261127-fast-2"></script>
   <script defer src="js/movie-api-account.js?v=20261124-90hz-3"></script>
 </head>
 <body class="cv-home-body">
