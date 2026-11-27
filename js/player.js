@@ -280,7 +280,10 @@
     let userSelectedAudio = false;
     let userMutedByToggle = false;
     let stallWatchTimer = 0;
-    let stallTimestamps = [];
+    let hlsNetRetries = 0;
+    let sourceHasPlayed = false;
+    let isSeekingVideo = false;
+    let lastKnownTime = 0;
     let lastProgressTime = 0;
     let lastProgressAt = 0;
 
@@ -755,6 +758,7 @@
       const failed = activeSource;
       const token = sourceToken;
       if (!failed || !video.getAttribute("src")) return;
+      const resumeAt = Math.max(video.currentTime || 0, lastKnownTime || 0, lastProgressTime || 0);
       const code = video.error?.code || 0;
       const message = video.error?.message || "";
       let probeInfo = null;
@@ -767,7 +771,7 @@
           const sep = failed.url.includes("?") ? "&" : "?";
           const retrySrc = { ...failed, url: failed.url + sep + "_r=" + Date.now() };
           setTimeout(() => {
-            if (token === sourceToken) setSource(retrySrc, false, true);
+            if (token === sourceToken) setSource(retrySrc, true, true, resumeAt);
           }, 600);
           return;
         }
@@ -783,8 +787,8 @@
       const sameQ = remaining.find(x => x.quality === failed.quality);
       const next = sameQ || remaining[0];
       if (next) {
-        console.warn("Video source failed; switching to fastest backup server", { quality: failed.quality, code, probeInfo });
-        setSource(next, true, true);
+        console.warn("Video source failed; switching to fastest backup server", { quality: failed.quality, code, probeInfo, resumeAt });
+        setSource(next, true, true, resumeAt);
         return;
       }
       const isHtmlAuth = probeInfo && /text\/html/i.test(String(probeInfo.contentType || ""));
@@ -985,35 +989,58 @@
       }
     }
 
-    function switchToFasterServer(reason = "buffering") {
+    function switchToFasterServer(reason = "initial-timeout") {
       if (!allSources.length || !activeSource) return false;
-      if (activeHls && Array.isArray(activeHls.levels) && activeHls.levels.length > 1) {
-        const curLvl = activeHls.currentLevel >= 0 ? activeHls.currentLevel : activeHls.levels.length - 1;
-        if (curLvl > 0) {
-          activeHls.nextLevel = curLvl - 1;
-          showOsd("⚡", "Adjusting Quality", Math.max(25, Math.round(((curLvl) / activeHls.levels.length) * 100)), 0, 100, "#38bdf8");
-          return true;
-        }
-      }
+      // Never switch servers mid-playback once the current fast server has started playing cleanly
+      if (sourceHasPlayed && reason !== "fatal-error") return false;
+      const resumeAt = Math.max(video.currentTime || 0, lastKnownTime || 0, lastProgressTime || 0);
       slowSources.add(activeSource.url);
       writeClientServerScore(sourceServerKey(activeSource.url), 4500, true);
       const exclude = new Set([...failedSources, ...slowSources]);
       const candidates = rankAllCandidates(allSources, exclude);
       const next = candidates.find(x => x.url !== activeSource.url);
       if (!next) return false;
-      console.warn(`Auto-switching to faster server (${reason})`, { from: activeSource.quality, to: next.quality, provider: next.provider });
+      console.warn(`Switching to backup fast server (${reason})`, { from: activeSource.quality, to: next.quality, provider: next.provider, resumeAt });
       showOsd("⚡", "Fast Server", 100, 0, 100, "#10b981");
-      setSource(next, true, !video.paused, video.currentTime || 0);
+      setSource(next, true, !video.paused, resumeAt);
       return true;
+    }
+
+    function restorePlaybackPosition(targetSec, tok) {
+      if (!Number.isFinite(targetSec) || targetSec <= 0.5) return;
+      const applySeek = () => {
+        if (tok !== sourceToken) return;
+        const dur = Number.isFinite(video.duration) && video.duration > 2 ? video.duration : 0;
+        const clamped = dur ? Math.min(targetSec, Math.max(0, dur - 2)) : targetSec;
+        if (Math.abs((video.currentTime || 0) - clamped) > 1.2) {
+          try {
+            video.currentTime = clamped;
+          } catch {}
+        }
+      };
+      applySeek();
+      video.addEventListener("canplay", applySeek, { once: true });
     }
 
     async function setSource(src, keep = true, autoplay = false, seekOverride = null) {
       const token = ++sourceToken;
-      const t = seekOverride != null ? Math.max(0, Number(seekOverride) || 0) : keep ? video.currentTime : 0;
+      const fallbackPos = Math.max(video.currentTime || 0, lastKnownTime || 0, lastProgressTime || 0);
+      const t = seekOverride != null ? Math.max(0, Number(seekOverride) || 0) : keep ? fallbackPos : 0;
       const was = !video.paused;
       errorNotice.hidden = true;
       clearTimeout(pauseStopTimer);
+      clearTimeout(stallWatchTimer);
       activeHlsStopped = false;
+      sourceHasPlayed = false;
+      isSeekingVideo = false;
+      hlsNetRetries = 0;
+      if (t > 0) {
+        lastKnownTime = t;
+        lastProgressTime = t;
+      } else if (!keep) {
+        lastKnownTime = 0;
+        lastProgressTime = 0;
+      }
       if (activeHls) {
         activeHls.destroy();
         activeHls = null;
@@ -1039,8 +1066,8 @@
       const ready = () => {
         if (token !== sourceToken) return;
         applyHlsPlaybackProfile(activeHls);
-        if (t > 0 && Number.isFinite(video.duration)) {
-          video.currentTime = Math.min(t, Math.max(0, video.duration - 2));
+        if (t > 0) {
+          restorePlaybackPosition(t, token);
         }
         autoSelectHindiAudio();
         if (activeSubtitleIdx >= 0) {
@@ -1050,8 +1077,6 @@
         if (was || autoplay) safePlayWithFallback();
       };
 
-      clearTimeout(stallWatchTimer);
-      lastProgressTime = video.currentTime || 0;
       lastProgressAt = Date.now();
 
       if (isHls) {
@@ -1067,14 +1092,20 @@
                 enableWorker: true,
                 lowLatencyMode: false,
                 startLevel: -1,
-                maxBufferLength: isSaver ? 10 : 40,
-                maxMaxBufferLength: isSaver ? 18 : 90,
+                startPosition: t > 0.5 ? t : -1,
+                maxBufferLength: isSaver ? 12 : 45,
+                maxMaxBufferLength: isSaver ? 24 : 120,
                 maxBufferHole: 0.5,
                 backBufferLength: isSaver ? 30 : 90,
                 capLevelToPlayerSize: isSaver,
-                nudgeMaxRetry: 5,
-                fragLoadingTimeOut: 12000,
-                manifestLoadingTimeOut: 10000,
+                nudgeMaxRetry: 8,
+                fragLoadingTimeOut: 20000,
+                fragLoadingMaxRetry: 5,
+                fragLoadingRetryDelay: 800,
+                manifestLoadingTimeOut: 15000,
+                manifestLoadingMaxRetry: 3,
+                abrBandWidthFactor: 0.85,
+                abrBandWidthUpFactor: 0.7,
                 abrEwmaDefaultEstimate: isSaver ? 400000 : 2500000
               });
               activeHls.on(Hls.Events.MEDIA_ATTACHED, () => {
@@ -1092,16 +1123,30 @@
               });
               activeHls.on(Hls.Events.ERROR, (_, data) => {
                 if (token !== sourceToken) return;
-                if (!data.fatal && (data.details === "bufferStalledError" || data.details === "fragLoadTimeOut" || data.details === "fragLoadError")) {
-                  if (activeHls && activeHls.currentLevel > 0) {
-                    activeHls.nextLevel = activeHls.currentLevel - 1;
+                if (!data.fatal) {
+                  if (data.details === "bufferStalledError" || data.details === "fragLoadTimeOut" || data.details === "fragLoadError") {
+                    if (activeHls && activeHls.currentLevel > 0) {
+                      activeHls.nextLevel = activeHls.currentLevel - 1;
+                    }
                   }
                   return;
                 }
-                if (data.fatal) {
-                  $(".cv-buffer").hidden = true;
-                  video.dispatchEvent(new Event("error"));
+                if (data.type === Hls.ErrorTypes.NETWORK_ERROR && hlsNetRetries < 2) {
+                  hlsNetRetries += 1;
+                  try {
+                    activeHls.startLoad(Math.max(-1, video.currentTime || lastKnownTime || -1));
+                    return;
+                  } catch {}
                 }
+                if (data.type === Hls.ErrorTypes.MEDIA_ERROR && hlsNetRetries < 2) {
+                  hlsNetRetries += 1;
+                  try {
+                    activeHls.recoverMediaError();
+                    return;
+                  } catch {}
+                }
+                $(".cv-buffer").hidden = true;
+                video.dispatchEvent(new Event("error"));
               });
               activeHls.attachMedia(video);
               return;
@@ -1328,14 +1373,25 @@
     skipControls.querySelector(".cv-mid-forward").addEventListener("click", () => jump(10));
 
     let saveAt = 0;
+    video.addEventListener("seeking", () => {
+      isSeekingVideo = true;
+      clearTimeout(stallWatchTimer);
+    });
+    video.addEventListener("seeked", () => {
+      isSeekingVideo = false;
+      if (Number.isFinite(video.currentTime)) {
+        lastKnownTime = video.currentTime;
+        lastProgressTime = video.currentTime;
+      }
+    });
     video.addEventListener("timeupdate", () => {
+      if (Number.isFinite(video.currentTime) && video.currentTime > 0) {
+        lastKnownTime = video.currentTime;
+      }
       if (Math.abs(video.currentTime - lastProgressTime) > 0.25) {
         lastProgressTime = video.currentTime;
         lastProgressAt = Date.now();
         clearTimeout(stallWatchTimer);
-        if (stallTimestamps.length && Date.now() - stallTimestamps[stallTimestamps.length - 1] > 15000) {
-          stallTimestamps = [];
-        }
       }
       if (video.duration) {
         seek.value = Math.round((video.currentTime / video.duration) * 1000);
@@ -1483,26 +1539,24 @@
     const onBufferingEvent = () => {
       $(".cv-buffer").hidden = false;
       if (video.paused || video.ended || !activeSource) return;
-      const now = Date.now();
-      stallTimestamps = stallTimestamps.filter(ts => now - ts < 25000);
-      stallTimestamps.push(now);
-      if (stallTimestamps.length >= 3 && allSources.length > 1) {
-        stallTimestamps = [];
-        if (switchToFasterServer("frequent-buffering")) return;
-      }
+      // Once the chosen fast server has started playing, NEVER auto-switch servers on buffering;
+      // let the stream buffer and continue smoothly at the current timestamp.
+      if (sourceHasPlayed || isSeekingVideo || video.seeking) return;
       clearTimeout(stallWatchTimer);
       const snapshotPos = video.currentTime;
       const curTok = sourceToken;
       stallWatchTimer = setTimeout(() => {
-        if (curTok !== sourceToken || video.paused || video.ended) return;
-        if (Math.abs(video.currentTime - snapshotPos) < 0.35 && video.readyState < 3) {
-          switchToFasterServer("stalled-4s");
+        if (curTok !== sourceToken || sourceHasPlayed || video.paused || video.ended || video.seeking) return;
+        if (Math.abs(video.currentTime - snapshotPos) < 0.35 && video.readyState < 3 && allSources.length > 1) {
+          switchToFasterServer("initial-timeout");
         }
-      }, 4200);
+      }, 12000);
     };
     video.addEventListener("waiting", onBufferingEvent);
     video.addEventListener("stalled", onBufferingEvent);
     video.addEventListener("playing", () => {
+      sourceHasPlayed = true;
+      isSeekingVideo = false;
       clearTimeout(stallWatchTimer);
       $(".cv-buffer").hidden = true;
       if (activeSource?.url) {
@@ -1602,8 +1656,11 @@
       ordered = dedupeByQuality(allSources);
       failedSources.clear();
       slowSources.clear();
-      stallTimestamps = [];
       clearTimeout(stallWatchTimer);
+      sourceHasPlayed = false;
+      isSeekingVideo = false;
+      lastKnownTime = seekTo > 0 ? seekTo : 0;
+      lastProgressTime = seekTo > 0 ? seekTo : 0;
       retriedUrls.clear();
       activeSource = null;
       errorNotice.hidden = true;
@@ -1645,7 +1702,10 @@
       preferredQuality = q || "auto";
       const src = preferredQuality === "auto" ? best() : ordered.find(x => x.quality === preferredQuality);
       if (quality) quality.value = preferredQuality === "auto" ? "auto" : src?.quality || "auto";
-      if (src) setSource(src, true, true);
+      if (src) {
+        const resumeAt = Math.max(video.currentTime || 0, lastKnownTime || 0, lastProgressTime || 0);
+        setSource(src, true, true, resumeAt);
+      }
       emitState();
     }
 
