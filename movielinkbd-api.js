@@ -20,16 +20,18 @@ import {
   collectTitleSuggestions
 } from "./lib/catalog-rules.js";
 
+import {
+  CHROME_SEC_HEADERS,
+  curlHttpRequest,
+  isCurlPreferredForHost,
+  markCurlPreferredForHost
+} from "./lib/http-transport.js";
+
 export const MLBD_MIRRORS = [
   { id: "primary", name: "Primary", baseUrl: "https://5njsa5.movielinkbd.de", priority: 1 },
-  { id: "mirror1", name: "Mirror 1", baseUrl: "https://xuysbd.movielinkbd.de", priority: 2 },
-  { id: "mirror2", name: "Mirror 2", baseUrl: "https://wvaedp.movielinkbd.at", priority: 3 },
-  { id: "mirror3", name: "Mirror 3", baseUrl: "https://movielinkbd.at", priority: 4 },
-  { id: "mirror4", name: "Mirror 4", baseUrl: "https://ep2zyu.movielinkbd.at", priority: 5 },
-  { id: "mirror5", name: "Mirror 5", baseUrl: "https://fvuyyu.movielinkbd.at", priority: 6 },
-  { id: "mirror6", name: "Mirror 6", baseUrl: "https://h5esed.movielinkbd.at", priority: 7 },
-  { id: "portal", name: "Portal", baseUrl: "https://movielinkbd.com", priority: 8 },
-  { id: "backup", name: "Backup", baseUrl: "https://cmyyhb.movielinkbd.at", priority: 9 }
+  { id: "mirror1", name: "Mirror 1", baseUrl: "https://74wyzj.movielinkbd.de", priority: 2 },
+  { id: "mirror2", name: "Mirror 2", baseUrl: "https://xuysbd.movielinkbd.de", priority: 3 },
+  { id: "portal", name: "Portal", baseUrl: "https://movielinkbd.com", priority: 4 }
 ];
 
 const DEFAULT_FALLBACK_CATEGORIES = [
@@ -731,7 +733,19 @@ function cookieStringFromResponse(res) {
   }
 }
 
-const BLOCKED_TRAP_HOSTS = new Set(["movielinkbd.tv", "www.movielinkbd.tv", "movielinkbd.app", "www.movielinkbd.app"]);
+const BLOCKED_TRAP_HOSTS = new Set([
+  "movielinkbd.tv",
+  "www.movielinkbd.tv",
+  "movielinkbd.app",
+  "www.movielinkbd.app",
+  "movielinkbd.at",
+  "www.movielinkbd.at"
+]);
+
+function isTrapMirrorHost(hostname = "") {
+  const h = String(hostname || "").toLowerCase();
+  return !h || BLOCKED_TRAP_HOSTS.has(h) || h.endsWith(".movielinkbd.at") || h.endsWith(".movielinkbd.tv") || h.endsWith(".movielinkbd.app");
+}
 
 function ensureTrailingSlashPath(pathWithQuery) {
   const raw = String(pathWithQuery || "/");
@@ -744,57 +758,136 @@ function ensureTrailingSlashPath(pathWithQuery) {
   return (p.endsWith("/") ? p : p + "/") + q;
 }
 
+function isCloudflareBlockedResponse(status, headers, text) {
+  if (status !== 403 && status !== 503) return false;
+  const cfMit = headers?.get?.("cf-mitigated") || "";
+  if (/challenge/i.test(cfMit)) return true;
+  return /Just a moment\.\.\.|Attention Required|cf-browser-verification|Enable JavaScript and cookies to continue/i.test(String(text || ""));
+}
+
 async function fetchMirrorOnce(baseUrl, pathWithQuery, extraHeaders = {}, timeoutMs = 14000) {
   let currentUrl = new URL(pathWithQuery, baseUrl).href;
   let allCookies = [];
-  let relayCandidateUrl = currentUrl;
   const baseHeaders = {
+    ...CHROME_SEC_HEADERS,
     "User-Agent": MOVIEBOX_UA,
-    Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
     Cookie: "mlbd_show18=1; hide18On=false",
     ...extraHeaders
   };
-  for (let hop = 0; hop < 5; hop++) {
-    const res = await fetch(currentUrl, {
-      headers: baseHeaders,
-      redirect: "manual",
-      signal: AbortSignal.timeout(timeoutMs)
-    });
-    const hopCookies = cookieStringFromResponse(res);
-    if (hopCookies) allCookies.push(hopCookies);
 
-    if (res.status >= 300 && res.status < 400) {
-      const loc = res.headers.get("location");
-      try { await res.body?.cancel(); } catch {}
-      if (!loc) return { res, text: "", finalUrl: currentUrl, finalOrigin: new URL(currentUrl).origin, cookies: allCookies.join("; ") };
-      const nextUrl = new URL(loc, currentUrl);
-      if (BLOCKED_TRAP_HOSTS.has(nextUrl.hostname.toLowerCase())) {
+  const tryCurl = async targetHref => {
+    const cRes = await curlHttpRequest(targetHref, {
+      method: "GET",
+      headers: baseHeaders,
+      timeoutMs,
+      followRedirects: true,
+      maxRedirs: 5
+    });
+    if (!cRes) return null;
+    try {
+      const host = new URL(cRes.finalUrl || targetHref).hostname;
+      if (isTrapMirrorHost(host)) {
         return {
-          res,
+          res: { ok: false, status: 302, headers: new Headers() },
           text: "",
-          finalUrl: currentUrl,
-          finalOrigin: new URL(currentUrl).origin,
+          finalUrl: targetHref,
+          finalOrigin: new URL(targetHref).origin,
           cookies: allCookies.join("; "),
-          blockedRedirect: nextUrl.href
+          blockedRedirect: cRes.finalUrl
         };
       }
-      currentUrl = nextUrl.href;
-      relayCandidateUrl = currentUrl;
-      continue;
-    }
+    } catch {}
+    return {
+      res: {
+        ok: cRes.ok,
+        status: cRes.status,
+        headers: new Headers()
+      },
+      text: cRes.text || "",
+      finalUrl: cRes.finalUrl,
+      finalOrigin: cRes.finalOrigin,
+      cookies: allCookies.join("; "),
+      viaCurl: true
+    };
+  };
 
-    const finalOrigin = new URL(res.url || currentUrl).origin;
-    const text = await res.text();
-    return { res, text, finalUrl: res.url || currentUrl, finalOrigin, cookies: allCookies.join("; ") };
+  if (isCurlPreferredForHost(currentUrl)) {
+    const curlOut = await tryCurl(currentUrl);
+    if (curlOut && !curlOut.blockedRedirect && curlOut.res.ok && !isCloudflareBlockedResponse(curlOut.res.status, curlOut.res.headers, curlOut.text)) {
+      return curlOut;
+    }
   }
-  throw new Error(`Too many redirects from ${baseUrl}`);
+
+  let fetchOut = null;
+  let fetchErr = null;
+  try {
+    for (let hop = 0; hop < 5; hop++) {
+      const res = await fetch(currentUrl, {
+        headers: baseHeaders,
+        redirect: "manual",
+        signal: AbortSignal.timeout(timeoutMs)
+      });
+      const hopCookies = cookieStringFromResponse(res);
+      if (hopCookies) allCookies.push(hopCookies);
+
+      if (res.status >= 300 && res.status < 400) {
+        const loc = res.headers.get("location");
+        try { await res.body?.cancel(); } catch {}
+        if (!loc) {
+          fetchOut = { res, text: "", finalUrl: currentUrl, finalOrigin: new URL(currentUrl).origin, cookies: allCookies.join("; ") };
+          break;
+        }
+        const nextUrl = new URL(loc, currentUrl);
+        if (isTrapMirrorHost(nextUrl.hostname)) {
+          return {
+            res,
+            text: "",
+            finalUrl: currentUrl,
+            finalOrigin: new URL(currentUrl).origin,
+            cookies: allCookies.join("; "),
+            blockedRedirect: nextUrl.href
+          };
+        }
+        currentUrl = nextUrl.href;
+        continue;
+      }
+
+      const finalOrigin = new URL(res.url || currentUrl).origin;
+      const text = await res.text();
+      fetchOut = { res, text, finalUrl: res.url || currentUrl, finalOrigin, cookies: allCookies.join("; ") };
+      break;
+    }
+  } catch (err) {
+    fetchErr = err;
+  }
+
+  const needsCurlFallback =
+    !fetchOut ||
+    fetchOut.res.status === 403 ||
+    fetchOut.res.status === 401 ||
+    fetchOut.res.status === 429 ||
+    fetchOut.res.status >= 500 ||
+    isCloudflareBlockedResponse(fetchOut.res.status, fetchOut.res.headers, fetchOut.text);
+
+  if (needsCurlFallback) {
+    const curlOut = await tryCurl(currentUrl);
+    if (curlOut) {
+      if (curlOut.res.ok && !isCloudflareBlockedResponse(curlOut.res.status, curlOut.res.headers, curlOut.text) && !isPortalLandingHtml(curlOut.text)) {
+        markCurlPreferredForHost(currentUrl);
+        return curlOut;
+      }
+      if (!fetchOut) return curlOut;
+    }
+  }
+
+  if (fetchOut) return fetchOut;
+  throw fetchErr || new Error(`Too many redirects from ${baseUrl}`);
 }
 
 function isPortalLandingHtml(html) {
   const s = String(html || "");
   if (!s) return true;
-  if (/cf-mitigated|Just a moment\.\.\./i.test(s)) return true;
+  if (/cf-mitigated|Just a moment\.\.\.|Attention Required|cf-browser-verification/i.test(s)) return true;
   const hasContentMarkers = /movie-card|rail-section|mlbdHdFrame|__PD2|mlbdInlinePlayerData/i.test(s);
   if (hasContentMarkers) return false;
   return /MovieLinkBD\.com\s*[—-]\s*Official/i.test(s) || /<meta[^>]+name="generator"[^>]*>/i.test(s) || s.length < 1200;
@@ -810,9 +903,8 @@ function extractMirrorOriginsFromPortal(html) {
     if (
       host === "movielinkbd.com" ||
       host === "www.movielinkbd.com" ||
-      host === "www.movielinkbd.at" ||
       host === "www.movielinkbd.de" ||
-      BLOCKED_TRAP_HOSTS.has(host)
+      isTrapMirrorHost(host)
     ) {
       continue;
     }
@@ -825,9 +917,11 @@ function extractMirrorOriginsFromPortal(html) {
   return out;
 }
 
-async function discoverLiveMirrorOrigin(timeoutMs = 8000) {
-  const cached = getCached("portal:mirrors");
-  if (cached) return cached;
+async function discoverLiveMirrorOrigin(timeoutMs = 8000, forceRefresh = false) {
+  if (!forceRefresh) {
+    const cached = getCached("portal:mirrors");
+    if (cached) return cached;
+  }
   try {
     const portal = await fetchMirrorOnce("https://movielinkbd.com", "/", {}, timeoutMs);
     if (portal.res.ok && portal.text) {
@@ -848,7 +942,7 @@ export async function mlbdFetchPage(upstreamPath = "/", options = {}) {
   }
 
   if (!options.bypassCache && Date.now() < mirrorsBlockedUntil) {
-    const blockedErr = new Error("MovieStreamBD mirrors blocked by Cloudflare (HTTP 403)");
+    const blockedErr = new Error("MovieStreamBD mirrors temporarily blocked by Cloudflare (HTTP 403)");
     blockedErr.status = 403;
     blockedErr.isCloudflareBlock = true;
     throw blockedErr;
@@ -865,7 +959,7 @@ export async function mlbdFetchPage(upstreamPath = "/", options = {}) {
       ...cachedOrigins,
       ...MLBD_MIRRORS.map(m => m.baseUrl)
     ])].filter(b => {
-      try { return !BLOCKED_TRAP_HOSTS.has(new URL(b).hostname.toLowerCase()); } catch { return false; }
+      try { return !isTrapMirrorHost(new URL(b).hostname); } catch { return false; }
     });
     const tried = new Set();
 
@@ -877,7 +971,7 @@ export async function mlbdFetchPage(upstreamPath = "/", options = {}) {
     )];
 
     let lastErr = null;
-    let portalChecked = cachedOrigins.length > 0;
+    let portalChecked = false;
     const perMirrorTimeoutMs = options.timeoutMs || 9000;
 
     for (let i = 0; i < candidateBases.length; i++) {
@@ -889,7 +983,7 @@ export async function mlbdFetchPage(upstreamPath = "/", options = {}) {
       if (/^https?:\/\/(?:www\.)?movielinkbd\.com$/i.test(base)) {
         if (!portalChecked) {
           portalChecked = true;
-          const discovered = await discoverLiveMirrorOrigin(6000);
+          const discovered = await discoverLiveMirrorOrigin(6000, true);
           for (const d of discovered) {
             if (!tried.has(d) && !candidateBases.includes(d)) {
               candidateBases.splice(i + 1, 0, d);
@@ -907,9 +1001,7 @@ export async function mlbdFetchPage(upstreamPath = "/", options = {}) {
             lastErr = new Error(`Blocked redirect (${out.blockedRedirect}) from ${base}`);
             break;
           }
-          const isCfChallenge =
-            out.res.status === 403 &&
-            (/challenge/i.test(out.res.headers.get("cf-mitigated") || "") || /Just a moment\.\.\.|Attention Required|cf-browser-verification/i.test(out.text || ""));
+          const isCfChallenge = isCloudflareBlockedResponse(out.res.status, out.res.headers, out.text);
           if (isCfChallenge || out.res.status === 403 || out.res.status === 401) {
             lastErr = new Error(
               isCfChallenge
@@ -956,7 +1048,7 @@ export async function mlbdFetchPage(upstreamPath = "/", options = {}) {
 
       if (!portalChecked) {
         portalChecked = true;
-        const discovered = await discoverLiveMirrorOrigin(6000);
+        const discovered = await discoverLiveMirrorOrigin(6000, true);
         for (const d of discovered) {
           if (!tried.has(d) && !candidateBases.includes(d)) {
             candidateBases.splice(i + 1, 0, d);
@@ -966,7 +1058,7 @@ export async function mlbdFetchPage(upstreamPath = "/", options = {}) {
     }
 
     if (isAuthOrForbiddenError(lastErr)) {
-      mirrorsBlockedUntil = Date.now() + 120000;
+      mirrorsBlockedUntil = Date.now() + 15000;
       mlbdDirectMirrorsBlocked = true;
       deleteStaleCached(cacheKey);
       throw lastErr;
@@ -977,7 +1069,7 @@ export async function mlbdFetchPage(upstreamPath = "/", options = {}) {
       if (stale) return stale;
     }
 
-    mirrorsBlockedUntil = Date.now() + 45000;
+    mirrorsBlockedUntil = Date.now() + 15000;
     mlbdDirectMirrorsBlocked = true;
     throw lastErr || new Error("All MovieStreamBD mirrors are currently unreachable");
   })();
@@ -994,7 +1086,7 @@ export async function getMlbdServerHealth() {
   const cached = getCached("server-health");
   if (cached) return cached;
 
-  const discovered = await discoverLiveMirrorOrigin(5000).catch(() => []);
+  const discovered = await discoverLiveMirrorOrigin(5000, true).catch(() => []);
   const mirrorTargets = [
     ...discovered
       .filter(origin => !MLBD_MIRRORS.some(m => m.baseUrl === origin))
@@ -1007,24 +1099,77 @@ export async function getMlbdServerHealth() {
       const started = Date.now();
       try {
         const res = await fetch(mirror.baseUrl + "/", {
-          method: "HEAD",
-          headers: { "User-Agent": MOVIEBOX_UA },
+          method: "GET",
+          headers: { ...CHROME_SEC_HEADERS, "User-Agent": MOVIEBOX_UA },
           redirect: "follow",
           signal: AbortSignal.timeout(5500)
         });
-        const latencyMs = Date.now() - started;
+        const status = res.status;
+        const finalUrl = res.url || mirror.baseUrl;
+        try { await res.body?.cancel(); } catch {}
+        if (res.ok) {
+          return {
+            id: mirror.id,
+            name: mirror.name,
+            baseUrl: mirror.baseUrl,
+            resolvedUrl: finalUrl,
+            priority: mirror.priority,
+            status,
+            ok: true,
+            online: true,
+            latencyMs: Date.now() - started
+          };
+        }
+        const curlRes = await curlHttpRequest(mirror.baseUrl + "/", {
+          method: "GET",
+          headers: { ...CHROME_SEC_HEADERS, "User-Agent": MOVIEBOX_UA },
+          timeoutMs: 5500
+        });
+        if (curlRes && curlRes.ok && !isCloudflareBlockedResponse(curlRes.status, null, curlRes.text)) {
+          markCurlPreferredForHost(mirror.baseUrl);
+          return {
+            id: mirror.id,
+            name: mirror.name,
+            baseUrl: mirror.baseUrl,
+            resolvedUrl: curlRes.finalUrl || mirror.baseUrl,
+            priority: mirror.priority,
+            status: curlRes.status,
+            ok: true,
+            online: true,
+            latencyMs: Date.now() - started
+          };
+        }
         return {
           id: mirror.id,
           name: mirror.name,
           baseUrl: mirror.baseUrl,
-          resolvedUrl: res.url || mirror.baseUrl,
+          resolvedUrl: finalUrl,
           priority: mirror.priority,
-          status: res.status,
-          ok: res.ok,
-          online: res.ok,
-          latencyMs
+          status: curlRes?.status || status,
+          ok: false,
+          online: false,
+          latencyMs: Date.now() - started
         };
       } catch (err) {
+        const curlRes = await curlHttpRequest(mirror.baseUrl + "/", {
+          method: "GET",
+          headers: { ...CHROME_SEC_HEADERS, "User-Agent": MOVIEBOX_UA },
+          timeoutMs: 5500
+        });
+        if (curlRes && curlRes.ok && !isCloudflareBlockedResponse(curlRes.status, null, curlRes.text)) {
+          markCurlPreferredForHost(mirror.baseUrl);
+          return {
+            id: mirror.id,
+            name: mirror.name,
+            baseUrl: mirror.baseUrl,
+            resolvedUrl: curlRes.finalUrl || mirror.baseUrl,
+            priority: mirror.priority,
+            status: curlRes.status,
+            ok: true,
+            online: true,
+            latencyMs: Date.now() - started
+          };
+        }
         return {
           id: mirror.id,
           name: mirror.name,
@@ -1074,7 +1219,7 @@ function normalizeMlbdItemPath(rawHref) {
   try {
     const s = decodeHtmlEntities(String(rawHref || "").trim());
     if (!s) return "";
-    const u = /^https?:\/\//i.test(s) ? new URL(s) : new URL(s, "https://movielinkbd.at");
+    const u = /^https?:\/\//i.test(s) ? new URL(s) : new URL(s, "https://5njsa5.movielinkbd.de");
     const p = u.pathname;
     if (/^\/(?:movie|series|drama|anime)\/[^/]+/i.test(p)) return p;
     return "";
@@ -1507,18 +1652,31 @@ async function fetchMlbdComPage(pagePath = "/") {
   const cached = getCached(cacheKey);
   if (cached) return cached;
 
-  const res = await fetch(`https://movielinkbd.com${clean}`, {
-    headers: {
-      "User-Agent": MOVIEBOX_UA,
-      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      "Accept-Language": "en-US,en;q=0.9"
-    },
-    redirect: "follow",
-    signal: AbortSignal.timeout(12000)
+  const headers = {
+    ...CHROME_SEC_HEADERS,
+    "User-Agent": MOVIEBOX_UA
+  };
+  try {
+    const res = await fetch(`https://movielinkbd.com${clean}`, {
+      headers,
+      redirect: "follow",
+      signal: AbortSignal.timeout(12000)
+    });
+    if (res.ok) {
+      const html = await res.text();
+      return setCached(cacheKey, html, 180000);
+    }
+  } catch {}
+
+  const cRes = await curlHttpRequest(`https://movielinkbd.com${clean}`, {
+    method: "GET",
+    headers,
+    timeoutMs: 12000
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status} from movielinkbd.com${clean}`);
-  const html = await res.text();
-  return setCached(cacheKey, html, 180000);
+  if (cRes?.ok && cRes.text) {
+    return setCached(cacheKey, cRes.text, 180000);
+  }
+  throw new Error(`HTTP ${cRes?.status || 502} from movielinkbd.com${clean}`);
 }
 
 function buildMlbdComItem({ title, rawPoster = "", rating = "", year = "", typeText = "", href = "", languageHint = "", genreHint = "", uploadedAtMs = 0, uploadTime = "" }) {
@@ -2093,12 +2251,22 @@ async function getMlbdComSitemapPaths() {
   const cached = getCached("mlbdcom:sitemap");
   if (cached) return cached;
   try {
-    const res = await fetch("https://movielinkbd.com/sitemap.xml", {
-      headers: { "User-Agent": MOVIEBOX_UA, Accept: "application/xml,text/xml,*/*" },
-      signal: AbortSignal.timeout(8000)
-    });
-    if (res.ok) {
-      const xml = await res.text();
+    let xml = "";
+    try {
+      const res = await fetch("https://movielinkbd.com/sitemap.xml", {
+        headers: { ...CHROME_SEC_HEADERS, "User-Agent": MOVIEBOX_UA, Accept: "application/xml,text/xml,*/*" },
+        signal: AbortSignal.timeout(8000)
+      });
+      if (res.ok) xml = await res.text();
+    } catch {}
+    if (!xml) {
+      const cRes = await curlHttpRequest("https://movielinkbd.com/sitemap.xml", {
+        headers: { ...CHROME_SEC_HEADERS, "User-Agent": MOVIEBOX_UA, Accept: "application/xml,text/xml,*/*" },
+        timeoutMs: 8000
+      });
+      if (cRes?.ok && cRes.text) xml = cRes.text;
+    }
+    if (xml) {
       const paths = [...new Set(
         [...xml.matchAll(/<loc>https:\/\/movielinkbd\.com(\/[^<]*)<\/loc>/gi)]
           .map(m => (m[1] || "/").trim())

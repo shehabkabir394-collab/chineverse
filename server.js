@@ -1,9 +1,11 @@
+import dns from "node:dns";
 import express from "express";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { gzip } from "node:zlib";
+import { CHROME_SEC_HEADERS, combineAbortSignals, curlHttpRequest } from "./lib/http-transport.js";
 import {
   MOVIEBOX_PLAYER_REFERER,
   MOVIEBOX_REFERER,
@@ -50,6 +52,9 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 loadDotEnvIfPresent(path.join(__dirname, ".env"));
+try {
+  dns.setDefaultResultOrder("ipv4first");
+} catch {}
 
 const app = express();
 const gzipAsync = promisify(gzip);
@@ -287,6 +292,17 @@ app.get("/api/moviebox-image/:file", async (req, res) => {
           try { await upstream.body?.cancel(); } catch {}
           upstream = await fetchMediaWithRetry(targetUrl, "GET", baseHeaders, null, 1, 10000);
         }
+        if (upstream.status === 403) {
+          try { await upstream.body?.cancel(); } catch {}
+          const secHeaders = {
+            ...CHROME_SEC_HEADERS,
+            ...baseHeaders,
+            ...(useReferer ? { Referer: referer } : {}),
+            "Sec-Fetch-Dest": "image",
+            "Sec-Fetch-Mode": "no-cors"
+          };
+          upstream = await fetchMediaWithRetry(targetUrl, "GET", secHeaders, null, 1, 10000);
+        }
         if (!upstream.ok) {
           try { await upstream.body?.cancel(); } catch {}
           return { ok: false, status: upstream.status };
@@ -515,7 +531,7 @@ async function fetchMediaWithRetry(targetUrl, method, headers, clientAbortSignal
       connectController.abort(new DOMException("Connect timeout", "TimeoutError"));
     }, connectTimeoutMs);
     const signal = clientAbortSignal
-      ? AbortSignal.any([clientAbortSignal, connectController.signal])
+      ? combineAbortSignals(clientAbortSignal, connectController.signal)
       : connectController.signal;
     try {
       const upstream = await fetch(targetUrl, {
@@ -1239,12 +1255,22 @@ app.get("/api/go", async (req, res) => {
   if (/fifadekho\.com\/[a-z0-9]+/i.test(targetUrl) && !targetUrl.includes("view=links")) {
     const linksPageUrl = `${targetUrl.replace(/\/+$/, "")}?view=links`;
     try {
-      const r = await fetch(linksPageUrl, {
-        headers: { "User-Agent": MOVIEBOX_UA, Referer: "https://fifadekho.com/" },
-        signal: AbortSignal.timeout(8000)
-      });
-      if (r.ok) {
-        const html = await r.text();
+      let html = "";
+      try {
+        const r = await fetch(linksPageUrl, {
+          headers: { ...CHROME_SEC_HEADERS, "User-Agent": MOVIEBOX_UA, Referer: "https://fifadekho.com/" },
+          signal: AbortSignal.timeout(8000)
+        });
+        if (r.ok) html = await r.text();
+      } catch {}
+      if (!html) {
+        const cRes = await curlHttpRequest(linksPageUrl, {
+          headers: { ...CHROME_SEC_HEADERS, "User-Agent": MOVIEBOX_UA, Referer: "https://fifadekho.com/" },
+          timeoutMs: 8000
+        });
+        if (cRes?.ok && cRes.text) html = cRes.text;
+      }
+      if (html) {
         const directMatch =
           html.match(/<a\s[^>]*href="(https?:\/\/(?:hubcloud|new\d*\.xcloud|gdflix)[^"]+)"[^>]*class="[^"]*nl-link-btn/i) ||
           html.match(/<a\s[^>]*class="[^"]*nl-link-btn[^"]*"[^>]*href="(https?:\/\/[^"]+)"/i);
@@ -1269,23 +1295,47 @@ app.get("/api/mlbd-hls.m3u8", async (req, res) => {
   }
   try {
     const hlsHeaders = {
+      ...CHROME_SEC_HEADERS,
       "User-Agent": MOVIEBOX_UA,
       Referer: getActiveMlbdReferer(),
       Accept: "*/*"
     };
-    const upstream = await fetchMediaWithRetry(
-      targetUrl,
-      "GET",
-      hlsHeaders,
-      null,
-      2,
-      20000
-    );
-    if (!upstream.ok) {
-      return res.status(upstream.status).type("text/plain").send("HLS playlist unavailable");
+    let rawText = "";
+    let finalUrl = targetUrl;
+    let lastStatus = 502;
+    try {
+      const upstream = await fetchMediaWithRetry(
+        targetUrl,
+        "GET",
+        hlsHeaders,
+        null,
+        2,
+        20000
+      );
+      lastStatus = upstream.status || 502;
+      if (upstream.ok) {
+        rawText = await upstream.text();
+        finalUrl = upstream.url || targetUrl;
+      } else {
+        try { await upstream.body?.cancel(); } catch {}
+      }
+    } catch {}
+    if (!rawText) {
+      const curlRes = await curlHttpRequest(targetUrl, {
+        headers: hlsHeaders,
+        timeoutMs: 20000
+      });
+      if (curlRes?.ok && curlRes.text) {
+        rawText = curlRes.text;
+        finalUrl = curlRes.finalUrl || targetUrl;
+      } else if (curlRes?.status) {
+        lastStatus = curlRes.status;
+      }
     }
-    const rawText = await upstream.text();
-    const rewritten = rewriteMlbdHlsPlaylist(rawText, upstream.url || targetUrl);
+    if (!rawText) {
+      return res.status(lastStatus || 502).type("text/plain").send("HLS playlist unavailable");
+    }
+    const rewritten = rewriteMlbdHlsPlaylist(rawText, finalUrl);
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Content-Type", "application/vnd.apple.mpegurl; charset=utf-8");
     res.setHeader("Cache-Control", "no-store");

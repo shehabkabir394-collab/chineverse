@@ -9,6 +9,7 @@ import {
   scoreSearchMatch,
   collectTitleSuggestions
 } from "./lib/catalog-rules.js";
+import { curlHttpRequest, isCurlPreferredForHost, markCurlPreferredForHost } from "./lib/http-transport.js";
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
@@ -163,7 +164,12 @@ function timingSafeEqualStr(a, b) {
 }
 
 export const MOVIEBOX_API = "https://h5-api.aoneroom.com";
-export const MOVIEBOX_MIRRORS = [MOVIEBOX_API, "https://moviebox.ph"];
+export const MOVIEBOX_MIRRORS = [
+  MOVIEBOX_API,
+  "https://moviebox.ph",
+  "https://moviebox01.com",
+  "https://movie-box.co"
+];
 export const MOVIEBOX_SPORT_API = "https://h5-sport-api.aoneroom.com";
 export const MOVIEBOX_REFERER = "https://moviebox01.com/";
 export const MOVIEBOX_PLAYER_REFERER = "https://movie-box.co/";
@@ -424,32 +430,84 @@ async function mbFetch(url, options = {}, ttlMs = 0) {
         } else if (host && host !== MOVIEBOX_API && customHeaders.Referer?.startsWith(MOVIEBOX_PLAYER_REFERER)) {
           customHeaders.Referer = `${host}/${customHeaders.Referer.slice(MOVIEBOX_PLAYER_REFERER.length)}`;
         }
+        const reqHeaders = buildMovieBoxHeaders(customHeaders, { useBearer });
         try {
-          const response = await fetch(targetUrl, {
-            method,
-            headers: buildMovieBoxHeaders(customHeaders, { useBearer }),
-            body: options.body,
-            signal: AbortSignal.timeout(options.timeoutMs || 18000)
-          });
-          captureGuestTokenFromResponse(response);
-          const text = await response.text();
-          let json;
-          try {
-            json = JSON.parse(text);
-          } catch {
-            lastError = new Error(`MovieBox API returned non-JSON (${response.status})`);
+          let status = 0;
+          let ok = false;
+          let text = "";
+          const preferCurl = isCurlPreferredForHost(targetUrl);
+
+          if (!preferCurl) {
+            try {
+              const response = await fetch(targetUrl, {
+                method,
+                headers: reqHeaders,
+                body: options.body,
+                signal: AbortSignal.timeout(options.timeoutMs || 18000)
+              });
+              captureGuestTokenFromResponse(response);
+              status = response.status;
+              ok = response.ok;
+              text = await response.text();
+            } catch (fetchErr) {
+              lastError = fetchErr;
+            }
+          }
+
+          let json = null;
+          if (text) {
+            try {
+              json = JSON.parse(text);
+            } catch {
+              json = null;
+            }
+          }
+
+          const shouldTryCurl =
+            preferCurl ||
+            !text ||
+            !json ||
+            status === 403 ||
+            status === 429 ||
+            status >= 500;
+
+          if (shouldTryCurl) {
+            const cRes = await curlHttpRequest(targetUrl, {
+              method,
+              headers: reqHeaders,
+              body: options.body,
+              timeoutMs: options.timeoutMs || 18000
+            });
+            if (cRes && cRes.text) {
+              try {
+                const cJson = JSON.parse(cRes.text);
+                if (cJson && typeof cJson === "object") {
+                  json = cJson;
+                  status = cRes.status;
+                  ok = cRes.ok;
+                  text = cRes.text;
+                  if (cRes.ok && cJson.code === 0) {
+                    markCurlPreferredForHost(targetUrl);
+                  }
+                }
+              } catch {}
+            }
+          }
+
+          if (!json) {
+            lastError = new Error(`MovieBox API returned non-JSON (${status || 0})`);
             continue;
           }
           lastJson = json;
-          if ((response.status === 400 || json?.code === 400) && /invalid token/i.test(`${json?.message || ""} ${json?.reason || ""}`)) {
+          if ((status === 400 || json?.code === 400) && /invalid token/i.test(`${json?.message || ""} ${json?.reason || ""}`)) {
             await ensureMbGuestToken(true);
             useBearer = true;
             continue;
           }
-          if (response.status === 429 || json?.code === 429 || response.status >= 500) {
+          if (status === 429 || json?.code === 429 || status >= 500) {
             continue;
           }
-          if (ttlMs > 0 && response.ok && json && json.code === 0) {
+          if (ttlMs > 0 && ok && json && json.code === 0) {
             setCacheEntry(cacheKey, json, ttlMs);
           }
           return json;
