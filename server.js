@@ -131,7 +131,9 @@ app.use((req, res, next) => {
     p === "/mock-catalog.js" ||
     p === "/package.json" ||
     p === "/package-lock.json" ||
-    p === "/metadata.json"
+    p === "/metadata.json" ||
+    p === "/render.yaml" ||
+    p === "/dockerfile"
   ) {
     return res.status(404).send("Not found");
   }
@@ -1002,7 +1004,7 @@ app.get("/api/health", (_req, res) => {
     provider: "CinePulse",
     buildVersion: BUILD_VERSION,
     startedAt: SERVER_STARTED_AT,
-    runtimeMode: IS_PORT_NUMBER ? "port" : "cpanel-socket",
+    runtimeMode: IS_PORT_NUMBER ? (process.env.RENDER ? "render" : "port") : "cpanel-socket",
     apiKeyConfigured: isCinePulseConfigured(),
     activeMlbdMirror: getActiveMlbdReferer(),
     checkedAt: new Date().toISOString()

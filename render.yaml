@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: moviestream-bd
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_OPTIONS
+        value: --dns-result-order=ipv4first
+      - key: MEDIA_PROXY_SECRET
+        generateValue: true
+      - key: CINEPULSE_API_KEY
+        sync: false
