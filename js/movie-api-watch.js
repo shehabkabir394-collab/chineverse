@@ -57,6 +57,23 @@
   let currentPlayableSources = [];
   let currentSubtitles = [];
 
+  function getPlaybackMode() {
+    if (playerApi?.getPlaybackMode) {
+      return playerApi.getPlaybackMode();
+    }
+    if (window.CineVerseAccount?.getPlaybackMode) {
+      return window.CineVerseAccount.getPlaybackMode();
+    }
+    try {
+      const saved = localStorage.getItem("cv_playback_quality_mode_v1");
+      if (saved === "data-saver" || saved === "high-quality") return saved;
+    } catch {}
+    try {
+      if (navigator.connection?.saveData) return "data-saver";
+    } catch {}
+    return "high-quality";
+  }
+
   function currentOfflineKey() {
     if (!window.CineVerseOffline || !path) return "";
     const ep = episodes[selectedEpIdx];
@@ -1005,21 +1022,25 @@
         video.controls = true;
       }
 
-      if (episodes[idx + 1] && getPlaybackMode() !== "data-saver") {
-        const nextKey = buildStreamQs(idx + 1, opts).toString();
-        if (!streamCache.has(nextKey)) {
-          setTimeout(() => {
-            if (reqId !== streamReqId || streamCache.has(nextKey) || getPlaybackMode() === "data-saver") return;
-            safeFetchJson(`/api/movie-api/stream?${nextKey}`, { cache: "no-store", priority: "low" })
-              .then(({ res: nr, data: np }) => {
-                if (nr?.ok && Array.isArray(np?.sources) && np.sources.length) {
-                  streamCache.set(nextKey, { payload: np, at: Date.now() });
-                }
-              })
-              .catch(() => {});
-          }, 3500);
+      try {
+        if (episodes[idx + 1] && getPlaybackMode() !== "data-saver") {
+          const nextKey = buildStreamQs(idx + 1, opts).toString();
+          if (!streamCache.has(nextKey)) {
+            setTimeout(() => {
+              try {
+                if (reqId !== streamReqId || streamCache.has(nextKey) || getPlaybackMode() === "data-saver") return;
+                safeFetchJson(`/api/movie-api/stream?${nextKey}`, { cache: "no-store", priority: "low" })
+                  .then(({ res: nr, data: np }) => {
+                    if (nr?.ok && Array.isArray(np?.sources) && np.sources.length) {
+                      streamCache.set(nextKey, { payload: np, at: Date.now() });
+                    }
+                  })
+                  .catch(() => {});
+              } catch {}
+            }, 3500);
+          }
         }
-      }
+      } catch {}
     } catch (err) {
       if (reqId === streamReqId) {
         const retryCount = Number(opts.retryCount || 0);
