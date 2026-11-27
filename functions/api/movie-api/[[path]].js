@@ -230,6 +230,8 @@ export async function onRequest({ request, env, params }) {
       const payload = mbRes.status === "fulfilled"
         ? mbRes.value
         : { ok: true, sections: [], trending: [], banners: [], categories: [], curated: {} };
+      let mlbdFreshItems = [];
+      let mlbdBanners = [];
       if (mlbdRes.status === "fulfilled" && mlbdRes.value?.ok) {
         const mlbd = mlbdRes.value;
         payload.mlbdSections = mlbd.sections || [];
@@ -242,9 +244,50 @@ export async function onRequest({ request, env, params }) {
         ];
         payload.sections = [...(mlbd.sections || []), ...(payload.sections || [])];
         payload.activeMlbdMirror = mlbd.activeMirror;
+        const freshSec = (mlbd.sections || []).find(s => /latest\s*release|new|\b\/new\b/i.test(`${s?.title || ""} ${s?.categoryPath || ""}`));
+        mlbdFreshItems = Array.isArray(freshSec?.items) ? freshSec.items : (mlbd.sections?.[0]?.items || []);
+        mlbdBanners = Array.isArray(mlbd.banners) ? mlbd.banners : [];
       }
       if (mlbdBanglaRes.status === "fulfilled" && Array.isArray(mlbdBanglaRes.value?.items)) {
         payload.mlbdBangla = mlbdBanglaRes.value.items;
+      }
+      const recentSeen = new Set();
+      const recentPool = [
+        ...mlbdFreshItems,
+        ...(payload.mlbdBangla || []).slice(0, 12),
+        ...(payload.curated?.recentlyAdded || []),
+        ...(payload.curated?.latestMovies || []),
+        ...(payload.curated?.recentlyUpdated || []),
+        ...(payload.mlbdTrending || []).slice(0, 12)
+      ].filter(x => {
+        if (!x || x.hasResource === false) return false;
+        const k = x.path || x.subjectId || x.title;
+        if (!k || recentSeen.has(k)) return false;
+        recentSeen.add(k);
+        return true;
+      });
+      payload.recentlyUploaded = recentPool.slice(0, 30);
+      const bannerSeen = new Set();
+      payload.banners = [...payload.recentlyUploaded.slice(0, 8), ...(payload.banners || []), ...mlbdBanners]
+        .filter(x => {
+          if (!x || x.hasResource === false) return false;
+          const k = x.path || x.subjectId || x.title;
+          if (!k || bannerSeen.has(k)) return false;
+          bannerSeen.add(k);
+          return true;
+        })
+        .slice(0, 10);
+      if (payload.curated && Array.isArray(payload.mlbdBangla) && payload.mlbdBangla.length) {
+        const existingIb = Array.isArray(payload.curated.indiaBangladeshTrending) ? payload.curated.indiaBangladeshTrending : [];
+        const ibSeen = new Set();
+        payload.curated.indiaBangladeshTrending = [...payload.mlbdBangla.slice(0, 10), ...existingIb]
+          .filter(x => {
+            const k = x?.path || x?.subjectId || x?.title;
+            if (!k || ibSeen.has(k)) return false;
+            ibSeen.add(k);
+            return true;
+          })
+          .slice(0, 28);
       }
       return json(payload, 200, "public, max-age=60");
     }

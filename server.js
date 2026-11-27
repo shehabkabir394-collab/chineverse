@@ -2445,7 +2445,9 @@ async function getMergedHomePayloadCached(query = new URLSearchParams()) {
     return await buildMergedHomePayload(query);
   }
   const now = Date.now();
-  if (mergedHomeCache && now - mergedHomeCache.builtAt < HOME_FRESH_MS) {
+  const hasMlbdData = Array.isArray(mergedHomeCache?.payload?.mlbdSections) && mergedHomeCache.payload.mlbdSections.length > 0;
+  const effectiveFreshMs = hasMlbdData ? HOME_FRESH_MS : 10000;
+  if (mergedHomeCache && now - mergedHomeCache.builtAt < effectiveFreshMs) {
     return mergedHomeCache;
   }
   if (mergedHomeCache && now - mergedHomeCache.builtAt < HOME_STALE_MS) {

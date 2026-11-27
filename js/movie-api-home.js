@@ -931,8 +931,13 @@
     renderPlatforms();
     renderLiveSportsSection();
 
+    const mlbdSections = Array.isArray(homeData.mlbdSections) ? homeData.mlbdSections : [];
+    const mlbdFreshSec = mlbdSections.find(sec => /latest\s*release|new|\b\/new\b/i.test(`${sec?.title || ""} ${sec?.categoryPath || ""}`));
     const bannersRaw = [
       ...(Array.isArray(homeData.recentlyUploaded) ? homeData.recentlyUploaded : []),
+      ...(mlbdFreshSec?.items || []),
+      ...(Array.isArray(homeData.mlbdBangla) ? homeData.mlbdBangla : []),
+      ...(Array.isArray(homeData.mlbdTrending) ? homeData.mlbdTrending : []),
       ...(homeData.curated?.recentlyAdded || []),
       ...(homeData.banners || []),
       ...(homeData.trending || [])
@@ -946,6 +951,9 @@
     const sectionsPool = (Array.isArray(homeData.sections) ? homeData.sections : []).flatMap(s => s.items || []);
     const allPool = dedupeList([
       ...(Array.isArray(homeData.recentlyUploaded) ? homeData.recentlyUploaded : []),
+      ...(mlbdFreshSec?.items || []),
+      ...(Array.isArray(homeData.mlbdBangla) ? homeData.mlbdBangla : []),
+      ...(Array.isArray(homeData.mlbdTrending) ? homeData.mlbdTrending : []),
       ...(curated.recentlyAdded || []),
       ...(curated.latestMovies || []),
       ...(curated.recentlyUpdated || []),
@@ -960,7 +968,6 @@
     ]);
 
     const matchAny = (pred) => allPool.filter(pred);
-    const mlbdSections = Array.isArray(homeData.mlbdSections) ? homeData.mlbdSections : [];
     const mlbdTop10Sec = mlbdSections.find(s => /top\s*10/i.test(String(s?.title || "")));
     const top10Keys = new Set((mlbdTop10Sec?.items || []).map(x => x?.path || x?.subjectId || x?.title).filter(Boolean));
     const mlbdBanglaRaw = dedupeList([
@@ -998,11 +1005,11 @@
       });
     };
 
-    const mlbdFreshSec = mlbdSections.find(sec => /latest\s*release|new|\b\/new\b/i.test(`${sec?.title || ""} ${sec?.categoryPath || ""}`));
     const recentlyUploadedItems = prioritizePostered(
       dedupeList([
         ...(Array.isArray(homeData.recentlyUploaded) ? homeData.recentlyUploaded : []),
         ...(mlbdFreshSec?.items || []),
+        ...(Array.isArray(homeData.mlbdBangla) ? homeData.mlbdBangla : []),
         ...(curated.recentlyAdded || []),
         ...(curated.latestMovies || []),
         ...(curated.recentlyUpdated || [])
