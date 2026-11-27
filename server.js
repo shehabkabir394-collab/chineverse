@@ -1162,7 +1162,12 @@ app.get("/api/suggest", async (req, res) => {
       seen.add(key);
       candidates.push(item);
     }
-    candidates.sort((a, b) => scoreMergedSearchItem(b, q) - scoreMergedSearchItem(a, q) || (Number(b.views) || 0) - (Number(a.views) || 0));
+    candidates.sort((a, b) =>
+      scoreMergedSearchItem(b, q) - scoreMergedSearchItem(a, q) ||
+      (b?.fromArchive ? 0 : 1) - (a?.fromArchive ? 0 : 1) ||
+      parseExactUploadMs(b) - parseExactUploadMs(a) ||
+      (Number(b.views) || 0) - (Number(a.views) || 0)
+    );
     const merged = candidates.slice(0, 40);
     const suggestions = collectTitleSuggestions(q, {
       suggestWords: mbSugg,
@@ -1790,6 +1795,8 @@ app.all("/api/movie-api/*", async (req, res) => {
       finalPool.sort((a, b) =>
         scoreMergedSearchItem(b, q) - scoreMergedSearchItem(a, q) ||
         (isPlayableCandidate(b) ? 1 : 0) - (isPlayableCandidate(a) ? 1 : 0) ||
+        (b?.fromArchive ? 0 : 1) - (a?.fromArchive ? 0 : 1) ||
+        parseExactUploadMs(b) - parseExactUploadMs(a) ||
         (Number(b.views) || 0) - (Number(a.views) || 0)
       );
       const merged = finalPool.slice(0, 100);

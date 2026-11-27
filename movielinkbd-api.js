@@ -2930,12 +2930,13 @@ export async function getMlbdSuggest(rawQuery) {
   if (!q) return { ok: true, query: "", items: [], suggestions: [] };
 
   const archiveRes = queryMlbdArchive({ q, includeAdult: true, sort: "popular", offset: 0, limit: 24 });
-  const cat = mlbdDirectMirrorsBlocked
-    ? { items: [] }
-    : await getMlbdCatalog({ path: "/search", q, page: 1 }).catch(() => ({ items: [] }));
+  const cat = await Promise.race([
+    getMlbdCatalog({ path: "/search", q, page: 1 }).catch(() => ({ items: [] })),
+    new Promise(r => setTimeout(() => r({ items: [] }), mlbdDirectMirrorsBlocked ? 3500 : 6000))
+  ]);
   const seen = new Set();
   const items = [];
-  for (const it of [...(cat.items || []), ...(archiveRes.items || [])]) {
+  for (const it of [...sortMlbdNewestFirst(cat.items || []), ...(archiveRes.items || [])]) {
     if (!it || isNigerianContent(it)) continue;
     const key = it.path || it.title.toLowerCase();
     if (seen.has(key)) continue;
