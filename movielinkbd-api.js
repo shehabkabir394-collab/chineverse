@@ -1086,9 +1086,183 @@ export async function mlbdFetchPage(upstreamPath = "/", options = {}) {
   }
 }
 
-export async function getMlbdServerHealth() {
-  const cached = getCached("server-health");
-  if (cached) return cached;
+export const MLBD_HEALTH_CHECKS = [
+  { key: "home", label: "Homepage", path: "/" },
+  { key: "latest", label: "Latest Catalog", path: "/new" },
+  { key: "trending", label: "Trending", path: "/mostwatch/7d" }
+];
+
+export function evaluateMlbdHealthHtml({
+  path = "/",
+  status = 0,
+  ok = false,
+  text = "",
+  finalUrl = "",
+  finalOrigin = "",
+  baseUrl = "",
+  blockedRedirect = "",
+  viaCurl = false,
+  latencyMs = 0
+} = {}) {
+  const cleanPath = String(path || "/");
+  if (blockedRedirect) {
+    return {
+      path: cleanPath,
+      status: status || 302,
+      ok: false,
+      live: false,
+      cardCount: 0,
+      fromArchive: false,
+      resolvedUrl: finalUrl || baseUrl,
+      viaCurl: Boolean(viaCurl),
+      latencyMs,
+      reason: "trap_redirect"
+    };
+  }
+  if (isCloudflareBlockedResponse(status, null, text)) {
+    return {
+      path: cleanPath,
+      status: status || 403,
+      ok: false,
+      live: false,
+      cardCount: 0,
+      fromArchive: false,
+      resolvedUrl: finalUrl || baseUrl,
+      viaCurl: Boolean(viaCurl),
+      latencyMs,
+      reason: "cloudflare_blocked"
+    };
+  }
+  if (!ok || status < 200 || status >= 300) {
+    return {
+      path: cleanPath,
+      status: Number(status) || 0,
+      ok: false,
+      live: false,
+      cardCount: 0,
+      fromArchive: false,
+      resolvedUrl: finalUrl || baseUrl,
+      viaCurl: Boolean(viaCurl),
+      latencyMs,
+      reason: status ? `http_${status}` : "unreachable"
+    };
+  }
+  if (isPortalLandingHtml(text)) {
+    return {
+      path: cleanPath,
+      status,
+      ok: false,
+      live: false,
+      cardCount: 0,
+      fromArchive: false,
+      resolvedUrl: finalUrl || baseUrl,
+      viaCurl: Boolean(viaCurl),
+      latencyMs,
+      reason: "portal_landing"
+    };
+  }
+  if (cleanPath !== "/" && finalUrl) {
+    try {
+      const resolvedPathname = new URL(finalUrl).pathname || "/";
+      if (resolvedPathname === "/") {
+        return {
+          path: cleanPath,
+          status,
+          ok: false,
+          live: false,
+          cardCount: 0,
+          fromArchive: false,
+          resolvedUrl: finalUrl,
+          viaCurl: Boolean(viaCurl),
+          latencyMs,
+          reason: "redirected_to_home"
+        };
+      }
+    } catch {}
+  }
+
+  const originForParse = finalOrigin || baseUrl || activeResolvedOrigin;
+  const liveCards = extractCardsFromHtml(text, originForParse, {
+    skipArchiveUpsert: true,
+    skipRegistry: true
+  }).filter(item => item && item.fromArchive !== true);
+
+  if (liveCards.length === 0) {
+    return {
+      path: cleanPath,
+      status,
+      ok: false,
+      live: false,
+      cardCount: 0,
+      fromArchive: false,
+      resolvedUrl: finalUrl || baseUrl,
+      viaCurl: Boolean(viaCurl),
+      latencyMs,
+      reason: "no_live_content"
+    };
+  }
+
+  return {
+    path: cleanPath,
+    status,
+    ok: true,
+    live: true,
+    cardCount: liveCards.length,
+    fromArchive: false,
+    resolvedUrl: finalUrl || baseUrl,
+    viaCurl: Boolean(viaCurl),
+    latencyMs,
+    reason: "ok"
+  };
+}
+
+async function probeMlbdMirrorEndpoint(mirror, spec, timeoutMs = 5500) {
+  const started = Date.now();
+  try {
+    const out = await fetchMirrorOnce(mirror.baseUrl, spec.path, {}, timeoutMs);
+    if (out?.res?.ok && out?.viaCurl) {
+      markCurlPreferredForHost(mirror.baseUrl);
+    }
+    return {
+      key: spec.key,
+      label: spec.label,
+      ...evaluateMlbdHealthHtml({
+        path: spec.path,
+        status: out?.res?.status || 0,
+        ok: Boolean(out?.res?.ok),
+        text: out?.text || "",
+        finalUrl: out?.finalUrl || new URL(spec.path, mirror.baseUrl).href,
+        finalOrigin: out?.finalOrigin || mirror.baseUrl,
+        baseUrl: mirror.baseUrl,
+        blockedRedirect: out?.blockedRedirect || "",
+        viaCurl: Boolean(out?.viaCurl),
+        latencyMs: Date.now() - started
+      })
+    };
+  } catch (err) {
+    return {
+      key: spec.key,
+      label: spec.label,
+      path: spec.path,
+      status: 0,
+      ok: false,
+      live: false,
+      cardCount: 0,
+      fromArchive: false,
+      resolvedUrl: new URL(spec.path, mirror.baseUrl).href,
+      viaCurl: false,
+      latencyMs: Date.now() - started,
+      reason: "unreachable",
+      error: err?.message || "Unreachable"
+    };
+  }
+}
+
+export async function getMlbdServerHealth(options = {}) {
+  if (!options?.bypassCache) {
+    const cached = getCached("server-health");
+    if (cached) return cached;
+  }
 
   const discovered = await discoverLiveMirrorOrigin(5000, true).catch(() => []);
   const mirrorTargets = [
@@ -1101,107 +1275,65 @@ export async function getMlbdServerHealth() {
   const checks = await Promise.all(
     mirrorTargets.map(async mirror => {
       const started = Date.now();
-      try {
-        const res = await fetch(mirror.baseUrl + "/", {
-          method: "GET",
-          headers: { ...CHROME_SEC_HEADERS, "User-Agent": MOVIEBOX_UA },
-          redirect: "follow",
-          signal: AbortSignal.timeout(5500)
-        });
-        const status = res.status;
-        const finalUrl = res.url || mirror.baseUrl;
-        try { await res.body?.cancel(); } catch {}
-        if (res.ok) {
-          return {
-            id: mirror.id,
-            name: mirror.name,
-            baseUrl: mirror.baseUrl,
-            resolvedUrl: finalUrl,
-            priority: mirror.priority,
-            status,
-            ok: true,
-            online: true,
-            latencyMs: Date.now() - started
-          };
-        }
-        const curlRes = await curlHttpRequest(mirror.baseUrl + "/", {
-          method: "GET",
-          headers: { ...CHROME_SEC_HEADERS, "User-Agent": MOVIEBOX_UA },
-          timeoutMs: 5500
-        });
-        if (curlRes && curlRes.ok && !isCloudflareBlockedResponse(curlRes.status, null, curlRes.text)) {
-          markCurlPreferredForHost(mirror.baseUrl);
-          return {
-            id: mirror.id,
-            name: mirror.name,
-            baseUrl: mirror.baseUrl,
-            resolvedUrl: curlRes.finalUrl || mirror.baseUrl,
-            priority: mirror.priority,
-            status: curlRes.status,
-            ok: true,
-            online: true,
-            latencyMs: Date.now() - started
-          };
-        }
-        return {
-          id: mirror.id,
-          name: mirror.name,
-          baseUrl: mirror.baseUrl,
-          resolvedUrl: finalUrl,
-          priority: mirror.priority,
-          status: curlRes?.status || status,
-          ok: false,
-          online: false,
-          latencyMs: Date.now() - started
-        };
-      } catch (err) {
-        const curlRes = await curlHttpRequest(mirror.baseUrl + "/", {
-          method: "GET",
-          headers: { ...CHROME_SEC_HEADERS, "User-Agent": MOVIEBOX_UA },
-          timeoutMs: 5500
-        });
-        if (curlRes && curlRes.ok && !isCloudflareBlockedResponse(curlRes.status, null, curlRes.text)) {
-          markCurlPreferredForHost(mirror.baseUrl);
-          return {
-            id: mirror.id,
-            name: mirror.name,
-            baseUrl: mirror.baseUrl,
-            resolvedUrl: curlRes.finalUrl || mirror.baseUrl,
-            priority: mirror.priority,
-            status: curlRes.status,
-            ok: true,
-            online: true,
-            latencyMs: Date.now() - started
-          };
-        }
-        return {
-          id: mirror.id,
-          name: mirror.name,
-          baseUrl: mirror.baseUrl,
-          resolvedUrl: mirror.baseUrl,
-          priority: mirror.priority,
-          status: 0,
-          ok: false,
-          online: false,
-          latencyMs: Date.now() - started,
-          error: err?.message || "Unreachable"
-        };
-      }
+      const endpointResults = await Promise.all(
+        MLBD_HEALTH_CHECKS.map(spec => probeMlbdMirrorEndpoint(mirror, spec, 5500))
+      );
+      const checkMap = Object.fromEntries(
+        endpointResults.map(r => [r.key, r])
+      );
+      const liveChecksPassed = endpointResults.filter(r => r.live).length;
+      const liveChecksTotal = MLBD_HEALTH_CHECKS.length;
+      const isLive = liveChecksPassed === liveChecksTotal;
+      const partialLive = liveChecksPassed > 0 && liveChecksPassed < liveChecksTotal;
+      const reachable = endpointResults.some(r => r.status >= 200 && r.status < 400);
+      const homeCheck = checkMap.home || endpointResults[0];
+
+      return {
+        id: mirror.id,
+        name: mirror.name,
+        baseUrl: mirror.baseUrl,
+        resolvedUrl: homeCheck?.resolvedUrl || mirror.baseUrl,
+        priority: mirror.priority,
+        status: homeCheck?.status || endpointResults.find(r => r.status > 0)?.status || 0,
+        ok: isLive,
+        online: isLive,
+        live: isLive,
+        partialLive,
+        reachable,
+        archiveCountedAsLive: false,
+        liveChecksPassed,
+        liveChecksTotal,
+        liveCardCounts: {
+          home: checkMap.home?.cardCount || 0,
+          latest: checkMap.latest?.cardCount || 0,
+          trending: checkMap.trending?.cardCount || 0,
+          total: endpointResults.reduce((sum, r) => sum + (r.cardCount || 0), 0)
+        },
+        checks: checkMap,
+        latencyMs: Date.now() - started
+      };
     })
   );
 
-  const onlineMirrors = checks
-    .filter(c => c.online && !/\/\/(?:www\.)?movielinkbd\.com$/i.test(c.baseUrl))
-    .sort((a, b) => a.latencyMs - b.latencyMs);
-  const primaryOnline = onlineMirrors[0] || checks.find(c => c.online);
+  const nonPortalLiveMirrors = checks
+    .filter(c => (c.live || c.partialLive) && !/\/\/(?:www\.)?movielinkbd\.com$/i.test(c.baseUrl))
+    .sort((a, b) =>
+      b.liveChecksPassed - a.liveChecksPassed ||
+      a.latencyMs - b.latencyMs ||
+      a.priority - b.priority
+    );
+  const primaryOnline = nonPortalLiveMirrors[0] || checks.find(c => c.live);
   if (primaryOnline?.resolvedUrl) {
     try {
-      activeResolvedOrigin = new URL(primaryOnline.resolvedUrl).origin;
-      if (!/\/\/(?:www\.)?movielinkbd\.com$/i.test(activeResolvedOrigin)) {
+      const nextOrigin = new URL(primaryOnline.resolvedUrl).origin;
+      if (!/\/\/(?:www\.)?movielinkbd\.com$/i.test(nextOrigin)) {
+        activeResolvedOrigin = nextOrigin;
         mlbdDirectMirrorsBlocked = false;
         mirrorsBlockedUntil = 0;
       }
     } catch {}
+  } else {
+    mlbdDirectMirrorsBlocked = true;
   }
 
   return setCached(
@@ -1210,7 +1342,11 @@ export async function getMlbdServerHealth() {
       ok: true,
       activeMirror: activeResolvedOrigin,
       onlineCount: checks.filter(c => c.online).length,
+      liveCount: checks.filter(c => c.live).length,
+      partialCount: checks.filter(c => c.partialLive).length,
       totalMirrors: checks.length,
+      archiveCountedAsLive: false,
+      requiredChecks: MLBD_HEALTH_CHECKS.map(c => c.path),
       cinepulseConfigured: isCinePulseConfigured(),
       servers: checks,
       checkedAt: new Date().toISOString()
@@ -1232,7 +1368,7 @@ function normalizeMlbdItemPath(rawHref) {
   }
 }
 
-export function extractCardsFromHtml(html, baseOrigin = activeResolvedOrigin) {
+export function extractCardsFromHtml(html, baseOrigin = activeResolvedOrigin, options = {}) {
   const items = [];
   const seen = new Set();
   const blocks = String(html || "").split(/<div class="movie-card"/i);
@@ -1304,11 +1440,15 @@ export function extractCardsFromHtml(html, baseOrigin = activeResolvedOrigin) {
       source: "movielinkbd",
       detailsEndpoint: `/api/details?path=${encodeURIComponent(itemPath)}`
     };
-    registerMlbdItem(builtItem);
+    if (!options?.skipRegistry) {
+      registerMlbdItem(builtItem);
+    }
     items.push(builtItem);
   }
 
-  if (items.length) upsertMlbdArchiveItems(items, "/");
+  if (items.length && !options?.skipArchiveUpsert) {
+    upsertMlbdArchiveItems(items, "/");
+  }
   return items;
 }
 

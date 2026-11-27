@@ -1042,9 +1042,10 @@ app.all("/api/cinepulse/v1/*", async (req, res) => {
   return res.status(cpRes.status || 200).json(normalizeCinePulsePayload(route, cpRes.data));
 });
 
-app.get("/api/server-health", async (_req, res) => {
+app.get("/api/server-health", async (req, res) => {
   try {
-    const data = await getMlbdServerHealth();
+    const bypassCache = req.query?.refresh === "1" || req.query?.nocache === "1";
+    const data = await getMlbdServerHealth({ bypassCache });
     res.setHeader("Cache-Control", "no-store");
     return res.json(data);
   } catch (err) {

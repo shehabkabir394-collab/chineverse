@@ -18,7 +18,9 @@ export async function onRequest({ request, env }) {
   }
   configureMediaSecret(env?.MEDIA_PROXY_SECRET);
   try {
-    const data = await getMlbdServerHealth();
+    const url = new URL(request.url);
+    const bypassCache = url.searchParams.get("refresh") === "1" || url.searchParams.get("nocache") === "1";
+    const data = await getMlbdServerHealth({ bypassCache });
     return json(data, 200);
   } catch (err) {
     return json({ ok: false, error: err?.message || "Server health check failed" }, 502);
