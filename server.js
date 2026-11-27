@@ -14,12 +14,14 @@ import {
   verifyMediaToken
 } from "./moviebox-api.js";
 import {
+  fetchViaMlbdRelay,
   findExactTitleMlbdBackup,
   getActiveMlbdReferer,
   getMlbdCatalog,
   getMlbdCategories,
   getMlbdDetails,
   getMlbdHomeFeed,
+  getMlbdRelayConfig,
   getMlbdServerHealth,
   getMlbdStream,
   getMlbdSuggest,
@@ -57,6 +59,8 @@ const RAW_PORT = process.env.PORT;
 const IS_PORT_NUMBER = !RAW_PORT || /^\d+$/.test(String(RAW_PORT).trim());
 const PORT = IS_PORT_NUMBER ? Number(RAW_PORT || 3000) : String(RAW_PORT).trim();
 const HOST = "0.0.0.0";
+const SERVER_STARTED_AT = new Date().toISOString();
+const BUILD_VERSION = "20261127-fast-5";
 const recentStreamEvents = [];
 
 function recordStreamEvent(evt) {
@@ -558,6 +562,19 @@ async function fetchUpstreamMedia(targetUrl, method, headers, clientAbortSignal,
         await upstream.body?.cancel();
       } catch {}
     }
+  } else if (upstream.status === 403 && getMlbdRelayConfig()) {
+    try {
+      await upstream.body?.cancel();
+    } catch {}
+    const relRes = await fetchViaMlbdRelay(targetUrl, {
+      method,
+      headers: Object.fromEntries(headers.entries()),
+      timeoutMs: connectTimeoutMs,
+      signal: clientAbortSignal
+    }).catch(() => null);
+    if (relRes && (relRes.ok || relRes.status === 206)) {
+      return { upstream: relRes, usedHeaders: headers };
+    }
   }
   return { upstream, usedHeaders: headers };
 }
@@ -982,10 +999,67 @@ app.get("/api/health", (_req, res) => {
     ok: true,
     service: "MovieStream BD",
     provider: "CinePulse",
+    buildVersion: BUILD_VERSION,
+    startedAt: SERVER_STARTED_AT,
+    runtimeMode: IS_PORT_NUMBER ? "port" : "cpanel-socket",
     apiKeyConfigured: isCinePulseConfigured(),
+    mlbdRelayConfigured: Boolean(getMlbdRelayConfig()),
     activeMlbdMirror: getActiveMlbdReferer(),
     checkedAt: new Date().toISOString()
   });
+});
+
+app.all("/api/mlbd-relay", async (req, res) => {
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    return res.status(405).set("Allow", "GET, HEAD").json({ ok: false, error: "Method not allowed" });
+  }
+  const relaySecret = String(process.env.MLBD_RELAY_SECRET || "").trim();
+  if (relaySecret && req.get("x-mlbd-relay-secret") !== relaySecret) {
+    return res.status(403).json({ ok: false, error: "Forbidden" });
+  }
+  const targetUrl = validateExternalHttpUrl(String(req.query.url || "").trim());
+  if (!targetUrl) {
+    return res.status(400).json({ ok: false, error: "Invalid target URL" });
+  }
+  const parsed = new URL(targetUrl);
+  const hostOk = /(?:^|\.)movielinkbd\.(?:de|at|com)$/i.test(parsed.hostname);
+  const mediaOk = /\.(?:m3u8|mp4|vtt|srt|ts|aac|m4s|jpg|jpeg|png|webp)(?:$|[?#])|\/(?:hls|vseg|vsub|s)\//i.test(parsed.pathname);
+  if (!hostOk && !mediaOk) {
+    return res.status(403).json({ ok: false, error: "Relay target host not allowed" });
+  }
+  try {
+    const fwdHeaders = {
+      "User-Agent": MOVIEBOX_UA,
+      Accept: req.get("accept") || "*/*",
+      "Accept-Language": req.get("accept-language") || "en-US,en;q=0.9",
+      Referer: validateExternalHttpUrl(req.get("x-mlbd-referer")) || getActiveMlbdReferer(),
+      Cookie: "mlbd_show18=1; hide18On=false"
+    };
+    if (req.get("range")) fwdHeaders.Range = req.get("range");
+    if (req.get("if-range")) fwdHeaders["If-Range"] = req.get("if-range");
+    const upstream = await fetch(targetUrl, {
+      method: req.method,
+      headers: fwdHeaders,
+      redirect: "follow",
+      signal: AbortSignal.timeout(25000)
+    });
+    for (const h of ["content-type", "content-length", "content-range", "accept-ranges", "cache-control", "etag", "last-modified"]) {
+      const v = upstream.headers.get(h);
+      if (v) res.setHeader(h, v);
+    }
+    if (upstream.headers.get("cf-mitigated")) {
+      res.setHeader("cf-mitigated", upstream.headers.get("cf-mitigated"));
+    }
+    res.setHeader("x-mlbd-relayed", "1");
+    res.status(upstream.status);
+    if (req.method === "HEAD" || !upstream.body) return res.end();
+    const nodeStream = Readable.fromWeb(upstream.body);
+    res.on("close", () => { try { nodeStream.destroy(); } catch {} });
+    nodeStream.on("error", () => { if (!res.headersSent) res.status(502).end(); else res.end(); });
+    return nodeStream.pipe(res);
+  } catch (err) {
+    return res.status(502).json({ ok: false, error: err?.message || "Relay fetch failed" });
+  }
 });
 
 app.all("/api/cinepulse/v1/*", async (req, res) => {
@@ -1256,18 +1330,24 @@ app.get("/api/mlbd-hls.m3u8", async (req, res) => {
     return res.status(400).type("text/plain").send("Invalid or expired MovieStreamBD HLS token");
   }
   try {
-    const upstream = await fetchMediaWithRetry(
+    const hlsHeaders = {
+      "User-Agent": MOVIEBOX_UA,
+      Referer: getActiveMlbdReferer(),
+      Accept: "*/*"
+    };
+    let upstream = await fetchMediaWithRetry(
       targetUrl,
       "GET",
-      {
-        "User-Agent": MOVIEBOX_UA,
-        Referer: getActiveMlbdReferer(),
-        Accept: "*/*"
-      },
+      hlsHeaders,
       null,
       2,
       20000
     );
+    if (upstream.status === 403 && getMlbdRelayConfig()) {
+      try { await upstream.body?.cancel(); } catch {}
+      const rel = await fetchViaMlbdRelay(targetUrl, { headers: hlsHeaders, timeoutMs: 20000 }).catch(() => null);
+      if (rel) upstream = rel;
+    }
     if (!upstream.ok) {
       return res.status(upstream.status).type("text/plain").send("HLS playlist unavailable");
     }

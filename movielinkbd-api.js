@@ -127,6 +127,46 @@ export function isMlbdDirectPlaybackAvailable() {
   return Boolean(!mlbdDirectMirrorsBlocked || mlbdCinePulseHasContent);
 }
 
+export function getMlbdRelayConfig() {
+  const rawUrl = String(process.env.MLBD_RELAY_URL || "").trim();
+  if (!rawUrl) return null;
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+    return {
+      url: parsed.href.replace(/\/+$/, ""),
+      secret: String(process.env.MLBD_RELAY_SECRET || "").trim()
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchViaMlbdRelay(targetUrl, { method = "GET", headers = {}, timeoutMs = 15000, signal = null } = {}) {
+  const relay = getMlbdRelayConfig();
+  if (!relay) return null;
+  const endpoint = new URL(relay.url);
+  endpoint.searchParams.set("url", targetUrl);
+  const fwdHeaders = new Headers();
+  for (const [k, v] of Object.entries(headers || {})) {
+    const low = k.toLowerCase();
+    if (low === "referer") fwdHeaders.set("x-mlbd-referer", String(v));
+    else if (low === "range" || low === "accept" || low === "accept-language" || low === "if-range") {
+      fwdHeaders.set(k, String(v));
+    }
+  }
+  if (relay.secret) fwdHeaders.set("x-mlbd-relay-secret", relay.secret);
+  const reqSignal = signal
+    ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)])
+    : AbortSignal.timeout(timeoutMs);
+  return await fetch(endpoint.toString(), {
+    method,
+    headers: fwdHeaders,
+    redirect: "follow",
+    signal: reqSignal
+  });
+}
+
 function normalizePosterKey(title = "") {
   return decodeHtmlEntities(String(title || ""))
     .toLowerCase()
@@ -670,15 +710,17 @@ function ensureTrailingSlashPath(pathWithQuery) {
 async function fetchMirrorOnce(baseUrl, pathWithQuery, extraHeaders = {}, timeoutMs = 14000) {
   let currentUrl = new URL(pathWithQuery, baseUrl).href;
   let allCookies = [];
+  let relayCandidateUrl = currentUrl;
+  const baseHeaders = {
+    "User-Agent": MOVIEBOX_UA,
+    Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    Cookie: "mlbd_show18=1; hide18On=false",
+    ...extraHeaders
+  };
   for (let hop = 0; hop < 5; hop++) {
     const res = await fetch(currentUrl, {
-      headers: {
-        "User-Agent": MOVIEBOX_UA,
-        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-        Cookie: "mlbd_show18=1; hide18On=false",
-        ...extraHeaders
-      },
+      headers: baseHeaders,
       redirect: "manual",
       signal: AbortSignal.timeout(timeoutMs)
     });
@@ -691,6 +733,17 @@ async function fetchMirrorOnce(baseUrl, pathWithQuery, extraHeaders = {}, timeou
       if (!loc) return { res, text: "", finalUrl: currentUrl, finalOrigin: new URL(currentUrl).origin, cookies: allCookies.join("; ") };
       const nextUrl = new URL(loc, currentUrl);
       if (BLOCKED_TRAP_HOSTS.has(nextUrl.hostname.toLowerCase())) {
+        if (getMlbdRelayConfig()) {
+          try {
+            const relRes = await fetchViaMlbdRelay(relayCandidateUrl, { headers: baseHeaders, timeoutMs });
+            if (relRes && relRes.ok) {
+              const text = await relRes.text();
+              if (text && !/cf-mitigated|Just a moment\.\.\./i.test(text)) {
+                return { res: relRes, text, finalUrl: relayCandidateUrl, finalOrigin: new URL(relayCandidateUrl).origin, cookies: allCookies.join("; "), viaRelay: true };
+              }
+            }
+          } catch {}
+        }
         return {
           res,
           text: "",
@@ -701,11 +754,24 @@ async function fetchMirrorOnce(baseUrl, pathWithQuery, extraHeaders = {}, timeou
         };
       }
       currentUrl = nextUrl.href;
+      relayCandidateUrl = currentUrl;
       continue;
     }
 
     const finalOrigin = new URL(res.url || currentUrl).origin;
     const text = await res.text();
+    const isCfBlock = res.status === 403 && (/challenge/i.test(res.headers.get("cf-mitigated") || "") || /Just a moment\.\.\./i.test(text || ""));
+    if (isCfBlock && getMlbdRelayConfig()) {
+      try {
+        const relRes = await fetchViaMlbdRelay(relayCandidateUrl, { headers: baseHeaders, timeoutMs });
+        if (relRes) {
+          const relText = await relRes.text();
+          if (relRes.ok && relText && !/cf-mitigated|Just a moment\.\.\./i.test(relText)) {
+            return { res: relRes, text: relText, finalUrl: relayCandidateUrl, finalOrigin: new URL(relayCandidateUrl).origin, cookies: allCookies.join("; "), viaRelay: true };
+          }
+        }
+      } catch {}
+    }
     return { res, text, finalUrl: res.url || currentUrl, finalOrigin, cookies: allCookies.join("; ") };
   }
   throw new Error(`Too many redirects from ${baseUrl}`);
@@ -953,6 +1019,7 @@ export async function getMlbdServerHealth() {
       onlineCount: checks.filter(c => c.online).length,
       totalMirrors: checks.length,
       cinepulseConfigured: isCinePulseConfigured(),
+      relayConfigured: Boolean(getMlbdRelayConfig()),
       servers: checks,
       checkedAt: new Date().toISOString()
     },
