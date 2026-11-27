@@ -68,7 +68,7 @@
 
   const WATCHLIST_KEY = "cv_watchlist_v1";
   const SPORTS_REMINDER_KEY = "cv_sports_reminders_v1";
-  const HOME_CACHE_KEY = "cv_home_cache_v2";
+  const HOME_CACHE_KEY = "cv_home_cache_v3";
   const HOME_CACHE_TTL_MS = 20 * 60 * 1000;
 
   const EXPLORE_CATEGORIES = [
@@ -931,6 +931,8 @@
     renderPlatforms();
     renderLiveSportsSection();
 
+    const mlbdDirectAvailable = homeData.mlbdDirectAvailable !== false;
+    const isPlayableCard = x => Boolean(x && x.hasResource !== false && (mlbdDirectAvailable || x.source !== "movielinkbd" || x.mbSubjectId));
     const mlbdSections = Array.isArray(homeData.mlbdSections) ? homeData.mlbdSections : [];
     const mlbdFreshSec = mlbdSections.find(sec => /latest\s*release|new|\b\/new\b/i.test(`${sec?.title || ""} ${sec?.categoryPath || ""}`));
     const bannersRaw = [
@@ -942,8 +944,12 @@
       ...(homeData.banners || []),
       ...(homeData.trending || [])
     ];
-    const bannerUniq = sortNewestFirst(
+    const bannerSorted = sortNewestFirst(
       dedupeList(bannersRaw).filter(item => safeImg(posterOf(item)) && item.hasResource !== false && !isUpcomingUnreleased(item))
+    );
+    const bannerUniq = (mlbdDirectAvailable
+      ? bannerSorted
+      : [...bannerSorted].sort((a, b) => (isPlayableCard(b) ? 1 : 0) - (isPlayableCard(a) ? 1 : 0))
     ).slice(0, 7);
     renderSpotlight(bannerUniq);
 
@@ -992,13 +998,12 @@
       "/genre/thriller": matchAny(x => /thriller|horror|mystery|crime/i.test(`${x.genre || ""}`))
     };
 
-    const isPlayableCard = x => Boolean(x && x.hasResource !== false);
     const prioritizePostered = list => {
       const arr = Array.isArray(list) ? list : [];
       const postered = arr.filter(x => safeImg(posterOf(x)));
       const pool = postered.length >= 6 ? postered : arr;
       return sortNewestFirst(pool).sort((a, b) => {
-        const score = x => (safeImg(posterOf(x)) ? 4 : 0) + (isPlayableCard(x) ? 2 : 0);
+        const score = x => (isPlayableCard(x) ? 4 : 0) + (safeImg(posterOf(x)) ? 2 : 0);
         const diff = score(b) - score(a);
         if (diff !== 0) return diff;
         return releaseTime(b) - releaseTime(a);
@@ -1463,6 +1468,7 @@
       }
       const snapshot = {
         ok: true,
+        mlbdDirectAvailable: payload.mlbdDirectAvailable !== false,
         banners: trimList(payload.banners, 8),
         recentlyUploaded: trimList(payload.recentlyUploaded, 20),
         trending: trimList(payload.trending, 18),

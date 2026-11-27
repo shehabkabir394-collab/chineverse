@@ -1430,8 +1430,8 @@ function buildMlbdComItem({ title, rawPoster = "", rating = "", year = "", typeT
 
   const searchTitle = cleanMlbdSearchTitle(cleanTitle);
   const absPoster = rawPoster && /^https?:\/\//i.test(rawPoster) ? rawPoster : "";
-  const regHit = !absPoster ? lookupPosterRegistry(searchTitle, yr) : null;
-  const archHit = (!absPoster && !regHit?.poster) ? (mlbdArchiveByNormTitle.get(normalizePosterKey(searchTitle)) || null) : null;
+  const regHit = lookupPosterRegistry(searchTitle, yr);
+  const archHit = mlbdArchiveByNormTitle.get(normalizePosterKey(searchTitle)) || null;
   const resolvedRawPoster = absPoster || regHit?.rawPoster || archHit?.rawPoster || "";
   const isHindi = /hindi|dual\s*audio/i.test(`${cleanTitle} ${languageHint}`);
   const isBangla = /bangla|bengali/i.test(`${cleanTitle} ${languageHint}`);
@@ -1508,11 +1508,13 @@ function extractMlbdComCards(html, pagePath = "/") {
   const now = Date.now();
   const currentYear = new Date(now + 6 * 3600 * 1000).getUTCFullYear();
   const isLatestHomePage = pagePath === "/";
+  const isFreshSectionPage = isLatestHomePage || /^\/(?:movies|web-series|hindi-movies|south-indian-movies|korean-drama|animation-movies|action-movies|browse\/(?:bangla|bangla-dubbed|hindi-dubbed|hindi|korean|turkish|genre-thriller))$/i.test(pagePath);
   const assignUploadTime = (built) => {
     if (!built) return;
     const yrNum = Number(built.year || 0);
-    if (isLatestHomePage && (!yrNum || yrNum >= currentYear - 1)) {
-      built.uploadedAtMs = now - items.length * 60_000;
+    if (isFreshSectionPage && (!yrNum || yrNum >= currentYear - 1) && (isLatestHomePage || items.length < 18)) {
+      const offsetMs = isLatestHomePage ? 0 : 1_800_000;
+      built.uploadedAtMs = now - offsetMs - items.length * 60_000;
       if (!built.uploadTime) built.uploadTime = "Today";
     }
   };
@@ -2252,15 +2254,28 @@ async function getMlbdComCatalog({ path = "/", q = "", page = 1 } = {}) {
     }
   }
 
-  const seenKeys = new Set();
+  const seenMap = new Map();
+  const seenKeyByTitle = new Map();
   const merged = [];
   const pushUnique = it => {
     if (!it || isNigerianContent(it)) return;
     const k = normalizePosterKey(it.searchTitle || it.title) + "|" + (it.year || "");
     const pKey = it.path || k;
-    if (seenKeys.has(pKey) || (k !== "|" && seenKeys.has(k))) return;
-    seenKeys.add(pKey);
-    if (k !== "|") seenKeys.add(k);
+    const existing = seenMap.get(pKey) || (k !== "|" ? seenKeyByTitle.get(k) : null);
+    if (existing) {
+      if (!existing.poster && it.poster) {
+        existing.poster = it.poster;
+        existing.rawPoster = it.rawPoster || existing.rawPoster;
+      }
+      if (!existing.mbSubjectId && it.mbSubjectId) {
+        existing.mbSubjectId = it.mbSubjectId;
+        existing.mbDetailPath = it.mbDetailPath || existing.mbDetailPath;
+      }
+      if (!existing.rating && it.rating) existing.rating = it.rating;
+      return;
+    }
+    seenMap.set(pKey, it);
+    if (k !== "|") seenKeyByTitle.set(k, it);
     merged.push(it);
   };
 
@@ -2277,8 +2292,8 @@ async function getMlbdComCatalog({ path = "/", q = "", page = 1 } = {}) {
   const totalCount = Math.max(orderedMerged.length, archiveRes.total || 0);
   const startIdx = (pageNum - 1) * perPage;
   const slice = orderedMerged.slice(startIdx, startIdx + perPage);
-  if (slice.some(x => !x.poster)) {
-    await enrichMlbdItemsWithPosters(slice, 12, 6);
+  if (slice.some(x => !x.poster || !x.mbSubjectId)) {
+    await enrichMlbdItemsWithPosters(slice, 18, 6);
   }
   const maxPage = Math.max(1, Math.ceil(totalCount / perPage));
 
@@ -2341,23 +2356,40 @@ async function getMlbdComHomeFeed() {
       spec.id === "mlbd-latest" || matchesMlbdCategoryItem(c, spec.categoryPath)
     );
     const mergedMap = new Map();
-    for (const c of [...archiveItems, ...liveCards]) {
+    for (const c of [...liveCards, ...archiveItems]) {
       if (!c?.title || isNigerianContent(c)) continue;
       const k = normalizePosterKey(c.searchTitle || c.title) || c.title.toLowerCase();
-      if (!mergedMap.has(k)) mergedMap.set(k, c);
+      const existing = mergedMap.get(k);
+      if (!existing) {
+        mergedMap.set(k, c);
+      } else {
+        if (!existing.poster && c.poster) {
+          existing.poster = c.poster;
+          existing.rawPoster = c.rawPoster || existing.rawPoster;
+        }
+        if (!existing.mbSubjectId && c.mbSubjectId) {
+          existing.mbSubjectId = c.mbSubjectId;
+          existing.mbDetailPath = c.mbDetailPath || existing.mbDetailPath;
+        }
+        if (!existing.rating && c.rating) existing.rating = c.rating;
+      }
     }
     const sorted = sortMlbdNewestFirst([...mergedMap.values()]);
-    const postered = sorted.filter(c => Boolean(c?.poster));
-    const finalCards = (postered.length >= 6 ? postered : sorted).slice(0, 36);
-    if (finalCards.length) {
-      parsedSections.push({ ...spec, items: finalCards });
+    if (sorted.length) {
+      parsedSections.push({ ...spec, sorted });
     }
   }
 
-  const unpostered = parsedSections.flatMap(s => s.items).filter(it => !it.poster);
-  if (unpostered.length) {
-    await enrichMlbdItemsWithPosters(unpostered, 24, 6);
-  }
+  await Promise.allSettled(
+    parsedSections.map(async s => {
+      const head = s.sorted.slice(0, 14);
+      if (head.some(it => !it.poster || !it.mbSubjectId)) {
+        await enrichMlbdItemsWithPosters(head, 10, 6);
+      }
+      const postered = s.sorted.filter(c => Boolean(c?.poster));
+      s.items = (postered.length >= 6 ? postered : s.sorted).slice(0, 36);
+    })
+  );
 
   const sections = parsedSections.map(s => ({
     id: s.id,
@@ -2480,15 +2512,27 @@ export async function getMlbdHomeFeed() {
   } catch {
     if (isCinePulseConfigured()) {
       const cp = await fetchCinePulseApi("home", { source: "movielinkbd", lang: "en" }, { timeoutMs: 12000 });
-      if (cp.ok && cp.data && (Array.isArray(cp.data.sections) || Array.isArray(cp.data.trending) || Array.isArray(cp.data.mlbdSections))) {
-        const norm = normalizeCinePulsePayload("home", cp.data);
-        const sections = (norm.mlbdSections?.length ? norm.mlbdSections : (norm.sections || [])).filter(s => Array.isArray(s?.items) && s.items.length > 0);
+      const rawCp = cp.data?.separated && cp.data?.movielinkbd ? cp.data.movielinkbd : cp.data;
+      if (cp.ok && rawCp) {
+        const norm = normalizeCinePulsePayload("home", rawCp);
+        let sections = (norm.mlbdSections?.length ? norm.mlbdSections : (norm.sections || [])).filter(s => Array.isArray(s?.items) && s.items.length > 0);
+        if (!sections.length) {
+          const fallbackGroups = [
+            { id: "mlbd-latest", title: "🆕 Latest Releases", categoryPath: "/new", items: rawCp.latestUploads },
+            { id: "mlbd-bangla", title: "🇧🇩 Bangla & Dubbed", categoryPath: "/language/bangla", items: rawCp.bangla },
+            { id: "mlbd-bollywood", title: "🇮🇳 Hindi & Dubbed", categoryPath: "/language/hindi", items: rawCp.bollywood },
+            { id: "mlbd-south", title: "💫 South Indian", categoryPath: "/southIndian", items: rawCp.south }
+          ]
+            .map(g => ({ ...g, items: normalizeCinePulsePayload("home", { items: g.items }).items || [] }))
+            .filter(g => g.items.length > 0);
+          sections = fallbackGroups;
+        }
         if (sections.length || norm.trending?.length) {
           mlbdCinePulseHasContent = true;
           return setCached("home-feed", {
             ok: true,
             source: "movielinkbd",
-            activeMirror: "CinePulse Gateway",
+            activeMirror: rawCp.activeMirror || "CinePulse Gateway",
             sections,
             trending: norm.trending || sections.flatMap(s => s.items || []).slice(0, 28),
             banners: norm.banners || [],
@@ -2558,14 +2602,15 @@ export async function getMlbdCatalog({ path = "/", q = "", page = 1 } = {}) {
         ? { q: cleanQuery, page: String(pageNum), source: "movielinkbd" }
         : { category: basePath, page: String(pageNum), source: "movielinkbd" };
       const cp = await fetchCinePulseApi(cpRoute, cpParams, { timeoutMs: 12000 });
-      if (cp.ok && Array.isArray(cp.data?.items) && cp.data.items.length > 0) {
+      const rawCp = cp.data?.separated && cp.data?.movielinkbd ? cp.data.movielinkbd : cp.data;
+      if (cp.ok && Array.isArray(rawCp?.items) && rawCp.items.length > 0) {
         mlbdCinePulseHasContent = true;
-        const norm = normalizeCinePulsePayload(cpRoute, cp.data);
+        const norm = normalizeCinePulsePayload(cpRoute, rawCp);
         return setCached(cacheKey, {
           ...norm,
           ok: true,
           source: "movielinkbd",
-          activeMirror: "CinePulse Gateway",
+          activeMirror: rawCp.activeMirror || "CinePulse Gateway",
           path: basePath,
           page: pageNum
         }, 90000);

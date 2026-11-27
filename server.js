@@ -2071,6 +2071,7 @@ function sortCatalogNewestFirst(items = []) {
     .sort((a, b) => {
       if (a.isFuture !== b.isFuture) return a.isFuture ? 1 : -1;
       if (a.isFuture && b.isFuture) return a.recency - b.recency;
+      if (!mlbdDirectOk && b.isDirect !== a.isDirect) return b.isDirect - a.isDirect;
       // Items with recent explicit upload timestamps first, strictly newest first
       if (b.recency !== a.recency) return b.recency - a.recency;
       if (b.up !== a.up) return b.up - a.up;
@@ -2113,14 +2114,23 @@ function normalizeCatalogDedupeKey(item) {
 function pickBetterCatalogItem(prev, next) {
   if (!prev) return next;
   if (!next) return prev;
+  const mlbdDirectOk = isMlbdDirectPlaybackAvailable();
   const prevPoster = prev?.poster || prev?.previewImage ? 1 : 0;
   const nextPoster = next?.poster || next?.previewImage ? 1 : 0;
   if (nextPoster !== prevPoster) return nextPoster > prevPoster ? next : prev;
+  const prevMb = prev?.mbSubjectId || prev?.source !== "movielinkbd" ? 1 : 0;
+  const nextMb = next?.mbSubjectId || next?.source !== "movielinkbd" ? 1 : 0;
+  if (!mlbdDirectOk && nextMb !== prevMb) {
+    const winner = nextMb > prevMb ? next : prev;
+    const loser = winner === next ? prev : next;
+    if (!winner.uploadedAtMs && loser.uploadedAtMs) {
+      return { ...winner, uploadedAtMs: loser.uploadedAtMs, uploadTime: winner.uploadTime || loser.uploadTime };
+    }
+    return winner;
+  }
   const prevUp = parseExactUploadMs(prev);
   const nextUp = parseExactUploadMs(next);
   if (nextUp !== prevUp) return nextUp > prevUp ? next : prev;
-  const prevMb = prev?.mbSubjectId || prev?.source !== "movielinkbd" ? 1 : 0;
-  const nextMb = next?.mbSubjectId || next?.source !== "movielinkbd" ? 1 : 0;
   if (nextMb !== prevMb) return nextMb > prevMb ? next : prev;
   return prev;
 }
@@ -2310,6 +2320,14 @@ async function buildMergedHomePayload(query = new URLSearchParams()) {
   const mlbdDirectOk = isMlbdDirectPlaybackAvailable();
   const isDirectlyStreamable = x => Boolean(x && x.hasResource !== false && (mlbdDirectOk || x.source !== "movielinkbd" || x.mbSubjectId));
   const hasPlayableStream = x => Boolean(x && x.hasResource !== false);
+  const sortByPlayableThenRecency = (a, b) => {
+    if (!mlbdDirectOk) {
+      const da = isDirectlyStreamable(a) ? 1 : 0;
+      const db = isDirectlyStreamable(b) ? 1 : 0;
+      if (db !== da) return db - da;
+    }
+    return parseHomeRecencyMs(b) - parseHomeRecencyMs(a);
+  };
   const rankHomeItems = list =>
     [...(Array.isArray(list) ? list : [])].sort((a, b) => {
       const score = x => (isDirectlyStreamable(x) ? 4 : 0) + (hasCardPoster(x) ? 2 : 0);
@@ -2323,6 +2341,7 @@ async function buildMergedHomePayload(query = new URLSearchParams()) {
     : { ok: true, sections: [], trending: [], banners: [], categories: [], curated: {} };
   const payload = {
     ok: true,
+    mlbdDirectAvailable: mlbdDirectOk,
     categories: rawMb.categories || [],
     banners: [],
     trending: [],
@@ -2362,10 +2381,15 @@ async function buildMergedHomePayload(query = new URLSearchParams()) {
     payload.activeMlbdMirror = mlbd.activeMirror;
   }
 
-  if (mlbdBanglaRes.status === "fulfilled" && Array.isArray(mlbdBanglaRes.value?.items)) {
-    payload.mlbdBangla = rankHomeItems(
-      mlbdBanglaRes.value.items.filter(x => !isNigerianContent(x) && hasPlayableStream(x))
-    ).slice(0, 28).map(compactHomeCard);
+  const mlbdBanglaSecItems = (payload.mlbdSections || [])
+    .find(s => s?.id === "mlbd-bangla" || /^\/language\/bangla$/i.test(s?.categoryPath || ""))?.items || [];
+  const mlbdBanglaFeedItems = mlbdBanglaRes.status === "fulfilled" && Array.isArray(mlbdBanglaRes.value?.items)
+    ? mlbdBanglaRes.value.items
+    : [];
+  const mergedBanglaPool = dedupeCatalogItems([...mlbdBanglaFeedItems, ...mlbdBanglaSecItems])
+    .filter(x => !isNigerianContent(x) && hasPlayableStream(x));
+  if (mergedBanglaPool.length) {
+    payload.mlbdBangla = rankHomeItems(mergedBanglaPool).slice(0, 28).map(compactHomeCard);
   }
 
   const mbSections = (rawMb.sections || [])
@@ -2413,6 +2437,7 @@ async function buildMergedHomePayload(query = new URLSearchParams()) {
   // Build unified Recently Uploaded pool (newest movies & dramas at the very top & front)
   const recentPoolRaw = [
     ...mlbdFreshNewItems,
+    ...(payload.mlbdBangla || []).slice(0, 12),
     ...(payload.curated?.recentlyAdded || []),
     ...(payload.curated?.latestMovies || []),
     ...(payload.curated?.recentlyUpdated || []),
@@ -2421,7 +2446,7 @@ async function buildMergedHomePayload(query = new URLSearchParams()) {
   payload.recentlyUploaded = dedupeCatalogItems(
     recentPoolRaw.filter(x => x && !isNigerianContent(x) && !isMusicOrClipSubject(x) && hasPlayableStream(x) && hasCardPoster(x))
   )
-    .sort((a, b) => parseHomeRecencyMs(b) - parseHomeRecencyMs(a))
+    .sort(sortByPlayableThenRecency)
     .slice(0, 30)
     .map(compactHomeCard);
 
@@ -2431,7 +2456,7 @@ async function buildMergedHomePayload(query = new URLSearchParams()) {
     .filter(x => !isNigerianContent(x) && hasPlayableStream(x) && hasCardPoster(x))
     .map(compactHomeCard);
   payload.banners = dedupeCatalogItems([...payload.recentlyUploaded.slice(0, 8), ...mbBanners, ...mlbdBanners])
-    .sort((a, b) => parseHomeRecencyMs(b) - parseHomeRecencyMs(a))
+    .sort(sortByPlayableThenRecency)
     .slice(0, 10);
 
   const jsonStr = JSON.stringify(payload);

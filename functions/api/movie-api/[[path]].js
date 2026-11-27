@@ -14,6 +14,7 @@ import {
   getMlbdDetails,
   getMlbdHomeFeed,
   getMlbdStream,
+  isMlbdDirectPlaybackAvailable,
   isMlbdPath,
   validateExternalHttpUrl
 } from "../../../movielinkbd-api.js";
@@ -251,8 +252,11 @@ export async function onRequest({ request, env, params }) {
       if (mlbdBanglaRes.status === "fulfilled" && Array.isArray(mlbdBanglaRes.value?.items)) {
         payload.mlbdBangla = mlbdBanglaRes.value.items;
       }
+      const mlbdDirectOk = isMlbdDirectPlaybackAvailable();
+      payload.mlbdDirectAvailable = mlbdDirectOk;
+      const isDirectPlayable = x => Boolean(x && x.hasResource !== false && (mlbdDirectOk || x.source !== "movielinkbd" || x.mbSubjectId));
       const recentSeen = new Set();
-      const recentPool = [
+      const recentPoolRaw = [
         ...mlbdFreshItems,
         ...(payload.mlbdBangla || []).slice(0, 12),
         ...(payload.curated?.recentlyAdded || []),
@@ -266,17 +270,23 @@ export async function onRequest({ request, env, params }) {
         recentSeen.add(k);
         return true;
       });
-      payload.recentlyUploaded = recentPool.slice(0, 30);
+      payload.recentlyUploaded = (mlbdDirectOk
+        ? recentPoolRaw
+        : [...recentPoolRaw].sort((a, b) => (isDirectPlayable(b) ? 1 : 0) - (isDirectPlayable(a) ? 1 : 0))
+      ).slice(0, 30);
       const bannerSeen = new Set();
-      payload.banners = [...payload.recentlyUploaded.slice(0, 8), ...(payload.banners || []), ...mlbdBanners]
+      const bannerPoolRaw = [...payload.recentlyUploaded.slice(0, 8), ...(payload.banners || []), ...mlbdBanners]
         .filter(x => {
           if (!x || x.hasResource === false) return false;
           const k = x.path || x.subjectId || x.title;
           if (!k || bannerSeen.has(k)) return false;
           bannerSeen.add(k);
           return true;
-        })
-        .slice(0, 10);
+        });
+      payload.banners = (mlbdDirectOk
+        ? bannerPoolRaw
+        : [...bannerPoolRaw].sort((a, b) => (isDirectPlayable(b) ? 1 : 0) - (isDirectPlayable(a) ? 1 : 0))
+      ).slice(0, 10);
       if (payload.curated && Array.isArray(payload.mlbdBangla) && payload.mlbdBangla.length) {
         const existingIb = Array.isArray(payload.curated.indiaBangladeshTrending) ? payload.curated.indiaBangladeshTrending : [];
         const ibSeen = new Set();
