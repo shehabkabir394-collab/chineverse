@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import dns from "node:dns";
 import express from "express";
 import path from "node:path";
@@ -6,6 +7,12 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { gzip } from "node:zlib";
 import { CHROME_SEC_HEADERS, combineAbortSignals, curlHttpRequest } from "./lib/http-transport.js";
+import {
+  applyDirectSourceMetadata,
+  isDirectMediaResponseSafe,
+  isDirectPublicImageCdn,
+  isKnownProtectedMediaHost
+} from "./lib/media-delivery.js";
 import {
   MOVIEBOX_PLAYER_REFERER,
   MOVIEBOX_REFERER,
@@ -201,10 +208,11 @@ function convertSrtToVtt(rawText) {
   return `WEBVTT\n\n${cues.join("\n\n")}\n`;
 }
 
-const IMAGE_CACHE_MAX_ENTRIES = 250;
+const IMAGE_CACHE_MAX_ENTRIES = 400;
 const IMAGE_CACHE_MAX_BYTES = 1.5 * 1024 * 1024;
-const IMAGE_CACHE_MAX_TOTAL_BYTES = 32 * 1024 * 1024;
-const IMAGE_CACHE_TTL_MS = 6 * 3600 * 1000;
+const IMAGE_CACHE_MAX_TOTAL_BYTES = 48 * 1024 * 1024;
+const IMAGE_CACHE_TTL_MS = 12 * 3600 * 1000;
+const IMAGE_CACHE_CONTROL = "public, max-age=604800, s-maxage=2592000, stale-while-revalidate=86400";
 const imageCache = new Map();
 const imageInFlight = new Map();
 let imageCacheTotalBytes = 0;
@@ -229,7 +237,7 @@ function getCachedImageEntry(url) {
 }
 
 function setCachedImageEntry(url, contentType, bodyBuffer) {
-  if (!bodyBuffer || !bodyBuffer.length || bodyBuffer.length > IMAGE_CACHE_MAX_BYTES) return;
+  if (!bodyBuffer || !bodyBuffer.length || bodyBuffer.length > IMAGE_CACHE_MAX_BYTES) return null;
   deleteCachedImageEntry(url);
   while (
     imageCache.size >= IMAGE_CACHE_MAX_ENTRIES ||
@@ -239,16 +247,20 @@ function setCachedImageEntry(url, contentType, bodyBuffer) {
     if (!oldestKey) break;
     deleteCachedImageEntry(oldestKey);
   }
-  imageCache.set(url, {
+  const etag = `"${createHash("sha1").update(bodyBuffer).digest("hex").slice(0, 20)}"`;
+  const entry = {
     contentType,
     body: bodyBuffer,
+    etag,
     expiresAt: Date.now() + IMAGE_CACHE_TTL_MS
-  });
+  };
+  imageCache.set(url, entry);
   imageCacheTotalBytes += bodyBuffer.length;
+  return entry;
 }
 
 function isPublicImageCdn(url) {
-  return /\b(?:image\.tmdb\.org|media-amazon\.com|r2\.dev|ibb\.co(?:\.com)?|postimg\.cc|ytimg\.com|mzstatic\.com|tvmaze\.com|wikimedia\.org|wikipedia\.org|imageflix\.cam|img\.movielinkapp\.com)\b/i.test(String(url || ""));
+  return isDirectPublicImageCdn(url) || /\b(?:image\.tmdb\.org|media-amazon\.com|r2\.dev|ibb\.co(?:\.com)?|postimg\.cc|ytimg\.com|mzstatic\.com|tvmaze\.com|wikimedia\.org|wikipedia\.org|imageflix\.cam|img\.movielinkapp\.com|pbcdnw\.aoneroom\.com)\b/i.test(String(url || ""));
 }
 
 // Image proxy for MovieBox/MLBD posters, avatars & sports logos (RAM cached, coalesced & hotlink-safe)
@@ -261,10 +273,14 @@ app.get("/api/moviebox-image/:file", async (req, res) => {
   const cached = getCachedImageEntry(targetUrl);
   if (cached) {
     res.setHeader("Content-Type", cached.contentType);
-    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.setHeader("Cache-Control", IMAGE_CACHE_CONTROL);
+    res.setHeader("ETag", cached.etag);
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("X-Image-Cache", "HIT");
-    return res.end(cached.body);
+    if (req.get("if-none-match") === cached.etag) {
+      return res.status(304).end();
+    }
+    return res.end(req.method === "HEAD" ? undefined : cached.body);
   }
 
   const referer = /aisports/i.test(targetUrl)
@@ -321,8 +337,9 @@ app.get("/api/moviebox-image/:file", async (req, res) => {
         if (!buf.length) {
           return { ok: false, status: 502 };
         }
-        setCachedImageEntry(targetUrl, ct, buf);
-        return { ok: true, contentType: ct, body: buf };
+        const saved = setCachedImageEntry(targetUrl, ct, buf);
+        const etag = saved?.etag || `"${createHash("sha1").update(buf).digest("hex").slice(0, 20)}"`;
+        return { ok: true, contentType: ct, body: buf, etag };
       })().finally(() => {
         imageInFlight.delete(targetUrl);
       });
@@ -334,9 +351,13 @@ app.get("/api/moviebox-image/:file", async (req, res) => {
       return res.status(result?.status || 502).send("Image unavailable");
     }
     res.setHeader("Content-Type", result.contentType);
-    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.setHeader("Cache-Control", IMAGE_CACHE_CONTROL);
+    if (result.etag) res.setHeader("ETag", result.etag);
     res.setHeader("X-Content-Type-Options", "nosniff");
-    return res.end(result.body);
+    if (result.etag && req.get("if-none-match") === result.etag) {
+      return res.status(304).end();
+    }
+    return res.end(req.method === "HEAD" ? undefined : result.body);
   } catch {
     return res.status(502).send("Image upstream unavailable");
   }
@@ -782,7 +803,12 @@ async function proxyMediaStream(req, res, targetUrl, extraHeaders = {}, forceDow
     res.setHeader("cache-control", "private, no-store");
   } else {
     res.setHeader("vary", "Range");
-    res.setHeader("cache-control", "private, max-age=300, no-transform");
+    res.setHeader(
+      "cache-control",
+      isHlsSegment
+        ? "public, max-age=3600, s-maxage=21600, stale-while-revalidate=3600, no-transform"
+        : "public, max-age=1800, s-maxage=3600, stale-while-revalidate=600, no-transform"
+    );
   }
   res.setHeader("x-content-type-options", "nosniff");
   res.status(upstream.status);
@@ -991,7 +1017,7 @@ app.all("/api/cinepulse-media", async (req, res) => {
 app.get("/api/categories", async (_req, res) => {
   try {
     const data = await getMlbdCategories();
-    res.setHeader("Cache-Control", "public, max-age=180");
+    res.setHeader("Cache-Control", "public, max-age=300, s-maxage=900, stale-while-revalidate=1800");
     return res.json(data);
   } catch (err) {
     return res.status(502).json({ ok: false, error: err?.message || "Categories unavailable" });
@@ -1178,7 +1204,7 @@ app.get("/api/suggest", async (req, res) => {
       extraTitles: [...mlbdSugg, ...imdbSugg],
       limit: 15
     });
-    res.setHeader("Cache-Control", "public, max-age=60");
+    res.setHeader("Cache-Control", "public, max-age=120, s-maxage=300, stale-while-revalidate=600");
     return res.json({
       ok: true,
       query: q,
@@ -1193,7 +1219,7 @@ app.get("/api/suggest", async (req, res) => {
 app.get("/api/home-feed", async (_req, res) => {
   try {
     const data = await getMlbdHomeFeed();
-    res.setHeader("Cache-Control", "public, max-age=120");
+    res.setHeader("Cache-Control", "public, max-age=120, s-maxage=300, stale-while-revalidate=600");
     return res.json(data);
   } catch (err) {
     return res.status(503).json({ ok: false, error: err?.message || "Home feed unavailable" });
@@ -1207,7 +1233,7 @@ app.get("/api/catalog", async (req, res) => {
     const page = Math.max(1, Number(req.query.page) || 1);
     if (q) {
       const data = await getMlbdCatalog({ path: pathParam, q, page });
-      res.setHeader("Cache-Control", "public, max-age=60");
+      res.setHeader("Cache-Control", data?.items?.length ? "public, max-age=120, s-maxage=300, stale-while-revalidate=600" : "no-store");
       return res.json(data);
     }
     const cacheKey = `mlbd-catalog:${pathParam.toLowerCase()}:${page}`;
@@ -1228,7 +1254,7 @@ app.get("/api/catalog", async (req, res) => {
         return data;
       }
     );
-    return sendPreGzipped(req, res, out, out?.payload?.items?.length ? "public, max-age=90, stale-while-revalidate=180" : "no-store");
+    return sendPreGzipped(req, res, out, out?.payload?.items?.length ? "public, max-age=120, s-maxage=300, stale-while-revalidate=600" : "no-store");
   } catch (err) {
     return res.status(503).json({ ok: false, error: err?.message || "Catalog unavailable" });
   }
@@ -1245,12 +1271,13 @@ app.get("/api/details", async (req, res) => {
         path: pathParam,
         title: String(req.query.title || "")
       }));
+      res.setHeader("Cache-Control", mbPayload?.detail?.hasResource !== false ? "public, max-age=180, s-maxage=600, stale-while-revalidate=1200" : "no-store");
       return res.json(mbPayload);
     }
     const data = await getMlbdDetails(pathParam, String(req.query.title || ""), {
       dubLock: req.query.dubLock === "1"
     });
-    res.setHeader("Cache-Control", data?.detail?.hasResource ? "public, max-age=120" : "no-store");
+    res.setHeader("Cache-Control", data?.detail?.hasResource ? "public, max-age=180, s-maxage=600, stale-while-revalidate=1200" : "no-store");
     return res.json(data);
   } catch (err) {
     return res.status(503).json({ ok: false, error: err?.message || "Title details unavailable" });
@@ -1299,12 +1326,30 @@ app.get("/api/go", async (req, res) => {
   return res.redirect(302, redirectTarget);
 });
 
+const mlbdHlsPlaylistCache = new Map();
+const MLBD_HLS_CACHE_FRESH_MS = 60000;
+const MLBD_HLS_CACHE_STALE_MS = 180000;
+const MLBD_HLS_CACHE_MAX_ENTRIES = 120;
+
 app.get("/api/mlbd-hls.m3u8", async (req, res) => {
   const token = String(req.query.t || "").trim();
   const targetUrl = resolveSafeMlbdToken(token);
   if (!targetUrl) {
     return res.status(400).type("text/plain").send("Invalid or expired MovieStreamBD HLS token");
   }
+
+  const cached = mlbdHlsPlaylistCache.get(targetUrl);
+  const now = Date.now();
+  if (cached && now - cached.builtAt < MLBD_HLS_CACHE_FRESH_MS) {
+    mlbdHlsPlaylistCache.delete(targetUrl);
+    mlbdHlsPlaylistCache.set(targetUrl, cached);
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Content-Type", "application/vnd.apple.mpegurl; charset=utf-8");
+    res.setHeader("Cache-Control", "public, max-age=180, s-maxage=600, stale-while-revalidate=300");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    return res.send(req.method === "HEAD" ? undefined : cached.body);
+  }
+
   try {
     const hlsHeaders = {
       ...CHROME_SEC_HEADERS,
@@ -1345,14 +1390,28 @@ app.get("/api/mlbd-hls.m3u8", async (req, res) => {
       }
     }
     if (!rawText) {
+      if (cached && now - cached.builtAt < MLBD_HLS_CACHE_STALE_MS) {
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.setHeader("Content-Type", "application/vnd.apple.mpegurl; charset=utf-8");
+        res.setHeader("Cache-Control", "public, max-age=60, s-maxage=180, stale-while-revalidate=120");
+        res.setHeader("X-Content-Type-Options", "nosniff");
+        return res.send(req.method === "HEAD" ? undefined : cached.body);
+      }
       return res.status(lastStatus || 502).type("text/plain").send("HLS playlist unavailable");
     }
     const rewritten = rewriteMlbdHlsPlaylist(rawText, finalUrl);
+    if (mlbdHlsPlaylistCache.has(targetUrl)) mlbdHlsPlaylistCache.delete(targetUrl);
+    mlbdHlsPlaylistCache.set(targetUrl, { body: rewritten, builtAt: Date.now() });
+    while (mlbdHlsPlaylistCache.size > MLBD_HLS_CACHE_MAX_ENTRIES) {
+      const oldestKey = mlbdHlsPlaylistCache.keys().next().value;
+      if (!oldestKey) break;
+      mlbdHlsPlaylistCache.delete(oldestKey);
+    }
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Content-Type", "application/vnd.apple.mpegurl; charset=utf-8");
-    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("Cache-Control", "public, max-age=180, s-maxage=600, stale-while-revalidate=300");
     res.setHeader("X-Content-Type-Options", "nosniff");
-    return res.send(rewritten);
+    return res.send(req.method === "HEAD" ? undefined : rewritten);
   } catch (err) {
     return res.status(502).type("text/plain").send(err?.message || "MovieStreamBD HLS proxy failed");
   }
@@ -1394,15 +1453,22 @@ app.get("/api/movie-api/download-file", async (req, res) => {
     const incomingUrl = new URL(req.originalUrl, getBaseUrl(req));
     const query = new URLSearchParams(incomingUrl.search);
     const reqPath = String(query.get("path") || "");
-    const streamPayload = isMlbdPath(reqPath)
+    const rawStreamPayload = isMlbdPath(reqPath)
       ? await getMlbdStream({ path: reqPath, se: query.get("se") || 0, ep: query.get("ep") || 1 })
       : await handleMovieBoxRoute("stream", query);
+    const streamPayload = await probeAndRankStreamPayload(rawStreamPayload);
     const sources = Array.isArray(streamPayload?.sources) ? streamPayload.sources : [];
     const best = sources.find(s => s?.url && !/\.m3u8(?:$|[?#])/i.test(s.url)) || sources[0];
     if (!best?.url) {
       return res.status(404).json({ ok: false, error: "No downloadable MP4 source found" });
     }
-    const parsed = new URL(best.url, getBaseUrl(req));
+    const directCandidate = String(best.directUrl || (best.directPlayback ? best.url : "") || "").trim();
+    if (best.directPlayback && /^https?:\/\//i.test(directCandidate) && !isKnownProtectedMediaHost(directCandidate)) {
+      res.setHeader("Referrer-Policy", "no-referrer");
+      res.setHeader("Cache-Control", "no-store");
+      return res.redirect(302, directCandidate);
+    }
+    const parsed = new URL(best.proxyUrl || best.url, getBaseUrl(req));
     const cpToken = parsed.pathname === "/api/cinepulse-media" ? parsed.searchParams.get("t") : "";
     if (cpToken && /^cp1[A-Za-z0-9._~-]{8,2048}$/.test(cpToken) && process.env.CINEPULSE_API_KEY) {
       return await proxyMediaStream(
@@ -1418,6 +1484,11 @@ app.get("/api/movie-api/download-file", async (req, res) => {
     if (!targetUrl) {
       return res.status(404).json({ ok: false, error: "Download token unavailable" });
     }
+    if (!isKnownProtectedMediaHost(targetUrl) && best.directPlayback !== false) {
+      res.setHeader("Referrer-Policy", "no-referrer");
+      res.setHeader("Cache-Control", "no-store");
+      return res.redirect(302, targetUrl);
+    }
     const referer = isMlbdPath(reqPath) ? getActiveMlbdReferer() : MOVIEBOX_PLAYER_REFERER;
     return await proxyMediaStream(req, res, targetUrl, { Referer: referer }, true);
   } catch (error) {
@@ -1429,10 +1500,18 @@ const cdnSpeedCache = new Map();
 const CDN_SPEED_TTL_MS = 120000;
 
 function resolveProbeTargetForSource(src) {
-  const rawUrl = String(src?.url || "").trim();
+  const rawUrl = String(src?.proxyUrl || src?.url || "").trim();
   if (!rawUrl) return null;
   try {
     const parsed = new URL(rawUrl, "http://127.0.0.1");
+    if (parsed.protocol === "https:" && parsed.origin !== "http://127.0.0.1") {
+      return {
+        targetUrl: parsed.href,
+        hostKey: parsed.hostname,
+        headers: { "User-Agent": MOVIEBOX_UA, Referer: getActiveMlbdReferer(), Accept: "*/*" },
+        isPlaylist: /\.m3u8(?:$|[?#])/i.test(parsed.pathname)
+      };
+    }
     if (parsed.pathname === "/api/mlbd-stream.mp4" || parsed.pathname === "/api/mlbd-hls.m3u8") {
       const targetUrl = resolveSafeMlbdToken(parsed.searchParams.get("t") || "");
       if (!targetUrl) return null;
@@ -1490,15 +1569,31 @@ async function probeSingleSourceSpeed(probe) {
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), 1100);
   const t0 = performance.now();
+  const canTryDirectNoReferer = !probe.isPlaylist && !isKnownProtectedMediaHost(probe.targetUrl);
   try {
     const reqHeaders = new Headers(probe.headers);
     if (!probe.isPlaylist) reqHeaders.set("Range", "bytes=0-32767");
-    const up = await fetch(probe.targetUrl, {
+
+    const mainFetch = fetch(probe.targetUrl, {
       method: "GET",
       headers: reqHeaders,
       redirect: "follow",
       signal: ac.signal
     });
+    const directFetch = canTryDirectNoReferer
+      ? fetch(probe.targetUrl, {
+          method: "GET",
+          headers: {
+            "User-Agent": MOVIEBOX_UA,
+            Accept: "*/*",
+            Range: "bytes=0-255"
+          },
+          redirect: "follow",
+          signal: ac.signal
+        }).catch(() => null)
+      : Promise.resolve(null);
+
+    const [up, directUp] = await Promise.all([mainFetch, directFetch]);
     const ttfbMs = Math.max(1, Math.round(performance.now() - t0));
     let bytes = 0;
     if (up.ok || up.status === 206) {
@@ -1513,6 +1608,17 @@ async function probeSingleSourceSpeed(probe) {
     } else {
       try { await up.body?.cancel(); } catch {}
     }
+
+    let directCheck = { directOk: false, directCors: false };
+    if (canTryDirectNoReferer && directUp) {
+      directCheck = isDirectMediaResponseSafe({
+        ok: directUp.ok,
+        status: directUp.status,
+        headers: directUp.headers
+      });
+      try { await directUp.body?.cancel(); } catch {}
+    }
+
     const totalMs = Math.max(1, Math.round(performance.now() - t0));
     const bps = bytes > 0 ? Math.round((bytes * 1000) / totalMs) : 0;
     const result = {
@@ -1520,6 +1626,8 @@ async function probeSingleSourceSpeed(probe) {
       status: up.status,
       latencyMs: ttfbMs,
       bps,
+      directOk: directCheck.directOk,
+      directCors: directCheck.directCors,
       checkedAt: Date.now()
     };
     if (cdnSpeedCache.size >= 200) {
@@ -1529,7 +1637,7 @@ async function probeSingleSourceSpeed(probe) {
     cdnSpeedCache.set(cacheKey, result);
     return result;
   } catch {
-    const failRes = { ok: false, status: 0, latencyMs: 1100, bps: 0, checkedAt: Date.now() };
+    const failRes = { ok: false, status: 0, latencyMs: 1100, bps: 0, directOk: false, directCors: false, checkedAt: Date.now() };
     cdnSpeedCache.set(cacheKey, failRes);
     return failRes;
   } finally {
@@ -1569,20 +1677,25 @@ async function probeAndRankStreamPayload(payload) {
   const scored = probedTargets.map(({ src, probe }, idx) => {
     const ck = probe ? `${probe.hostKey}:${probe.isPlaylist ? "hls" : "mp4"}` : "";
     const stats = ck ? probeResults.get(ck) : null;
+    const directStats = stats && typeof stats.directOk === "boolean"
+      ? { directOk: stats.directOk, directCors: stats.directCors }
+      : null;
+    const deliveredSrc = applyDirectSourceMetadata(src, probe?.targetUrl || src?.directUrl || "", directStats);
     const serverOk = stats ? Boolean(stats.ok) : true;
     const latencyMs = stats ? stats.latencyMs : 500;
     const bps = stats ? stats.bps : 0;
-    const isHls = /\.m3u8(?:$|[?#])/i.test(String(src?.url || "")) || /hls/i.test(String(src?.format || ""));
+    const isHls = /\.m3u8(?:$|[?#])/i.test(String(deliveredSrc?.url || "")) || /hls/i.test(String(deliveredSrc?.format || ""));
     const fastBonus = serverOk ? Math.max(0, 1000 - latencyMs) + Math.min(800, Math.round(bps / 15000)) : -5000;
-    const qualScore = qualityRank(src?.quality) || (isHls ? 720 : 480);
+    const directBonus = deliveredSrc?.directPlayback && serverOk ? 250 : 0;
+    const qualScore = qualityRank(deliveredSrc?.quality) || (isHls ? 720 : 480);
     // Keep fast servers on top; among fast servers (<450ms), favor crisp quality & adaptive HLS
     const speedTier = !serverOk ? 0 : latencyMs <= 160 ? 3 : latencyMs <= 380 ? 2 : latencyMs <= 750 ? 1 : 0;
-    const totalScore = speedTier * 10000 + fastBonus + (speedTier >= 1 ? qualScore * 2 : 0);
+    const totalScore = speedTier * 10000 + fastBonus + directBonus + (speedTier >= 1 ? qualScore * 2 : 0);
     return {
       idx,
       totalScore,
       source: {
-        ...src,
+        ...deliveredSrc,
         serverOk,
         serverLatencyMs: latencyMs,
         ...(bps > 0 ? { serverBps: bps } : {}),
@@ -1631,7 +1744,7 @@ app.all("/api/movie-api/*", async (req, res) => {
       const payload = await getMlbdDetails(reqPath, String(query.get("title") || ""), {
         dubLock: query.get("dubLock") === "1"
       });
-      res.setHeader("Cache-Control", payload?.detail?.hasResource ? "public, max-age=120" : "no-store");
+      res.setHeader("Cache-Control", payload?.detail?.hasResource ? "public, max-age=180, s-maxage=600, stale-while-revalidate=1200" : "no-store");
       return res.status(200).json(payload);
     }
 
@@ -1661,7 +1774,7 @@ app.all("/api/movie-api/*", async (req, res) => {
 
     if (legacy === "home") {
       const homeOut = await getMergedHomePayloadCached(query);
-      return sendPreGzipped(req, res, homeOut, "public, max-age=60, stale-while-revalidate=120");
+      return sendPreGzipped(req, res, homeOut, "public, max-age=120, s-maxage=300, stale-while-revalidate=600");
     }
 
     if (legacy === "categories") {
@@ -1688,7 +1801,7 @@ app.all("/api/movie-api/*", async (req, res) => {
           };
         }
       );
-      return sendPreGzipped(req, res, out, "public, max-age=180, stale-while-revalidate=600");
+      return sendPreGzipped(req, res, out, "public, max-age=300, s-maxage=900, stale-while-revalidate=1800");
     }
 
     if (legacy === "filter-options" && !query.toString()) {
@@ -1697,7 +1810,7 @@ app.all("/api/movie-api/*", async (req, res) => {
         { freshMs: 600000, staleMs: 1800000 },
         () => handleMovieBoxRoute("filter-options", new URLSearchParams())
       );
-      return sendPreGzipped(req, res, out, "public, max-age=600, stale-while-revalidate=1200");
+      return sendPreGzipped(req, res, out, "public, max-age=600, s-maxage=1800, stale-while-revalidate=3600");
     }
 
     if (legacy === "trending") {
@@ -1718,7 +1831,7 @@ app.all("/api/movie-api/*", async (req, res) => {
           return d;
         }
       );
-      return sendPreGzipped(req, res, out, "public, max-age=60, stale-while-revalidate=180");
+      return sendPreGzipped(req, res, out, "public, max-age=120, s-maxage=300, stale-while-revalidate=600");
     }
 
     if (legacy === "hot-search") {
@@ -1728,7 +1841,7 @@ app.all("/api/movie-api/*", async (req, res) => {
         { freshMs: 120000, staleMs: 600000 },
         () => handleMovieBoxRoute("hot-search", query)
       );
-      return sendPreGzipped(req, res, out, "public, max-age=120, stale-while-revalidate=300");
+      return sendPreGzipped(req, res, out, "public, max-age=120, s-maxage=300, stale-while-revalidate=600");
     }
 
     if (legacy === "sports" && !query.toString()) {
@@ -1741,7 +1854,7 @@ app.all("/api/movie-api/*", async (req, res) => {
         },
         () => handleMovieBoxRoute("sports", new URLSearchParams())
       );
-      return sendPreGzipped(req, res, out, "public, max-age=20, stale-while-revalidate=60");
+      return sendPreGzipped(req, res, out, "public, max-age=20, s-maxage=30, stale-while-revalidate=60");
     }
 
     if (legacy === "platform") {
@@ -1762,7 +1875,7 @@ app.all("/api/movie-api/*", async (req, res) => {
           return d;
         }
       );
-      return sendPreGzipped(req, res, out, out?.payload?.items?.length ? "public, max-age=90, stale-while-revalidate=180" : "no-store");
+      return sendPreGzipped(req, res, out, out?.payload?.items?.length ? "public, max-age=120, s-maxage=300, stale-while-revalidate=600" : "no-store");
     }
 
     if (legacy === "search") {
@@ -1815,7 +1928,7 @@ app.all("/api/movie-api/*", async (req, res) => {
         Number(mlbdRes.value?.maxPage || page),
         searchHasMore ? page + 1 : page
       );
-      res.setHeader("Cache-Control", "public, max-age=60");
+      res.setHeader("Cache-Control", merged.length ? "public, max-age=120, s-maxage=300, stale-while-revalidate=600" : "no-store");
       return res.json({
         ok: true,
         items: merged,
@@ -1845,7 +1958,7 @@ app.all("/api/movie-api/*", async (req, res) => {
         () => buildUnifiedCatalogPayload(category, page, query)
       );
       const hasItems = Array.isArray(out?.payload?.items) && out.payload.items.length > 0;
-      return sendPreGzipped(req, res, out, hasItems ? "public, max-age=60, stale-while-revalidate=300" : "no-store");
+      return sendPreGzipped(req, res, out, hasItems ? "public, max-age=120, s-maxage=300, stale-while-revalidate=600" : "no-store");
     }
 
     let payload = await handleMovieBoxRoute(legacy, query);
@@ -1914,7 +2027,16 @@ app.all("/api/movie-api/*", async (req, res) => {
       payload.cinepulseConfigured = isCinePulseConfigured();
       payload.activeMlbdMirror = getActiveMlbdReferer();
     }
-    res.setHeader("Cache-Control", legacy === "stream" ? "no-store" : "public, max-age=60");
+    const cacheCtrl = legacy === "stream"
+      ? "no-store"
+      : legacy === "details"
+        ? (payload?.detail?.hasResource !== false ? "public, max-age=180, s-maxage=600, stale-while-revalidate=1200" : "no-store")
+        : legacy === "suggest"
+          ? "public, max-age=120, s-maxage=300, stale-while-revalidate=600"
+          : statusCode === 200
+            ? "public, max-age=120, s-maxage=300, stale-while-revalidate=600"
+            : "no-store";
+    res.setHeader("Cache-Control", cacheCtrl);
     return res.status(statusCode).json(payload);
   } catch (error) {
     console.warn(`[MovieBox API fallback] ${legacy}:`, error?.message || error);

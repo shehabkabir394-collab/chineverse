@@ -62,7 +62,13 @@ export async function onRequest({ request, env }) {
       headers.set("content-disposition", `attachment; filename="${rawName}"`);
       headers.set("cache-control", "private, no-store");
     } else {
-      headers.set("cache-control", "no-store");
+      headers.set("vary", "Range");
+      headers.set(
+        "cache-control",
+        isHlsSeg
+          ? "public, max-age=3600, s-maxage=21600, stale-while-revalidate=3600, no-transform"
+          : "public, max-age=1800, s-maxage=3600, stale-while-revalidate=600, no-transform"
+      );
     }
     headers.set("Access-Control-Allow-Origin", "*");
     headers.set("X-Content-Type-Options", "nosniff");

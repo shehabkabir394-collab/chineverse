@@ -19,6 +19,7 @@ import {
   validateExternalHttpUrl
 } from "../../../movielinkbd-api.js";
 import { handleMockMovieApi } from "../../../mock-catalog.js";
+import { isKnownProtectedMediaHost } from "../../../lib/media-delivery.js";
 
 const CINEPULSE_UPSTREAM = "https://okay-891h.onrender.com";
 const CINEPULSE_ROUTES = {
@@ -109,11 +110,32 @@ async function handleDownloadFile(request, incoming) {
     if (!best?.url) {
       return json({ ok: false, error: "No downloadable MP4 source found" }, 404);
     }
-    const parsed = new URL(best.url, incoming.origin);
+    const directCandidate = String(best.directUrl || (best.directPlayback ? best.url : "") || "").trim();
+    if (best.directPlayback && /^https?:\/\//i.test(directCandidate) && !isKnownProtectedMediaHost(directCandidate)) {
+      return new Response(null, {
+        status: 302,
+        headers: {
+          Location: directCandidate,
+          "Referrer-Policy": "no-referrer",
+          "Cache-Control": "no-store"
+        }
+      });
+    }
+    const parsed = new URL(best.proxyUrl || best.url, incoming.origin);
     const token = parsed.searchParams.get("mb") || parsed.searchParams.get("t");
     const targetUrl = validateExternalHttpUrl(verifyMediaToken(token));
     if (!targetUrl) {
       return json({ ok: false, error: "Download token unavailable" }, 404);
+    }
+    if (!isKnownProtectedMediaHost(targetUrl) && best.directPlayback !== false) {
+      return new Response(null, {
+        status: 302,
+        headers: {
+          Location: targetUrl,
+          "Referrer-Policy": "no-referrer",
+          "Cache-Control": "no-store"
+        }
+      });
     }
     const reqHeaders = new Headers({
       "User-Agent": MOVIEBOX_UA,
@@ -208,7 +230,7 @@ export async function onRequest({ request, env, params }) {
       const payload = await getMlbdDetails(reqPath, String(query.get("title") || ""), {
         dubLock: query.get("dubLock") === "1"
       });
-      return json(payload, 200, "public, max-age=120");
+      return json(payload, 200, payload?.detail?.hasResource ? "public, max-age=180, s-maxage=600, stale-while-revalidate=1200" : "no-store");
     }
 
     if (legacy === "stream" && isMlbdPath(reqPath)) {
@@ -299,7 +321,7 @@ export async function onRequest({ request, env, params }) {
           })
           .slice(0, 28);
       }
-      return json(payload, 200, "public, max-age=60");
+      return json(payload, 200, "public, max-age=120, s-maxage=300, stale-while-revalidate=600");
     }
 
     if (legacy === "categories") {
@@ -315,7 +337,7 @@ export async function onRequest({ request, env, params }) {
         ok: true,
         categories: mergedCats,
         servers: mlbdRes.status === "fulfilled" ? mlbdRes.value?.servers || [] : []
-      }, 200, "public, max-age=120");
+      }, 200, "public, max-age=300, s-maxage=900, stale-while-revalidate=1800");
     }
 
     if (legacy === "search") {
@@ -344,7 +366,7 @@ export async function onRequest({ request, env, params }) {
         items: merged,
         totalCount: merged.length,
         hasMore: Boolean(mbRes.value?.hasMore || mlbdRes.value?.hasMore)
-      }, 200, "public, max-age=60");
+      }, 200, "public, max-age=120, s-maxage=300, stale-while-revalidate=600");
     }
 
     if (legacy === "catalog") {
@@ -355,20 +377,20 @@ export async function onRequest({ request, env, params }) {
       const isLatestCat = normCatPath === "/new" || normCatPath === "/latest";
       if (isTrendingCat || isLatestCat) {
         const mlbdRouteRes = await getMlbdCatalog({ path: catPath, page });
-        return json({ ...mlbdRouteRes, ok: true }, 200, "public, max-age=60");
+        return json({ ...mlbdRouteRes, ok: true }, 200, mlbdRouteRes?.items?.length ? "public, max-age=120, s-maxage=300, stale-while-revalidate=600" : "no-store");
       }
       const isMlbdOnlyCategory = /^\/(?:language\/(?:dual-audio|gujrati|kannada|marathi|malaysian|vietnamese|german|italian|portuguese|others)|genre\/(?:biographical|historical|musical|sports|superhero|survival|suspense)|category\/|collection\/|collections)/i.test(catPath);
       if (isMlbdOnlyCategory) {
         try {
           const mlbdCat = await getMlbdCatalog({ path: catPath, page });
           if (Array.isArray(mlbdCat?.items) && mlbdCat.items.length > 0) {
-            return json({ ...mlbdCat, items: sortByReleaseNewest(mlbdCat.items) }, 200, "public, max-age=60");
+            return json({ ...mlbdCat, items: sortByReleaseNewest(mlbdCat.items) }, 200, "public, max-age=120, s-maxage=300, stale-while-revalidate=600");
           }
         } catch {}
         try {
           const mbFallback = await handleMovieBoxRoute("catalog", query);
           if (mbFallback?.ok && Array.isArray(mbFallback.items)) {
-            return json({ ...mbFallback, items: sortByReleaseNewest(mbFallback.items) }, 200, "public, max-age=60");
+            return json({ ...mbFallback, items: sortByReleaseNewest(mbFallback.items) }, 200, mbFallback.items.length ? "public, max-age=120, s-maxage=300, stale-while-revalidate=600" : "no-store");
           }
         } catch {}
         return json({ ok: true, items: [], maxPage: 1, page }, 200, "no-store");
@@ -399,7 +421,7 @@ export async function onRequest({ request, env, params }) {
           Number(mbPayload?.maxPage || 1),
           Number(mlbdRes.status === "fulfilled" ? mlbdRes.value?.maxPage || 1 : 1)
         )
-      }, 200, "public, max-age=60");
+      }, 200, merged.length ? "public, max-age=120, s-maxage=300, stale-while-revalidate=600" : "no-store");
     }
 
     const payload = await handleMovieBoxRoute(legacy, query);
@@ -407,7 +429,13 @@ export async function onRequest({ request, env, params }) {
       return json(payload, 404);
     }
     const statusCode = payload?.ok === false ? 502 : 200;
-    const cacheControl = legacy === "stream" ? "no-store" : "public, max-age=60";
+    const cacheControl = legacy === "stream"
+      ? "no-store"
+      : legacy === "details"
+        ? (payload?.detail?.hasResource !== false ? "public, max-age=180, s-maxage=600, stale-while-revalidate=1200" : "no-store")
+        : legacy === "filter-options"
+          ? "public, max-age=600, s-maxage=1800, stale-while-revalidate=3600"
+          : "public, max-age=120, s-maxage=300, stale-while-revalidate=600";
     return json(payload, statusCode, cacheControl);
   } catch (error) {
     try {

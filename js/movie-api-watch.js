@@ -238,7 +238,9 @@
         ep: epNum,
         quality: mp4.quality || "HD",
         url: decorateOfflineUrl(mp4.url),
+        fallbackUrl: mp4.proxyUrl && mp4.proxyUrl !== mp4.url ? decorateOfflineUrl(mp4.proxyUrl) : "",
         posterUrl: safeImg(watchDetail?.poster || ""),
+        posterFallbackUrl: safeImg(watchDetail?.rawPoster || ""),
         subtitles: currentSubtitles
       })
       .then(() => {
@@ -320,6 +322,7 @@
       path,
       title: watchDetail?.title || requestedTitle || "Saved Title",
       poster: watchDetail?.poster || "",
+      rawPoster: watchDetail?.rawPoster || "",
       rating: watchDetail?.rating || "",
       year: watchDetail?.year || "",
       typeBadge: watchDetail?.typeBadge || (watchDetail?.isMovie ? "Movie" : "Series"),
@@ -864,6 +867,10 @@
           format: String(s.format || ""),
           mime,
           audioLanguage: s.audioLanguage || s.audio_language || "",
+          ...(s.proxyUrl || s.proxy_url ? { proxyUrl: String(s.proxyUrl || s.proxy_url) } : {}),
+          ...(s.directUrl ? { directUrl: String(s.directUrl) } : {}),
+          ...(s.directPlayback !== undefined ? { directPlayback: Boolean(s.directPlayback) } : {}),
+          ...(s.directCors !== undefined ? { directCors: Boolean(s.directCors) } : {}),
           ...(s.serverOk !== undefined ? { serverOk: s.serverOk } : {}),
           ...(s.serverLatencyMs != null ? { serverLatencyMs: Number(s.serverLatencyMs) } : {}),
           ...(s.serverBps != null ? { serverBps: Number(s.serverBps) } : {}),
@@ -1194,7 +1201,7 @@
     grid.innerHTML = usable
       .map(x => {
         const poster = safeImg(posterOf(x) || x?.rawPoster);
-        const rawFb = /^(?:https?:\/\/|\/\/)/i.test(String(x?.rawPoster || "")) ? String(x.rawPoster) : "";
+        const rawFb = /^(?:https?:\/\/|\/\/|\/api\/)/i.test(String(x?.rawPoster || "")) ? String(x.rawPoster) : "";
         const fbAttr = rawFb && rawFb !== poster ? ` data-fallback-src="${esc(rawFb)}"` : "";
         const lang = x._hindiCatalog || x.isHindiDubbed ? "Hindi Dubbed" : String(x.language || x.typeBadge || "").split("·")[0].trim();
         const rate = x.rating && Number(x.rating) > 0 ? `★ ${esc(x.rating)}` : "";

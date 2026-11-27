@@ -297,7 +297,7 @@
  }
  function card(item,idx=99){
   const image=posterOf(item),p=/^(?:https?:\/\/|\/\/|\/api\/)/i.test(image)?image:"";
-  const rawP=/^(?:https?:\/\/|\/\/)/i.test(String(item?.rawPoster||""))?String(item.rawPoster):"";
+  const rawP=/^(?:https?:\/\/|\/\/|\/api\/)/i.test(String(item?.rawPoster||""))?String(item.rawPoster):"";
   const fbAttr=rawP&&rawP!==p?' data-fallback-src="'+esc(rawP)+'"':"";
   const loadAttr=(idx<6?'loading="eager"':'loading="lazy"')+(idx<4?' fetchpriority="high"':'');
   const title=text(item.title)||"Untitled",path=pathOf(item),b=badge(item);

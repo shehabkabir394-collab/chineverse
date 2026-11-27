@@ -76,7 +76,7 @@
     const cards = offlineItems
       .map((item, idx) => {
         const poster = safeImg(item.posterDataUrl || item.rawPoster);
-        const rawFb = /^(?:https?:\/\/|\/\/)/i.test(String(item.rawPoster || "")) ? String(item.rawPoster) : "";
+        const rawFb = /^(?:https?:\/\/|\/\/|\/api\/)/i.test(String(item.rawPoster || "")) ? String(item.rawPoster) : "";
         const fbAttr = rawFb && rawFb !== poster ? ` data-fallback-src="${esc(rawFb)}"` : "";
         const loadAttr = (idx < 6 ? 'loading="eager"' : 'loading="lazy"') + (idx < 4 ? ' fetchpriority="high"' : "");
         const isComplete = item.status === "complete";
@@ -210,7 +210,7 @@
           ${visible
             .map((item, idx) => {
               const poster = safeImg(item.poster || item.rawPoster);
-              const rawFb = /^(?:https?:\/\/|\/\/)/i.test(String(item.rawPoster || "")) ? String(item.rawPoster) : "";
+              const rawFb = /^(?:https?:\/\/|\/\/|\/api\/)/i.test(String(item.rawPoster || "")) ? String(item.rawPoster) : "";
               const fbAttr = rawFb && rawFb !== poster ? ` data-fallback-src="${esc(rawFb)}"` : "";
               const loadAttr = (idx < 6 ? 'loading="eager"' : 'loading="lazy"') + (idx < 4 ? ' fetchpriority="high"' : "");
               const href = item.path

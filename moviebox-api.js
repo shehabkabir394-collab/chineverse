@@ -10,6 +10,7 @@ import {
   collectTitleSuggestions
 } from "./lib/catalog-rules.js";
 import { curlHttpRequest, isCurlPreferredForHost, markCurlPreferredForHost } from "./lib/http-transport.js";
+import { isDirectPublicImageCdn } from "./lib/media-delivery.js";
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
@@ -374,7 +375,7 @@ export function verifyMediaToken(token) {
   }
 }
 
-export function proxyImageUrl(rawUrl, filename = "poster.jpg") {
+export function proxyImageUrlForce(rawUrl, filename = "poster.jpg") {
   const clean = String(rawUrl || "").trim();
   if (!clean) return "";
   if (clean.startsWith("/api/moviebox-image/")) return clean;
@@ -383,6 +384,22 @@ export function proxyImageUrl(rawUrl, filename = "poster.jpg") {
     if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return "";
     const safeName = String(filename || "poster.jpg").replace(/[^a-zA-Z0-9._-]/g, "");
     return `/api/moviebox-image/${safeName || "poster.jpg"}?t=${encodeURIComponent(signMediaToken(parsed.href))}`;
+  } catch {
+    return "";
+  }
+}
+
+export function proxyImageUrl(rawUrl, filename = "poster.jpg") {
+  const clean = String(rawUrl || "").trim();
+  if (!clean) return "";
+  if (clean.startsWith("/api/moviebox-image/")) return clean;
+  try {
+    const parsed = new URL(clean);
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return "";
+    if (isDirectPublicImageCdn(parsed.href)) {
+      return parsed.href;
+    }
+    return proxyImageUrlForce(parsed.href, filename);
   } catch {
     return "";
   }
@@ -586,6 +603,9 @@ export function normalizeSubject(raw, extra = {}) {
     (Array.isArray(s.stills) && s.stills[0]?.url ? s.stills[0].url : "") ||
     "";
   const poster = proxyImageUrl(rawPoster, "poster.jpg");
+  const rawPosterFallback = poster && isDirectPublicImageCdn(poster)
+    ? proxyImageUrlForce(poster, "poster.jpg")
+    : String(extra.rawPoster || rawPoster || "").trim();
   const rawTrailer = String(s.trailer?.videoAddress?.url || "").trim();
   const trailerUrl = rawTrailer ? `/api/cinepulse-media?mb=${encodeURIComponent(signMediaToken(rawTrailer))}` : "";
   const hasResource = s.hasResource !== false;
@@ -645,6 +665,7 @@ export function normalizeSubject(raw, extra = {}) {
     _animeCatalog: isAnime,
     ...extra,
     poster,
+    rawPoster: rawPosterFallback,
     previewImage: poster,
     posterUrl: poster,
     cover: poster
@@ -1132,7 +1153,8 @@ export async function getHomeFeed() {
         const bannerRawImg = b.image?.url || b.subject?.cover?.url || "";
         const item = normalizeSubject(b.subject || b, {
           poster: proxyImageUrl(bannerRawImg, "poster.jpg"),
-          previewImage: proxyImageUrl(bannerRawImg, "poster.jpg")
+          previewImage: proxyImageUrl(bannerRawImg, "poster.jpg"),
+          ...(bannerRawImg ? { rawPoster: bannerRawImg } : {})
         });
         if (item && item.subjectId && /^\d+$/.test(item.subjectId) && item.hasResource !== false && !isNigerianContent(item)) {
           banners.push(item);

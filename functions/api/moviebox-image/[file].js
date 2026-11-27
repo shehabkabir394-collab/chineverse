@@ -32,7 +32,7 @@ export async function onRequest({ request, env }) {
       "User-Agent": MOVIEBOX_UA,
       Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8"
     };
-    if (!/(?:image\.tmdb\.org|media-amazon\.com|ytimg\.com|mzstatic\.com|tvmaze\.com|wikimedia\.org|wikipedia\.org)/i.test(targetUrl)) {
+    if (!/(?:image\.tmdb\.org|media-amazon\.com|r2\.dev|ibb\.co(?:\.com)?|postimg\.cc|ytimg\.com|mzstatic\.com|tvmaze\.com|wikimedia\.org|wikipedia\.org|imageflix\.cam|img\.movielinkapp\.com|pbcdnw\.aoneroom\.com)/i.test(targetUrl)) {
       imgHeaders.Referer = referer;
     }
     const upstream = await fetch(targetUrl, {
@@ -46,7 +46,7 @@ export async function onRequest({ request, env }) {
     }
     const headers = new Headers();
     headers.set("Content-Type", upstream.headers.get("content-type") || "image/jpeg");
-    headers.set("Cache-Control", "public, max-age=86400");
+    headers.set("Cache-Control", "public, max-age=604800, s-maxage=2592000, stale-while-revalidate=86400");
     headers.set("X-Content-Type-Options", "nosniff");
     return new Response(request.method === "HEAD" ? null : upstream.body, {
       status: upstream.status,

@@ -12,7 +12,7 @@
   const posterOf = item => imageValue(item?.poster || item?.posterUrl || item?.poster_url || item?.previewImage || item?.preview_image || item?.bannerImage || item?.banner_image || item?.cover || item?.coverUrl || item?.coverImage || item?.image || item?.imageUrl || item?.image_url || item?.thumbnail || item?.thumbnailUrl || item?.thumbnail_url || item?.pic || item?.img || item?.rawPoster);
   const rawPosterOf = item => {
     const u = imageValue(item?.rawPoster);
-    return /^(?:https?:\/\/|\/\/)/i.test(String(u || "")) ? String(u) : "";
+    return /^(?:https?:\/\/|\/\/|\/api\/)/i.test(String(u || "")) ? String(u) : "";
   };
   const safeImg = u => (/^(?:https?:\/\/|\/\/|\/api\/)/i.test(String(u || "")) ? String(u) : "");
   const posterImgAttrs = (poster, rawPoster, alt, eager = false, highPriority = false) => {

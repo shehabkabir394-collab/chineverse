@@ -101,15 +101,21 @@
     }
     const rows = raw.map(s => {
       const rawUrl = s.downloadUrl || s.download_url || s.url || s.link || s.fileUrl || s.file_url || s.proxyUrl || s.proxy_url;
+      const rawProxy = s.proxyUrl || s.proxy_url || "";
       const q = String(s.quality || s.resolution || s.resolutions || s.label || s.name || s.title || "").match(/\d{3,4}/)?.[0];
       const quality = q ? `${q}p` : "";
       const isTrailer = Boolean(s.isTrailer);
       const sizeBytes = Number(s.size) || 0;
       const language = String(s.audioLanguage || s.audio_language || s.dubLanguage || s.language || s.lang || "");
       const type = String(s.type || s.format || s.mimeType || "");
-      const url = decorateMediaUrl(rawUrl, filenameBase ? `${filenameBase}-${quality || "HD"}.mp4` : "");
+      const fnameHint = filenameBase ? `${filenameBase}-${quality || "HD"}.mp4` : "";
+      const url = decorateMediaUrl(rawUrl, fnameHint);
+      const proxyUrl = rawProxy ? decorateMediaUrl(rawProxy, fnameHint) : "";
       return {
         url,
+        proxyUrl: proxyUrl && proxyUrl !== url ? proxyUrl : "",
+        directPlayback: Boolean(s.directPlayback),
+        directCors: Boolean(s.directCors),
         quality,
         qualityNum: q ? Number(q) : 0,
         size: sizeBytes,
@@ -206,24 +212,44 @@
 
     const filename = buildFilename(ep, src);
     const finalUrl = decorateMediaUrl(src.url, filename);
+    const rawFallback = src.proxyUrl ? decorateMediaUrl(src.proxyUrl, filename) : "";
+    const fallbackUrl = rawFallback && rawFallback !== finalUrl ? rawFallback : "";
+    const isExternalDirect = /^https?:\/\//i.test(finalUrl);
     const metaLabel = [src.sizeText, src.language || detail?.language || "", src.isTrailer ? "Trailer Only" : "Full Video"].filter(Boolean).join(" · ");
 
     action.href = finalUrl;
     action.setAttribute("download", filename);
     action.dataset.dlUrl = finalUrl;
+    action.dataset.dlFallbackUrl = fallbackUrl;
     action.dataset.dlFilename = filename;
+    if (isExternalDirect) {
+      action.setAttribute("referrerpolicy", "no-referrer");
+      action.setAttribute("rel", "noopener noreferrer");
+    } else {
+      action.removeAttribute("referrerpolicy");
+      action.removeAttribute("rel");
+    }
     action.setAttribute("aria-disabled", "false");
     action.innerHTML = `<span>⚡ ONE CLICK DOWNLOAD · ${esc(src.quality)}<small>${esc(metaLabel || "Resumable Verified MP4 · Won't cancel halfway")}</small></span><b class="icon">↓</b>`;
 
     if (safeBtn) {
       safeBtn.hidden = false;
       safeBtn.dataset.dlUrl = finalUrl;
+      safeBtn.dataset.dlFallbackUrl = fallbackUrl;
       safeBtn.dataset.dlFilename = filename;
     }
     if (rawLink) {
       rawLink.hidden = false;
       rawLink.href = finalUrl;
       rawLink.dataset.dlUrl = finalUrl;
+      rawLink.dataset.dlFallbackUrl = fallbackUrl;
+      if (isExternalDirect) {
+        rawLink.setAttribute("referrerpolicy", "no-referrer");
+        rawLink.setAttribute("rel", "noopener noreferrer");
+      } else {
+        rawLink.removeAttribute("referrerpolicy");
+        rawLink.removeAttribute("rel");
+      }
       rawLink.removeAttribute("download");
     }
     syncOfflineUiState(src);
@@ -260,8 +286,11 @@
       .map(s => {
         const fname = buildFilename(ep, s);
         const href = decorateMediaUrl(s.url, fname);
+        const rawFb = s.proxyUrl ? decorateMediaUrl(s.proxyUrl, fname) : "";
+        const fb = rawFb && rawFb !== href ? rawFb : "";
+        const extAttrs = /^https?:\/\//i.test(href) ? ' referrerpolicy="no-referrer" rel="noopener noreferrer"' : "";
         const sub = [s.sizeText || "Full MP4", s.language || "", s.isTrailer ? "Trailer" : ""].filter(Boolean).join(" · ");
-        return `<a class="ms-download-link" href="${esc(href)}" download="${esc(fname)}" data-dl-url="${esc(href)}" data-dl-filename="${esc(fname)}"><span>Download ${esc(s.quality)}<small>${esc(sub)}</small></span><b>⬇</b></a>`;
+        return `<a class="ms-download-link" href="${esc(href)}" download="${esc(fname)}" data-dl-url="${esc(href)}" data-dl-fallback-url="${esc(fb)}" data-dl-filename="${esc(fname)}"${extAttrs}><span>Download ${esc(s.quality)}<small>${esc(sub)}</small></span><b>⬇</b></a>`;
       })
       .join("");
 
@@ -420,9 +449,12 @@
         ? AbortSignal.any([outerSignal, timeoutCtrl.signal])
         : timeoutCtrl.signal;
       try {
+        const isSameOrigin = String(url || "").startsWith("/");
         const res = await fetch(url, {
           headers: { Range: `bytes=${start}-${end}` },
           cache: "no-store",
+          credentials: isSameOrigin ? "same-origin" : "omit",
+          referrerPolicy: "no-referrer",
           signal
         });
         clearTimeout(timer);
@@ -479,85 +511,100 @@
     }
   }
 
-  async function downloadVerifiedFullFile(url, filename, onProgress, outerSignal) {
+  async function downloadVerifiedFullFile(url, filename, onProgress, outerSignal, fallbackUrl = "") {
     if (window.CineVerseOffline?.downloadToDevice) {
       return await window.CineVerseOffline.downloadToDevice({
         url,
+        fallbackUrl,
         filename,
         onProgress,
         signal: outerSignal
       });
     }
 
-    let writable = null;
-    try {
-      writable = await tryOpenDirectDiskWriter(filename);
-    } catch (err) {
-      if (err?.name === "AbortError") throw err;
-      writable = null;
-    }
+    const candidates = [url, fallbackUrl].filter((u, i, a) => u && a.indexOf(u) === i);
+    let lastDownloadErr = null;
 
-    let totalBytes = 0;
-    try {
-      const headRes = await fetch(url, { method: "HEAD", cache: "no-store", signal: outerSignal });
-      if (headRes.ok) totalBytes = Number(headRes.headers.get("content-length") || 0);
-    } catch (err) {
-      if (err?.name === "AbortError") {
-        await writable?.abort().catch(() => {});
-        throw err;
+    for (const activeUrl of candidates) {
+      let writable = null;
+      try {
+        writable = await tryOpenDirectDiskWriter(filename);
+      } catch (err) {
+        if (err?.name === "AbortError") throw err;
+        writable = null;
       }
-    }
 
-    const chunks = writable ? null : [];
-    let downloaded = 0;
-    let detectedTotal = totalBytes;
-    const startedAt = Date.now();
-    let emptyRetries = 0;
+      let totalBytes = 0;
+      try {
+        const isSameOrigin = String(activeUrl || "").startsWith("/");
+        const headRes = await fetch(activeUrl, {
+          method: "HEAD",
+          cache: "no-store",
+          credentials: isSameOrigin ? "same-origin" : "omit",
+          referrerPolicy: "no-referrer",
+          signal: outerSignal
+        });
+        if (headRes.ok) totalBytes = Number(headRes.headers.get("content-length") || 0);
+      } catch (err) {
+        if (err?.name === "AbortError") {
+          await writable?.abort().catch(() => {});
+          throw err;
+        }
+      }
 
-    try {
-      while (detectedTotal === 0 || downloaded < detectedTotal) {
-        if (outerSignal?.aborted) throw new DOMException("Download cancelled", "AbortError");
-        const nextEnd = detectedTotal > 0 ? Math.min(detectedTotal - 1, downloaded + CHUNK_SIZE - 1) : downloaded + CHUNK_SIZE - 1;
-        const part = await fetchChunkWithRetry(url, downloaded, nextEnd, outerSignal);
-        if (part.total > 0 && (detectedTotal === 0 || part.total > detectedTotal)) {
-          detectedTotal = part.total;
+      const chunks = writable ? null : [];
+      let downloaded = 0;
+      let detectedTotal = totalBytes;
+      const startedAt = Date.now();
+      let emptyRetries = 0;
+
+      try {
+        while (detectedTotal === 0 || downloaded < detectedTotal) {
+          if (outerSignal?.aborted) throw new DOMException("Download cancelled", "AbortError");
+          const nextEnd = detectedTotal > 0 ? Math.min(detectedTotal - 1, downloaded + CHUNK_SIZE - 1) : downloaded + CHUNK_SIZE - 1;
+          const part = await fetchChunkWithRetry(activeUrl, downloaded, nextEnd, outerSignal);
+          if (part.total > 0 && (detectedTotal === 0 || part.total > detectedTotal)) {
+            detectedTotal = part.total;
+          }
+          if (!part.buf.byteLength) {
+            emptyRetries++;
+            if (emptyRetries > 3) break;
+            await new Promise(r => setTimeout(r, 700));
+            continue;
+          }
+          emptyRetries = 0;
+          if (writable) {
+            await writable.write(new Uint8Array(part.buf));
+          } else {
+            chunks.push(part.buf);
+          }
+          downloaded += part.buf.byteLength;
+          const elapsedSec = Math.max(0.25, (Date.now() - startedAt) / 1000);
+          const speedBps = downloaded / elapsedSec;
+          onProgress?.(downloaded, detectedTotal, speedBps);
+          if (part.status === 200 && downloaded >= detectedTotal) break;
         }
-        if (!part.buf.byteLength) {
-          emptyRetries++;
-          if (emptyRetries > 3) break;
-          await new Promise(r => setTimeout(r, 700));
-          continue;
+
+        if (detectedTotal > 0 && downloaded < detectedTotal) {
+          throw new Error(`Incomplete download (${formatBytes(downloaded)} / ${formatBytes(detectedTotal)})`);
         }
-        emptyRetries = 0;
+
         if (writable) {
-          await writable.write(new Uint8Array(part.buf));
-        } else {
-          chunks.push(part.buf);
+          await writable.close();
+          return { size: downloaded, streamedToDisk: true };
         }
-        downloaded += part.buf.byteLength;
-        const elapsedSec = Math.max(0.25, (Date.now() - startedAt) / 1000);
-        const speedBps = downloaded / elapsedSec;
-        onProgress?.(downloaded, detectedTotal, speedBps);
-        if (part.status === 200 && downloaded >= detectedTotal) break;
-      }
 
-      if (detectedTotal > 0 && downloaded < detectedTotal) {
-        throw new Error(`Incomplete download (${formatBytes(downloaded)} / ${formatBytes(detectedTotal)})`);
+        const blob = new Blob(chunks, { type: "video/mp4" });
+        chunks.length = 0;
+        triggerBlobSave(blob, filename);
+        return { size: blob.size, streamedToDisk: false };
+      } catch (err) {
+        if (writable) await writable.abort().catch(() => {});
+        if (err?.name === "AbortError") throw err;
+        lastDownloadErr = err;
       }
-
-      if (writable) {
-        await writable.close();
-        return { size: downloaded, streamedToDisk: true };
-      }
-
-      const blob = new Blob(chunks, { type: "video/mp4" });
-      chunks.length = 0;
-      triggerBlobSave(blob, filename);
-      return { size: blob.size, streamedToDisk: false };
-    } catch (err) {
-      if (writable) await writable.abort().catch(() => {});
-      throw err;
     }
+    throw lastDownloadErr || new Error("Download failed");
   }
 
   function triggerBlobSave(blob, filename) {
@@ -571,7 +618,7 @@
     setTimeout(() => URL.revokeObjectURL(u), 180000);
   }
 
-  async function startVerifiedSingleDownload(url, filename) {
+  async function startVerifiedSingleDownload(url, filename, fallbackUrl = "") {
     if (busy || !url) return;
     busy = true;
     activeDownloadAbort = new AbortController();
@@ -602,7 +649,8 @@
           bar.style.width = `${pct}%`;
           label.textContent = `Downloaded ${formatBytes(done)} / ${formatBytes(total) || "?"} (${pct}%)${speedText}`;
         },
-        activeDownloadAbort.signal
+        activeDownloadAbort.signal,
+        fallbackUrl
       );
       bar.style.width = "100%";
       label.textContent = `Complete: ${formatBytes(res.size)} (${filename})`;
@@ -640,7 +688,8 @@
     if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button === 1) return;
     e.preventDefault();
     const filename = action?.dataset.dlFilename || action?.getAttribute("download") || "MovieStreamBD-Video.mp4";
-    startVerifiedSingleDownload(url, filename);
+    const fallbackUrl = action?.dataset.dlFallbackUrl || "";
+    startVerifiedSingleDownload(url, filename, fallbackUrl);
   });
 
   $("#downloadOfflineBtn")?.addEventListener("click", () => {
@@ -697,6 +746,8 @@
       if (!currentSelectedSource) return;
       const filename = buildFilename(ep, currentSelectedSource);
       const finalUrl = decorateMediaUrl(currentSelectedSource.url, filename);
+      const rawFallback = currentSelectedSource.proxyUrl ? decorateMediaUrl(currentSelectedSource.proxyUrl, filename) : "";
+      const fallbackUrl = rawFallback && rawFallback !== finalUrl ? rawFallback : "";
       if (status) status.textContent = "ইন-অ্যাপ অফলাইন সেভ শুরু হয়েছে (YouTube Style) — শেষ হলে নেট ছাড়াই প্লে হবে।";
       window.CineVerseOffline
         .startDownload(
@@ -709,7 +760,9 @@
             ep: coords.ep,
             quality: currentSelectedSource.quality || "HD",
             url: finalUrl,
+            fallbackUrl,
             posterUrl: detail?.poster || "",
+            posterFallbackUrl: detail?.rawPoster || "",
             subtitles: Array.isArray(ep?.subtitles) ? ep.subtitles : []
           },
           handleProgress
@@ -736,9 +789,10 @@
     const safeBtn = $("#downloadSafeChunked");
     const action = $("#downloadAction");
     const url = safeBtn?.dataset.dlUrl || action?.dataset.dlUrl || action?.getAttribute("href");
+    const fallbackUrl = safeBtn?.dataset.dlFallbackUrl || action?.dataset.dlFallbackUrl || "";
     const filename = safeBtn?.dataset.dlFilename || action?.dataset.dlFilename || action?.getAttribute("download") || "MovieStreamBD-Video.mp4";
     if (!url || url === "#") return;
-    startVerifiedSingleDownload(url, filename);
+    startVerifiedSingleDownload(url, filename, fallbackUrl);
   });
 
   $("#downloadDirectRaw")?.addEventListener("click", async e => {
@@ -781,8 +835,9 @@
     if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button === 1) return;
     e.preventDefault();
     const url = link.dataset.dlUrl || href;
+    const fallbackUrl = link.dataset.dlFallbackUrl || "";
     const filename = link.dataset.dlFilename || link.getAttribute("download") || "MovieStreamBD-Video.mp4";
-    startVerifiedSingleDownload(url, filename);
+    startVerifiedSingleDownload(url, filename, fallbackUrl);
   });
 
   async function fetchEpisodeBlobOnly(item, index) {
@@ -796,32 +851,45 @@
         if (window.CineVerseOffline?.resumableRangeDownload) {
           await window.CineVerseOffline.resumableRangeDownload({
             url: source.url,
+            fallbackUrl: source.proxyUrl || "",
             onBytes: async chunk => {
               chunks.push(chunk.slice().buffer);
             }
           });
         } else {
-          let downloaded = 0;
-          let detectedTotal = 0;
-          let emptyRetries = 0;
-          while (detectedTotal === 0 || downloaded < detectedTotal) {
-            const nextEnd = detectedTotal > 0 ? Math.min(detectedTotal - 1, downloaded + CHUNK_SIZE - 1) : downloaded + CHUNK_SIZE - 1;
-            const part = await fetchChunkWithRetry(source.url, downloaded, nextEnd, null);
-            if (part.total > 0 && (detectedTotal === 0 || part.total > detectedTotal)) detectedTotal = part.total;
-            if (!part.buf.byteLength) {
-              emptyRetries++;
-              if (emptyRetries > 3) break;
-              continue;
+          const urlsToTry = [source.url, source.proxyUrl].filter((u, i, a) => u && a.indexOf(u) === i);
+          let completedSource = false;
+          for (const tryUrl of urlsToTry) {
+            chunks.length = 0;
+            let downloaded = 0;
+            let detectedTotal = 0;
+            let emptyRetries = 0;
+            try {
+              while (detectedTotal === 0 || downloaded < detectedTotal) {
+                const nextEnd = detectedTotal > 0 ? Math.min(detectedTotal - 1, downloaded + CHUNK_SIZE - 1) : downloaded + CHUNK_SIZE - 1;
+                const part = await fetchChunkWithRetry(tryUrl, downloaded, nextEnd, null);
+                if (part.total > 0 && (detectedTotal === 0 || part.total > detectedTotal)) detectedTotal = part.total;
+                if (!part.buf.byteLength) {
+                  emptyRetries++;
+                  if (emptyRetries > 3) break;
+                  continue;
+                }
+                emptyRetries = 0;
+                chunks.push(part.buf);
+                downloaded += part.buf.byteLength;
+                if (part.status === 200 && downloaded >= detectedTotal) break;
+              }
+              if (detectedTotal > 0 && downloaded < detectedTotal) {
+                last = `Incomplete episode (${formatBytes(downloaded)} / ${formatBytes(detectedTotal)})`;
+                continue;
+              }
+              completedSource = true;
+              break;
+            } catch (err) {
+              last = err?.message || "Network error";
             }
-            emptyRetries = 0;
-            chunks.push(part.buf);
-            downloaded += part.buf.byteLength;
-            if (part.status === 200 && downloaded >= detectedTotal) break;
           }
-          if (detectedTotal > 0 && downloaded < detectedTotal) {
-            last = `Incomplete episode (${formatBytes(downloaded)} / ${formatBytes(detectedTotal)})`;
-            continue;
-          }
+          if (!completedSource) continue;
         }
         const blob = new Blob(chunks, { type: "video/mp4" });
         if (!blob.size) {

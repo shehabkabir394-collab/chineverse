@@ -123,7 +123,7 @@ async function proxyMediaStream(request, targetUrl, extraHeaders = {}, forceDown
     responseHeaders.set("cache-control", "private, no-store");
   } else {
     responseHeaders.set("vary", "Range");
-    responseHeaders.set("cache-control", "private, max-age=300, no-transform");
+    responseHeaders.set("cache-control", "public, max-age=1800, s-maxage=3600, stale-while-revalidate=600, no-transform");
   }
   responseHeaders.set("x-content-type-options", "nosniff");
 

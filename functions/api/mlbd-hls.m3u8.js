@@ -40,7 +40,7 @@ export async function onRequest({ request, env }) {
       headers: {
         "Access-Control-Allow-Origin": "*",
         "Content-Type": "application/vnd.apple.mpegurl; charset=utf-8",
-        "Cache-Control": "no-store",
+        "Cache-Control": "public, max-age=180, s-maxage=600, stale-while-revalidate=300",
         "X-Content-Type-Options": "nosniff"
       }
     });

@@ -140,21 +140,33 @@
     }
   }
 
+  function fetchInitForUrl(targetUrl, extra = {}) {
+    const isSameOrigin = String(targetUrl || "").startsWith("/");
+    return {
+      ...extra,
+      credentials: isSameOrigin ? "same-origin" : "omit",
+      referrerPolicy: "no-referrer"
+    };
+  }
+
   async function probeTotalLength(url, signal) {
     try {
-      const headRes = await fetch(url, { method: "HEAD", cache: "no-store", signal });
+      const headRes = await fetch(url, fetchInitForUrl(url, { method: "HEAD", cache: "no-store", signal }));
       const cl = Number(headRes.headers.get("content-length") || 0);
       if (headRes.ok && cl > 0) return cl;
     } catch (err) {
       if (err?.name === "AbortError") throw err;
     }
     try {
-      const rangeRes = await fetch(url, {
-        method: "GET",
-        headers: { Range: "bytes=0-0" },
-        cache: "no-store",
-        signal
-      });
+      const rangeRes = await fetch(
+        url,
+        fetchInitForUrl(url, {
+          method: "GET",
+          headers: { Range: "bytes=0-0" },
+          cache: "no-store",
+          signal
+        })
+      );
       const cr = parseTotalFromContentRange(rangeRes.headers.get("content-range"));
       try {
         await rangeRes.body?.cancel();
@@ -174,16 +186,26 @@
    */
   async function resumableRangeDownload({
     url,
+    fallbackUrl = "",
     startOffset = 0,
     knownTotal = 0,
     signal,
     onBytes,
-    onProgress
+    onProgress,
+    onUrlSwitch = null
   }) {
+    let activeUrl = url;
+    let switchedToFallback = false;
     let offset = Math.max(0, Number(startOffset) || 0);
     let totalBytes = Math.max(0, Number(knownTotal) || 0);
     if (!totalBytes) {
-      totalBytes = await probeTotalLength(url, signal);
+      totalBytes = await probeTotalLength(activeUrl, signal);
+      if (!totalBytes && fallbackUrl && fallbackUrl !== activeUrl) {
+        const fbTotal = await probeTotalLength(fallbackUrl, signal);
+        if (fbTotal > 0) {
+          totalBytes = fbTotal;
+        }
+      }
     }
 
     const startedAt = Date.now();
@@ -210,11 +232,14 @@
       let serverIgnoredRange = false;
 
       try {
-        res = await fetch(url, {
-          headers: { Range: `bytes=${offset}-${reqEnd}` },
-          cache: "no-store",
-          signal: reqSignal
-        });
+        res = await fetch(
+          activeUrl,
+          fetchInitForUrl(activeUrl, {
+            headers: { Range: `bytes=${offset}-${reqEnd}` },
+            cache: "no-store",
+            signal: reqSignal
+          })
+        );
         clearTimeout(connectTimer);
 
         if (res.status === 416) {
@@ -224,18 +249,18 @@
             totalBytes = cr.total;
             break;
           }
-          throw new Error("HTTP 416 Range not satisfiable");
+          throw Object.assign(new Error("HTTP 416 Range not satisfiable"), { httpStatus: 416 });
         }
 
         if (res.status === 429 || res.status >= 500) {
           const retryAfter = Number(res.headers.get("retry-after") || 0);
           try { await res.body?.cancel(); } catch {}
-          throw Object.assign(new Error(`Server busy (HTTP ${res.status})`), { retryAfterMs: retryAfter * 1000 });
+          throw Object.assign(new Error(`Server busy (HTTP ${res.status})`), { retryAfterMs: retryAfter * 1000, httpStatus: res.status });
         }
 
         if (!res.ok && res.status !== 206) {
           try { await res.body?.cancel(); } catch {}
-          throw new Error(`HTTP ${res.status}`);
+          throw Object.assign(new Error(`HTTP ${res.status}`), { httpStatus: res.status });
         }
 
         const ct = (res.headers.get("content-type") || "").toLowerCase();
@@ -326,6 +351,21 @@
           throw new DOMException("Download aborted", "AbortError");
         }
         consecutiveErrors++;
+        const st = Number(err?.httpStatus || 0);
+        const immediateSwitch =
+          err instanceof TypeError || st === 401 || st === 403 || st === 404 || st === 416;
+        if (
+          fallbackUrl &&
+          !switchedToFallback &&
+          fallbackUrl !== activeUrl &&
+          (immediateSwitch || consecutiveErrors >= 2)
+        ) {
+          activeUrl = fallbackUrl;
+          switchedToFallback = true;
+          consecutiveErrors = 0;
+          onUrlSwitch?.(activeUrl);
+          continue;
+        }
         if (consecutiveErrors > MAX_RETRIES) {
           throw err;
         }
@@ -391,7 +431,8 @@
     const a = document.createElement("a");
     a.href = url;
     if (filename) a.download = filename;
-    a.rel = "noopener";
+    a.referrerPolicy = "no-referrer";
+    a.rel = "noopener noreferrer";
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -408,7 +449,7 @@
     return true;
   }
 
-  async function downloadToDevice({ url, filename, onProgress, signal }) {
+  async function downloadToDevice({ url, fallbackUrl = "", filename, onProgress, signal }) {
     let directWriter = await tryOpenDirectDiskWriter(filename);
     let opfsRoot = null;
     let opfsName = "";
@@ -460,6 +501,7 @@
     try {
       const result = await resumableRangeDownload({
         url,
+        fallbackUrl,
         signal,
         onProgress,
         onBytes: async chunk => {
@@ -500,22 +542,27 @@
     }
   }
 
-  async function fetchPosterDataUrl(posterUrl) {
-    if (!posterUrl) return "";
-    try {
-      const res = await fetch(posterUrl, { cache: "force-cache", signal: AbortSignal.timeout(8000) });
-      if (!res.ok) return "";
-      const blob = await res.blob();
-      if (!blob || blob.size > 512 * 1024) return "";
-      return await new Promise(resolve => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result || ""));
-        reader.onerror = () => resolve("");
-        reader.readAsDataURL(blob);
-      });
-    } catch {
-      return "";
+  async function fetchPosterDataUrl(posterUrl, posterFallbackUrl = "") {
+    const candidates = [posterUrl, posterFallbackUrl].filter((u, i, a) => u && a.indexOf(u) === i);
+    for (const candidate of candidates) {
+      try {
+        const res = await fetch(
+          candidate,
+          fetchInitForUrl(candidate, { cache: "force-cache", signal: AbortSignal.timeout(8000) })
+        );
+        if (!res.ok) continue;
+        const blob = await res.blob();
+        if (!blob || blob.size > 512 * 1024) continue;
+        const dataUrl = await new Promise(resolve => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result || ""));
+          reader.onerror = () => resolve("");
+          reader.readAsDataURL(blob);
+        });
+        if (dataUrl) return dataUrl;
+      } catch {}
     }
+    return "";
   }
 
   async function fetchOfflineSubtitles(subtitles = []) {
@@ -649,12 +696,14 @@
         ep: Number(opts.ep ?? existing?.ep ?? 1) || 1,
         quality: String(opts.quality || existing?.quality || "HD"),
         sourceUrl: String(opts.url || existing?.sourceUrl || ""),
+        fallbackUrl: String(opts.fallbackUrl || existing?.fallbackUrl || ""),
         mimeType: "video/mp4",
         totalBytes: Number(existing?.totalBytes || 0),
         downloadedBytes: existingBytes,
         chunkCount: existingCount,
         chunkSize: CHUNK_SIZE,
         posterDataUrl: existing?.posterDataUrl || "",
+        posterFallbackUrl: String(opts.posterFallbackUrl || existing?.posterFallbackUrl || ""),
         subtitles: Array.isArray(existing?.subtitles) ? existing.subtitles : [],
         status: "downloading",
         error: "",
@@ -666,7 +715,9 @@
 
       // Cache poster & VTT subtitles in parallel (non-blocking if offline-first)
       Promise.all([
-        !record.posterDataUrl && opts.posterUrl ? fetchPosterDataUrl(opts.posterUrl) : Promise.resolve(""),
+        !record.posterDataUrl && (opts.posterUrl || record.posterFallbackUrl)
+          ? fetchPosterDataUrl(opts.posterUrl || record.posterFallbackUrl, record.posterFallbackUrl)
+          : Promise.resolve(""),
         (!record.subtitles || !record.subtitles.length) && Array.isArray(opts.subtitles)
           ? fetchOfflineSubtitles(opts.subtitles)
           : Promise.resolve([])
@@ -714,9 +765,13 @@
       try {
         const res = await resumableRangeDownload({
           url: record.sourceUrl,
+          fallbackUrl: record.fallbackUrl,
           startOffset: existingBytes,
           knownTotal: record.totalBytes,
           signal: abortController.signal,
+          onUrlSwitch: nextUrl => {
+            record.sourceUrl = nextUrl;
+          },
           onBytes: async (chunk, detectedTotal) => {
             if (detectedTotal > 0 && detectedTotal !== record.totalBytes) {
               record.totalBytes = detectedTotal;

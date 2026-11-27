@@ -5,7 +5,7 @@
   const safeImg = u => (/^(?:https?:\/\/|\/api\/|favicon\.svg)/i.test(String(u || "")) ? String(u) : "");
   const rawPosterOf = item => {
     const u = String(item?.rawPoster || "");
-    return /^(?:https?:\/\/|\/\/)/i.test(u) ? u : "";
+    return /^(?:https?:\/\/|\/\/|\/api\/)/i.test(u) ? u : "";
   };
   const RECENT_KEY = "cv_recent_searches_v1";
   const FAMILY_SAFE_KEY = "cv_family_safe_v1";

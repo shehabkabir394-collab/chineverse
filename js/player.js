@@ -132,7 +132,8 @@
     const sourceServerKey = rawUrl => {
       try {
         const u = new URL(String(rawUrl || ""), location.origin);
-        return `${u.pathname}:${u.searchParams.get("res") || ""}:${String(u.searchParams.get("t") || u.searchParams.get("mb") || "").slice(0, 12)}`;
+        const hostPart = u.origin !== location.origin ? u.hostname : "";
+        return `${hostPart}${u.pathname}:${u.searchParams.get("res") || ""}:${String(u.searchParams.get("t") || u.searchParams.get("mb") || "").slice(0, 12)}`;
       } catch {
         return String(rawUrl || "").slice(0, 48);
       }
@@ -761,9 +762,29 @@
       const resumeAt = Math.max(video.currentTime || 0, lastKnownTime || 0, lastProgressTime || 0);
       const code = video.error?.code || 0;
       const message = video.error?.message || "";
+      if (failed.proxyUrl && failed.proxyUrl !== failed.url && !failedSources.has(failed.proxyUrl)) {
+        failedSources.add(failed.url);
+        writeClientServerScore(sourceServerKey(failed.url), 9999, false);
+        console.warn("Direct playback source failed; falling back immediately to proxy server", { quality: failed.quality, code, resumeAt });
+        setSource({
+          ...failed,
+          url: failed.proxyUrl,
+          proxyUrl: "",
+          directPlayback: false,
+          directCors: false,
+          provider: `${failed.provider || "Direct"} (Proxy)`
+        }, true, true, resumeAt);
+        return;
+      }
       let probeInfo = null;
       try {
-        const pr = await fetch(failed.url, { headers: { Range: "bytes=0-1023" }, credentials: "same-origin", cache: "no-store" });
+        const sameOrigin = String(failed.url || "").startsWith("/") || new URL(failed.url, location.origin).origin === location.origin;
+        const pr = await fetch(failed.url, {
+          headers: { Range: "bytes=0-1023" },
+          credentials: sameOrigin ? "same-origin" : "omit",
+          referrerPolicy: "no-referrer",
+          cache: "no-store"
+        });
         if (token !== sourceToken) return;
         probeInfo = { status: pr.status, contentType: pr.headers.get("content-type") || "", redirected: pr.redirected };
         if ((pr.status >= 500 || pr.status === 429) && !retriedUrls.has(failed.url)) {
@@ -969,7 +990,16 @@
           const isHls = isHlsSource(src);
           const t0 = performance.now();
           const hdrs = isHls ? {} : { Range: "bytes=0-16383" };
-          return fetch(src.url, { method: "GET", headers: hdrs, credentials: "same-origin", signal: ac.signal })
+          const isSameOrigin = String(src.url || "").startsWith("/") || (() => {
+            try { return new URL(src.url, location.origin).origin === location.origin; } catch { return false; }
+          })();
+          return fetch(src.url, {
+            method: "GET",
+            headers: hdrs,
+            credentials: isSameOrigin ? "same-origin" : "omit",
+            referrerPolicy: "no-referrer",
+            signal: ac.signal
+          })
             .then(async r => {
               const ms = Math.max(1, Math.round(performance.now() - t0));
               try { await r.body?.cancel(); } catch {}
@@ -1158,7 +1188,25 @@
       }
 
       video.preload = playbackMode === "data-saver" ? "metadata" : "auto";
-      video.src = isHls ? src.url : applySaverUrlFlag(src.url);
+      const nextMediaUrl = isHls ? src.url : applySaverUrlFlag(src.url);
+      const isCrossOriginMedia = (() => {
+        try {
+          return /^https?:\/\//i.test(nextMediaUrl) && new URL(nextMediaUrl, location.origin).origin !== location.origin;
+        } catch {
+          return false;
+        }
+      })();
+      if (isCrossOriginMedia && src.directCors === true) {
+        video.crossOrigin = "anonymous";
+      } else {
+        video.removeAttribute("crossorigin");
+      }
+      if (isCrossOriginMedia) {
+        video.referrerPolicy = "no-referrer";
+      } else {
+        video.removeAttribute("referrerpolicy");
+      }
+      video.src = nextMediaUrl;
       video.addEventListener("loadedmetadata", ready, { once: true });
       if (autoplay) {
         safePlayWithFallback();

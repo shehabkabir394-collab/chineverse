@@ -26,6 +26,10 @@ import {
   isCurlPreferredForHost,
   markCurlPreferredForHost
 } from "./lib/http-transport.js";
+import {
+  applyDirectSourceMetadata,
+  isDirectPublicImageCdn
+} from "./lib/media-delivery.js";
 
 export const MLBD_MIRRORS = [
   { id: "primary", name: "Primary", baseUrl: "https://rnztvk.movielinkbd.de", priority: 1 },
@@ -233,6 +237,9 @@ function normalizeArchiveItem(rec) {
   const proxiedPoster = absRawPoster
     ? mlbdProxyImageUrl(absRawPoster)
     : (String(rec.poster || "").startsWith("/api/") ? String(rec.poster) : "");
+  const fallbackPoster = absRawPoster
+    ? mlbdPosterFallbackUrl(absRawPoster, proxiedPoster)
+    : "";
   const yr = extractPlausibleYear(rawTitle, rec.year || "", normPath);
   const typeBadgeRaw = String(rec.typeBadge || rec.type || "").trim();
   const isAnime = Boolean(rec.isAnime) || /^\/anime\//i.test(normPath) || /\banime\b/i.test(`${typeBadgeRaw} ${rawTitle} ${rec.genre || ""}`);
@@ -257,7 +264,7 @@ function normalizeArchiveItem(rec) {
     title: rawTitle,
     searchTitle,
     poster: proxiedPoster,
-    rawPoster: absRawPoster,
+    rawPoster: fallbackPoster || absRawPoster || "",
     mbSubjectId: String(rec.mbSubjectId || ""),
     mbDetailPath: String(rec.mbDetailPath || ""),
     quality: String(rec.quality || "HD"),
@@ -692,12 +699,31 @@ export function decDataDl(b, s, r) {
   }
 }
 
-export function mlbdProxyImageUrl(rawUrl) {
+export function mlbdProxyImageUrlForce(rawUrl) {
   const clean = String(rawUrl || "").trim();
   if (!clean) return "";
   if (clean.startsWith("/api/")) return clean;
   if (!/^https?:\/\//i.test(clean)) return "";
   return `/api/moviebox-image/mlbd-poster.jpg?t=${encodeURIComponent(signMediaToken(clean))}`;
+}
+
+export function mlbdProxyImageUrl(rawUrl) {
+  const clean = String(rawUrl || "").trim();
+  if (!clean) return "";
+  if (clean.startsWith("/api/")) return clean;
+  if (!/^https?:\/\//i.test(clean)) return "";
+  if (isDirectPublicImageCdn(clean)) return clean;
+  return mlbdProxyImageUrlForce(clean);
+}
+
+export function mlbdPosterFallbackUrl(rawUrl, primaryUrl = "") {
+  const clean = String(rawUrl || "").trim();
+  if (!clean || !/^https?:\/\//i.test(clean)) return "";
+  const primary = String(primaryUrl || "").trim();
+  if (primary && /^https?:\/\//i.test(primary)) {
+    return mlbdProxyImageUrlForce(clean);
+  }
+  return clean;
 }
 
 export function mlbdProxyHlsUrl(rawUrl) {
@@ -1434,13 +1460,15 @@ export function extractCardsFromHtml(html, baseOrigin = activeResolvedOrigin, op
     const isAnime = /^\/anime\//i.test(itemPath) || /anime/i.test(`${typeText} ${title}`);
     const ratingMatch = chunk.match(/★\s*(\d+(?:\.\d+)?)/);
 
+    const cardPoster = absPoster ? mlbdProxyImageUrl(absPoster) : "";
+    const cardFallbackPoster = absPoster ? mlbdPosterFallbackUrl(absPoster, cardPoster) : "";
     const builtItem = {
       id: itemPath.split("/").pop() || itemPath,
       path: itemPath,
       title: stripSiteBrandFromLabel(title) || title,
       searchTitle: cleanMlbdSearchTitle(title),
-      poster: absPoster ? mlbdProxyImageUrl(absPoster) : "",
-      rawPoster: absPoster,
+      poster: cardPoster,
+      rawPoster: cardFallbackPoster || absPoster,
       quality,
       language: language || (title.toLowerCase().includes("bangla") ? "Bangla" : ""),
       type: isAnime ? "anime" : isSeries ? "series" : "movie",
@@ -1775,14 +1803,21 @@ function buildSourcesForPd2Entry(entry, pd2Fallback = {}, filenameBase = "") {
     const fileLabel = [safeBase, entry?.label && entry.label !== "Movie" ? entry.label : "", "1080p"]
       .filter(Boolean)
       .join(" - ") + ".mp4";
-    sources.push({
-      url: mlbdProxyStreamUrl(mp4Raw, fileLabel),
-      quality: "1080p",
-      format: "MP4",
-      mime: "video/mp4",
-      provider: "MovieStreamBD Direct MP4",
-      audioLanguage: pd2Fallback?.langs || ""
-    });
+    const proxyUrl = mlbdProxyStreamUrl(mp4Raw, fileLabel);
+    sources.push(
+      applyDirectSourceMetadata(
+        {
+          url: proxyUrl,
+          proxyUrl,
+          quality: "1080p",
+          format: "MP4",
+          mime: "video/mp4",
+          provider: "MovieStreamBD Direct MP4",
+          audioLanguage: pd2Fallback?.langs || ""
+        },
+        mp4Raw
+      )
+    );
   }
 
   const masterRaw = entry?.master || pd2Fallback?.master || "";
@@ -1802,13 +1837,30 @@ function buildSourcesForPd2Entry(entry, pd2Fallback = {}, filenameBase = "") {
       const raw = s?.url || s?.src || "";
       if (!validateExternalHttpUrl(raw)) continue;
       const isHls = /\.m3u8|\/m\/|\/hls\//i.test(raw) || /hls|mpegurl/i.test(String(s.type || s.format || ""));
-      sources.push({
-        url: isHls ? mlbdProxyHlsUrl(raw) : mlbdProxyStreamUrl(raw, `${safeBase}.mp4`),
-        quality: String(s.quality || s.label || "720p"),
-        format: isHls ? "HLS" : "MP4",
-        mime: isHls ? "application/vnd.apple.mpegurl" : "video/mp4",
-        provider: "MovieStreamBD Player"
-      });
+      if (isHls) {
+        sources.push({
+          url: mlbdProxyHlsUrl(raw),
+          quality: String(s.quality || s.label || "720p"),
+          format: "HLS",
+          mime: "application/vnd.apple.mpegurl",
+          provider: "MovieStreamBD Player"
+        });
+      } else {
+        const proxyUrl = mlbdProxyStreamUrl(raw, `${safeBase}.mp4`);
+        sources.push(
+          applyDirectSourceMetadata(
+            {
+              url: proxyUrl,
+              proxyUrl,
+              quality: String(s.quality || s.label || "720p"),
+              format: "MP4",
+              mime: "video/mp4",
+              provider: "MovieStreamBD Player"
+            },
+            raw
+          )
+        );
+      }
     }
   }
 
@@ -1872,13 +1924,17 @@ function buildMlbdComItem({ title, rawPoster = "", rating = "", year = "", typeT
   const resolvedRawPoster = absPoster || regHit?.rawPoster || archHit?.rawPoster || "";
   const isHindi = /hindi|dual\s*audio/i.test(`${cleanTitle} ${languageHint}`);
   const isBangla = /bangla|bengali/i.test(`${cleanTitle} ${languageHint}`);
+  const itemPoster = absPoster ? mlbdProxyImageUrl(absPoster) : (regHit?.poster || archHit?.poster || "");
+  const itemFallbackPoster = absPoster
+    ? mlbdPosterFallbackUrl(absPoster, itemPoster)
+    : (regHit?.rawPoster || archHit?.rawPoster || resolvedRawPoster);
   const item = {
     id: itemPath.split("/").pop() || itemPath,
     path: itemPath,
     title: cleanTitle,
     searchTitle,
-    poster: absPoster ? mlbdProxyImageUrl(absPoster) : (regHit?.poster || archHit?.poster || ""),
-    rawPoster: resolvedRawPoster,
+    poster: itemPoster,
+    rawPoster: itemFallbackPoster || resolvedRawPoster,
     mbSubjectId: regHit?.mbSubjectId || archHit?.mbSubjectId || "",
     mbDetailPath: regHit?.mbDetailPath || archHit?.mbDetailPath || "",
     quality: /full\s*hd|1080p/i.test(cleanTitle) ? "1080p" : "HD",
@@ -3750,6 +3806,8 @@ export async function getMlbdDetails(rawPath, hintTitle = "", extraOpts = {}) {
           label: `Direct MP4 (${s.quality})`,
           quality: s.quality,
           url: s.url,
+          ...(s.proxyUrl ? { proxyUrl: s.proxyUrl } : {}),
+          ...(s.directPlayback ? { directPlayback: true } : {}),
           type: "mp4",
           provider: s.provider
         }));
@@ -3766,14 +3824,22 @@ export async function getMlbdDetails(rawPath, hintTitle = "", extraOpts = {}) {
         audioTracks: mapPd2AudioTracks(ep?.audio).length ? mapPd2AudioTracks(ep?.audio) : globalAudio,
         downloadButtons: [...mp4SourceButtons, ...epDlBtns],
         masterHls: ep?.master ? mlbdProxyHlsUrl(ep.master) : "",
-        directMp4: ep?.mp4 ? mlbdProxyStreamUrl(ep.mp4, `${finalTitle} - ${ep?.label || `Ep ${epNum}`}.mp4`) : ""
+        directMp4: ep?.mp4 ? (sources.find(s => s.format === "MP4")?.url || mlbdProxyStreamUrl(ep.mp4, `${finalTitle} - ${ep?.label || `Ep ${epNum}`}.mp4`)) : ""
       };
     });
   } else {
     const fallbackSources = buildSourcesForPd2Entry({}, baseData, finalTitle);
     const mp4Buttons = fallbackSources
       .filter(s => s.format === "MP4")
-      .map(s => ({ label: `Direct MP4 (${s.quality})`, quality: s.quality, url: s.url, type: "mp4", provider: s.provider }));
+      .map(s => ({
+        label: `Direct MP4 (${s.quality})`,
+        quality: s.quality,
+        url: s.url,
+        ...(s.proxyUrl ? { proxyUrl: s.proxyUrl } : {}),
+        ...(s.directPlayback ? { directPlayback: true } : {}),
+        type: "mp4",
+        provider: s.provider
+      }));
     const parsedRange = parseEpisodeRangeFromTitle(hintTitle || finalTitle);
     const fallbackSe = /^\/(?:series|drama|anime)\//i.test(cleanPath) ? (parsedRange?.season || 1) : 0;
     const fallbackEp = parsedRange?.startEp || 1;
@@ -3807,6 +3873,8 @@ export async function getMlbdDetails(rawPath, hintTitle = "", extraOpts = {}) {
       : "");
   const hasStreamSources = episodes.some(e => Array.isArray(e.sources) && e.sources.length > 0);
 
+  const detailRawPoster = String(baseData.poster || rawPoster || "");
+  const detailPoster = baseData.poster ? mlbdProxyImageUrl(baseData.poster) : poster;
   const detail = {
     source: "movielinkbd",
     id: String(baseData.id || cleanPath.split("/").pop() || cleanPath),
@@ -3815,8 +3883,8 @@ export async function getMlbdDetails(rawPath, hintTitle = "", extraOpts = {}) {
     detailPath: cleanPath,
     title: finalTitle,
     year,
-    poster: baseData.poster ? mlbdProxyImageUrl(baseData.poster) : poster,
-    rawPoster: String(baseData.poster || rawPoster || ""),
+    poster: detailPoster,
+    rawPoster: mlbdPosterFallbackUrl(detailRawPoster, detailPoster) || detailRawPoster,
     description,
     storyline: description,
     language: inferredLang,
