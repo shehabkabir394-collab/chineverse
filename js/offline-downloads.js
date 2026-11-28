@@ -3,10 +3,12 @@
 
   const DB_NAME = "moviestreambd_offline_v1";
   const DB_VERSION = 1;
-  const CHUNK_SIZE = 4 * 1024 * 1024; // 4 MiB verified chunks: fast, zero Cloud Run 32 MiB cutoffs
+  const CHUNK_SIZE = 2 * 1024 * 1024; // 2 MiB balanced chunks: fast resume without starving browsing
   const READ_IDLE_TIMEOUT_MS = 28000;
   const MAX_RETRIES = 15;
-  const MAX_CONCURRENT_LOCAL = 2;
+  const MAX_CONCURRENT_LOCAL = 1;
+  const INTER_CHUNK_YIELD_MS = 160;
+  const CLIENT_BUSY_YIELD_MS = 450;
   const CHANNEL_NAME = "cv-downloads-v1";
 
   const activeJobs = new Map(); // id -> { abortController, promise }
@@ -19,6 +21,37 @@
   let swInitPromise = null;
   let swChannel = null;
   let dbPromise = null;
+  let localBusyUntil = 0;
+  let lastYieldPostAt = 0;
+
+  function sleepWithAbort(ms, signal) {
+    const wait = Math.max(0, Number(ms) || 0);
+    if (!wait) return Promise.resolve();
+    if (signal?.aborted) return Promise.reject(new DOMException("Download aborted", "AbortError"));
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        if (signal) signal.removeEventListener("abort", onAbort);
+        resolve();
+      }, wait);
+      const onAbort = () => {
+        clearTimeout(timer);
+        reject(new DOMException("Download aborted", "AbortError"));
+      };
+      if (signal) signal.addEventListener("abort", onAbort, { once: true });
+    });
+  }
+
+  function yieldForBrowsing(ms = 1800) {
+    const until = Date.now() + Math.max(400, Math.min(5000, Number(ms) || 1800));
+    if (until > localBusyUntil) localBusyUntil = until;
+    const now = Date.now();
+    if (now - lastYieldPostAt >= 500) {
+      lastYieldPostAt = now;
+      try {
+        navigator.serviceWorker?.controller?.postMessage?.({ type: "SW_DL_CLIENT_YIELD", until });
+      } catch {}
+    }
+  }
 
   function openDb() {
     if (dbPromise) return dbPromise;
@@ -188,6 +221,7 @@
   function fetchInitForUrl(targetUrl, extra = {}) {
     const isSameOrigin = String(targetUrl || "").startsWith("/");
     return {
+      priority: extra.priority ?? "low",
       ...extra,
       credentials: isSameOrigin ? "same-origin" : "omit",
       referrerPolicy: "no-referrer"
@@ -260,6 +294,10 @@
     while (totalBytes === 0 || offset < totalBytes) {
       if (signal?.aborted) throw new DOMException("Download aborted", "AbortError");
       await waitOnlineIfNeeded(signal);
+      if (offset > initialOffset) {
+        const pauseMs = Date.now() < localBusyUntil ? CLIENT_BUSY_YIELD_MS : INTER_CHUNK_YIELD_MS;
+        await sleepWithAbort(pauseMs, signal);
+      }
 
       const reqEnd = totalBytes > 0 ? Math.min(totalBytes - 1, offset + CHUNK_SIZE - 1) : offset + CHUNK_SIZE - 1;
       const connectCtrl = new AbortController();
@@ -1114,7 +1152,7 @@
             if (total > 0) record.totalBytes = total;
             record.downloadedBytes = done;
             const nowMs = Date.now();
-            if (nowMs - lastUiTick > 220) {
+            if (nowMs - lastUiTick >= 800) {
               lastUiTick = nowMs;
               onProgress?.({ id, downloadedBytes: done, totalBytes: total, speedBps, status: "downloading" });
               emitChange({ id, status: "downloading", downloadedBytes: done, totalBytes: total, speedBps, mode: "page" });
@@ -1681,9 +1719,21 @@
   cleanupStaleOpfsFiles();
   initServiceWorker();
 
+  try {
+    document.addEventListener("click", e => {
+      if (e.target?.closest?.("a[href]") && (activeJobs.size > 0 || swActiveIds.size > 0)) {
+        yieldForBrowsing(2000);
+      }
+    }, { capture: true, passive: true });
+    window.addEventListener("pagehide", () => {
+      if (activeJobs.size > 0 || swActiveIds.size > 0) yieldForBrowsing(2200);
+    });
+  } catch {}
+
   window.CineVerseOffline = {
     buildId,
     formatBytes,
+    yieldForBrowsing,
     resumableRangeDownload,
     downloadToDevice,
     startDownload,

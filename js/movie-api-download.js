@@ -12,7 +12,7 @@
   const safeName = s =>
     String(s || "MovieStreamBD").replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 100) || "MovieStreamBD";
 
-  const CHUNK_SIZE = 4 * 1024 * 1024; // 4 MiB verified chunks: stays safely below proxy/Cloud Run body limits
+  const CHUNK_SIZE = 2 * 1024 * 1024; // 2 MiB balanced chunks: stays responsive across browsing
   const CHUNK_TIMEOUT_MS = 35000;
   const CHUNK_MAX_RETRIES = 12;
 
@@ -127,6 +127,7 @@
     });
 
     const filtered = rows.filter(s => {
+      if (s.isTrailer || /\btrailer\b/i.test(s.quality || "")) return false;
       try {
         const u = new URL(s.url, location.origin);
         const allowed = u.protocol === "https:" || (u.origin === location.origin && (u.pathname === "/api/cinepulse-media" || u.pathname === "/api/mlbd-stream.mp4"));
@@ -137,7 +138,7 @@
     });
 
     const uniq = [...new Map(filtered.map(s => [sourceDedupeKey(s), s])).values()];
-    return uniq.sort((a, b) => Number(a.isTrailer) - Number(b.isTrailer) || b.qualityNum - a.qualityNum);
+    return uniq.sort((a, b) => b.qualityNum - a.qualityNum);
   }
 
   function currentOfflineId() {
@@ -218,7 +219,7 @@
     const rawFallback = src.proxyUrl ? decorateMediaUrl(src.proxyUrl, filename) : "";
     const fallbackUrl = rawFallback && rawFallback !== finalUrl ? rawFallback : "";
     const isExternalDirect = /^https?:\/\//i.test(finalUrl);
-    const metaLabel = [src.sizeText, src.language || detail?.language || "", src.isTrailer ? "Trailer Only" : "Full Video"].filter(Boolean).join(" · ");
+    const metaLabel = [src.sizeText, src.language || detail?.language || "", "Full Video"].filter(Boolean).join(" · ");
 
     action.href = finalUrl;
     action.setAttribute("download", filename);
@@ -273,7 +274,7 @@
     quality.innerHTML = downloadable.length
       ? downloadable
           .map((s, i) => {
-            const parts = [s.quality, s.sizeText, s.language, s.isTrailer ? "Trailer" : ""].filter(Boolean);
+            const parts = [s.quality, s.sizeText, s.language].filter(Boolean);
             return `<option value="${i}">${esc(parts.join(" · "))}</option>`;
           })
           .join("")
@@ -297,7 +298,7 @@
         const rawFb = s.proxyUrl ? decorateMediaUrl(s.proxyUrl, fname) : "";
         const fb = rawFb && rawFb !== href ? rawFb : "";
         const extAttrs = /^https?:\/\//i.test(href) ? ' referrerpolicy="no-referrer" rel="noopener noreferrer"' : "";
-        const sub = [s.sizeText || "Full MP4", s.language || "", s.isTrailer ? "Trailer" : ""].filter(Boolean).join(" · ");
+        const sub = [s.sizeText || "Full MP4", s.language || ""].filter(Boolean).join(" · ");
         return `<a class="ms-download-link" href="${esc(href)}" download="${esc(fname)}" data-dl-url="${esc(href)}" data-dl-fallback-url="${esc(fb)}" data-dl-filename="${esc(fname)}" data-dl-quality="${esc(s.quality)}" data-dl-size="${Number(s.size || 0)}"${extAttrs}><span>Download ${esc(s.quality)}<small>${esc(sub)}</small></span><b>⬇</b></a>`;
       })
       .join("");
@@ -314,12 +315,10 @@
     if (downloadable.length) {
       const picked = downloadable[defaultIdx] || downloadable[0];
       applySelectedSource(picked);
-      const trailerOnly = downloadable.every(s => s.isTrailer);
-      status.textContent = trailerOnly
-        ? `এই টাইটেলটির শুধু Trailer পাওয়া গেছে (${downloadable.length}টি quality)।`
-        : `${downloadable.length}টি পূর্ণাঙ্গ MP4 quality পাওয়া গেছে (${picked.quality}${picked.sizeText ? ` · ${picked.sizeText}` : ""})।`;
+      status.textContent = `${downloadable.length}টি পূর্ণাঙ্গ MP4 quality পাওয়া গেছে (${picked.quality}${picked.sizeText ? ` · ${picked.sizeText}` : ""})।`;
     } else {
       applySelectedSource(null);
+      status.textContent = "এই টাইটেলটির সরাসরি পূর্ণাঙ্গ ভিডিও স্ট্রিম বর্তমানে পাওয়া যাচ্ছে না।";
     }
 
     $("#downloadZip").hidden = episodes.length < 2 || !subjectIdOf();
@@ -896,10 +895,14 @@
     });
   });
 
+  let offlineSyncTimer = null;
   window.addEventListener("cv:offline-change", ev => {
-    if (!ev?.detail?.id || ev.detail.id === currentOfflineId()) {
+    const d = ev?.detail;
+    if (d?.id && d.id !== currentOfflineId()) return;
+    clearTimeout(offlineSyncTimer);
+    offlineSyncTimer = setTimeout(() => {
       syncOfflineUiState();
-    }
+    }, d?.status === "downloading" ? 650 : 60);
   });
 
   $("#downloadSafeChunked")?.addEventListener("click", () => {
@@ -1104,6 +1107,7 @@
       return;
     }
     try {
+      window.CineVerseOffline?.yieldForBrowsing?.(2000);
       const reqUrl = `/api/movie-api/details?path=${encodeURIComponent(path)}&title=${encodeURIComponent(requestedTitle)}`;
       let loadedDetail = readCachedDownloadDetail(path);
       if (!loadedDetail) {

@@ -43,6 +43,13 @@ import { buildPosterSvg, handleMockMovieApi } from "./mock-catalog.js";
 import {
   CATALOG_PAGE_SIZE,
   isNigerianContent,
+  isUpcomingUnreleased,
+  isTrailerOnlyItem,
+  isPlayableCatalogItem,
+  isMediaMarkedUnplayable,
+  markMediaUnplayable,
+  clearMediaUnplayable,
+  onMediaMarkedUnplayable,
   isMusicOrClipSubject,
   expandSearchQueryVariants,
   scoreSearchMatch,
@@ -504,8 +511,8 @@ app.get("/api/sports-hls/:file", async (req, res) => {
   }
 });
 
-const MAX_STREAM_CHUNK = 12 * 1024 * 1024;
-const INITIAL_STREAM_CHUNK = 3 * 1024 * 1024;
+const MAX_STREAM_CHUNK = 4 * 1024 * 1024;
+const INITIAL_STREAM_CHUNK = 2 * 1024 * 1024;
 const MAX_STREAM_CHUNK_SAVER = 2 * 1024 * 1024;
 const INITIAL_STREAM_CHUNK_SAVER = 768 * 1024;
 
@@ -1185,8 +1192,7 @@ app.get("/api/suggest", async (req, res) => {
     const seen = new Set();
     const candidates = [];
     for (const item of [...mbItems, ...mlbdItems]) {
-      if (!item || isNigerianContent(item)) continue;
-      if (!allowMusicSearch && isMusicOrClipSubject(item)) continue;
+      if (!isAllowedCatalogItem(item, { allowMusic: allowMusicSearch })) continue;
       if (safeMode && isAdultCatalogItem(item)) continue;
       if (!matchesSearchType(item, subjectType)) continue;
       if (scoreMergedSearchItem(item, q) <= 0) continue;
@@ -1253,7 +1259,8 @@ app.get("/api/catalog", async (req, res) => {
         const normPath = pathParam.toLowerCase().replace(/\/page\/\d+\/?$/i, "").replace(/\/+$/, "") || "/";
         const preserveOrder = normPath === "/mostwatch/7d" || normPath === "/mostwatch" || normPath === "/popular" || normPath === "/top10" || normPath === "/top-rated";
         if (Array.isArray(data?.items)) {
-          data.items = (preserveOrder ? data.items : sortCatalogNewestFirst(data.items)).map(compactCatalogCard);
+          const clean = data.items.filter(x => isAllowedCatalogItem(x));
+          data.items = (preserveOrder ? clean : sortCatalogNewestFirst(clean)).map(compactCatalogCard);
         }
         return data;
       }
@@ -1763,13 +1770,26 @@ app.all("/api/movie-api/*", async (req, res) => {
           bypassCache: query.get("retry") === "1"
         })
       );
+      if (Array.isArray(payload?.sources)) {
+        payload.sources = payload.sources.filter(s => s && !s.isTrailer && !/\btrailer\b/i.test(String(s.quality || "")));
+      }
+      if (Array.isArray(payload?.stream?.sources)) {
+        payload.stream.sources = payload.stream.sources.filter(s => s && !s.isTrailer && !/\btrailer\b/i.test(String(s.quality || "")));
+      }
+      const sourceCount = payload?.sources?.length || 0;
+      const mlbdTarget = { path: reqPath, title: String(query.get("title") || "") };
+      if (sourceCount > 0) {
+        clearMediaUnplayable(mlbdTarget);
+      } else if (!/rate\s*limit|429/i.test(String(payload?.message || ""))) {
+        markMediaUnplayable(mlbdTarget, "no_direct_stream");
+      }
       recordStreamEvent({
         title: query.get("title") || reqPath,
         subjectId: reqPath,
         se: query.get("se") || "0",
         ep: query.get("ep") || "0",
         status: 200,
-        sourceCount: payload.sources?.length || 0,
+        sourceCount,
         message: "MovieStreamBD",
         durationMs: Date.now() - startedAt
       });
@@ -1831,7 +1851,7 @@ app.all("/api/movie-api/*", async (req, res) => {
         async () => {
           const d = await handleMovieBoxRoute("trending", query);
           if (d && Array.isArray(d.items)) {
-            d.items = sortCatalogNewestFirst(d.items.filter(x => x && !isNigerianContent(x))).map(compactCatalogCard);
+            d.items = sortCatalogNewestFirst(d.items.filter(x => isAllowedCatalogItem(x))).map(compactCatalogCard);
           }
           return d;
         }
@@ -1875,7 +1895,7 @@ app.all("/api/movie-api/*", async (req, res) => {
         async () => {
           const d = await handleMovieBoxRoute("platform", query);
           if (d && Array.isArray(d.items)) {
-            d.items = sortCatalogNewestFirst(d.items.filter(x => x && !isNigerianContent(x))).map(compactCatalogCard);
+            d.items = sortCatalogNewestFirst(d.items.filter(x => isAllowedCatalogItem(x))).map(compactCatalogCard);
           }
           return d;
         }
@@ -1903,8 +1923,7 @@ app.all("/api/movie-api/*", async (req, res) => {
       const candidates = [];
       const seen = new Set();
       for (const candidate of [...mbItems, ...mlbdItems]) {
-        if (!candidate || isNigerianContent(candidate)) continue;
-        if (!allowMusicSearch && isMusicOrClipSubject(candidate)) continue;
+        if (!isAllowedCatalogItem(candidate, { allowMusic: allowMusicSearch })) continue;
         if (safeMode && isAdultCatalogItem(candidate)) continue;
         if (!matchesSearchType(candidate, subjectType)) continue;
         if (q && scoreMergedSearchItem(candidate, q) <= 0) continue;
@@ -1913,8 +1932,7 @@ app.all("/api/movie-api/*", async (req, res) => {
         seen.add(key);
         candidates.push(candidate);
       }
-      const hasRes = candidates.filter(x => x && x.hasResource !== false);
-      const finalPool = hasRes.length ? hasRes : candidates;
+      const finalPool = candidates;
       finalPool.sort((a, b) =>
         scoreMergedSearchItem(b, q) - scoreMergedSearchItem(a, q) ||
         (isPlayableCandidate(b) ? 1 : 0) - (isPlayableCandidate(a) ? 1 : 0) ||
@@ -2013,6 +2031,30 @@ app.all("/api/movie-api/*", async (req, res) => {
           }
         } catch {}
       }
+      if (Array.isArray(payload?.sources)) {
+        payload.sources = payload.sources.filter(s => s && !s.isTrailer && !/\btrailer\b/i.test(String(s.quality || "")));
+        sourceCount = payload.sources.length;
+      }
+      if (Array.isArray(payload?.stream?.sources)) {
+        payload.stream.sources = payload.stream.sources.filter(s => s && !s.isTrailer && !/\btrailer\b/i.test(String(s.quality || "")));
+        payload.stream.isTrailer = false;
+        payload.stream.hasResource = sourceCount > 0;
+      }
+      const streamTarget = {
+        path: reqPath || String(query.get("path") || ""),
+        subjectId: String(query.get("subjectId") || ""),
+        detailPath: String(query.get("detailPath") || ""),
+        title: reqTitle
+      };
+      if (sourceCount > 0) {
+        clearMediaUnplayable(streamTarget);
+      } else if (!/rate\s*limit|429/i.test(String(payload?.message || payload?.error || ""))) {
+        const wantSe = Number(query.get("se") || 0) || 0;
+        const wantEp = Number(query.get("ep") || 1) || 1;
+        if (wantSe <= 1 && wantEp <= 1) {
+          markMediaUnplayable(streamTarget, "no_direct_stream");
+        }
+      }
       const evt = {
         title: reqTitle,
         subjectId: query.get("subjectId") || "",
@@ -2097,6 +2139,63 @@ let mergedHomeInFlight = null;
 const SWR_MAX_ENTRIES = 90;
 const swrApiCache = new Map();
 const swrInFlight = new Map();
+
+function isAllowedCatalogItem(item, { allowMusic = false } = {}) {
+  if (!item || typeof item !== "object") return false;
+  if (isNigerianContent(item)) return false;
+  if (!allowMusic && isMusicOrClipSubject(item)) return false;
+  return isPlayableCatalogItem(item);
+}
+
+onMediaMarkedUnplayable(() => {
+  try {
+    if (mergedHomeCache?.payload) {
+      const p = mergedHomeCache.payload;
+      const keep = x => isAllowedCatalogItem(x);
+      for (const k of ["banners", "trending", "mlbdLatest", "mlbdTrending", "mlbdBangla", "recentlyUploaded"]) {
+        if (Array.isArray(p[k])) p[k] = p[k].filter(keep);
+      }
+      for (const secKey of ["sections", "mlbdSections"]) {
+        if (Array.isArray(p[secKey])) {
+          p[secKey] = p[secKey]
+            .map(s => ({ ...s, items: (s.items || []).filter(keep) }))
+            .filter(s => s.items.length > 0);
+        }
+      }
+      if (p.curated && typeof p.curated === "object") {
+        for (const ck of Object.keys(p.curated)) {
+          if (Array.isArray(p.curated[ck])) p.curated[ck] = p.curated[ck].filter(keep);
+        }
+      }
+      mergedHomeCache.jsonStr = JSON.stringify(p);
+      mergedHomeCache.gzipBuf = null;
+    }
+  } catch {}
+  try {
+    for (const pool of unifiedCatalogPools.values()) {
+      if (!pool || !Array.isArray(pool.items) || !pool.items.length) continue;
+      const filtered = pool.items.filter(x => isAllowedCatalogItem(x));
+      if (filtered.length !== pool.items.length) {
+        pool.items = filtered;
+        pool.keyIndex = new Map();
+        pool.pathIndex = new Map();
+        pool.items.forEach((it, idx) => {
+          const k = normalizeCatalogDedupeKey(it);
+          const pk = normalizeCatalogPathKey(it);
+          if (k && !pool.keyIndex.has(k)) pool.keyIndex.set(k, idx);
+          if (pk && !pool.pathIndex.has(pk)) pool.pathIndex.set(pk, idx);
+        });
+      }
+    }
+  } catch {}
+  try {
+    for (const k of [...swrApiCache.keys()]) {
+      if (/^(?:api:(?:catalog|trending|platform|hot-search):|mlbd-catalog:)/.test(k)) {
+        swrApiCache.delete(k);
+      }
+    }
+  } catch {}
+});
 
 function setSwrEntry(key, entry) {
   if (swrApiCache.has(key)) swrApiCache.delete(key);
@@ -2435,8 +2534,7 @@ function compactCatalogCard(item) {
 }
 
 function matchesCatalogRecentCategory(item, categoryPath = "/") {
-  if (!item || typeof item !== "object") return false;
-  if (isNigerianContent(item) || isMusicOrClipSubject(item) || item.hasResource === false) return false;
+  if (!isAllowedCatalogItem(item)) return false;
   const norm = String(categoryPath || "/").toLowerCase().replace(/\/+$/, "") || "/";
   if (norm === "/" || norm === "/all" || norm === "/new" || norm === "/recently-updated" || norm === "/popular" || norm === "/mostwatch/7d") {
     return !isAdultCatalogItem(item);
@@ -2543,7 +2641,7 @@ async function fetchUnifiedCatalogUpstreamBatch({ category, norm, upstreamPage, 
       const mlbdCat = await getMlbdCatalog({ path: category, page: upstreamPage });
       mlbdMeta = mlbdCat || {};
       if (Array.isArray(mlbdCat?.items)) {
-        mlbdPlayable = mlbdCat.items.filter(x => x && !isNigerianContent(x) && x.hasResource !== false);
+        mlbdPlayable = mlbdCat.items.filter(x => isAllowedCatalogItem(x));
       }
       mlbdMaxPage = Math.max(1, Number(mlbdCat?.maxPage || mlbdCat?.totalPages || 1));
       const mlbdHasMore = Boolean(mlbdCat?.hasMore || upstreamPage < mlbdMaxPage);
@@ -2566,7 +2664,7 @@ async function fetchUnifiedCatalogUpstreamBatch({ category, norm, upstreamPage, 
           const mbSearch = await handleMovieBoxRoute("search", new URLSearchParams({ q: kw, page: String(upstreamPage) })).catch(() => null);
           if (Array.isArray(mbSearch?.items)) mbItems = [...mbItems, ...mbSearch.items];
         }
-        mlbdPlayable.push(...mbItems.filter(item => item && !isNigerianContent(item) && !isMusicOrClipSubject(item) && item.hasResource !== false));
+        mlbdPlayable.push(...mbItems.filter(item => isAllowedCatalogItem(item)));
       } catch {}
     }
 
@@ -2587,10 +2685,10 @@ async function fetchUnifiedCatalogUpstreamBatch({ category, norm, upstreamPage, 
   ]);
 
   const mbPayload = mbRes.status === "fulfilled" && mbRes.value?.ok ? mbRes.value : { ok: true, items: [] };
-  const mbRaw = (Array.isArray(mbPayload?.items) ? mbPayload.items : []).filter(x => x && !isNigerianContent(x) && x.hasResource !== false);
+  const mbRaw = (Array.isArray(mbPayload?.items) ? mbPayload.items : []).filter(x => isAllowedCatalogItem(x));
   const mlbdPayload = mlbdRes.status === "fulfilled" ? mlbdRes.value : null;
   const mlbdRaw = (Array.isArray(mlbdPayload?.items) ? mlbdPayload.items : [])
-    .filter(x => x && !isNigerianContent(x) && x.hasResource !== false);
+    .filter(x => isAllowedCatalogItem(x));
 
   const mbPages = Math.max(1, Number(mbPayload?.totalPages || mbPayload?.maxPage || 1));
   const mbHasMoreFlag = Boolean(mbPayload?.hasMore || mbPayload?.pager?.hasMore || upstreamPage < mbPages);
@@ -2665,10 +2763,27 @@ function mergeBatchIntoUnifiedPool(pool, rawItems, { preserveOrder = false, allo
 async function buildUnifiedCatalogPayload(category, page, query) {
   const safePage = Math.max(1, Math.floor(Number(page) || 1));
   const norm = String(category || "/").toLowerCase().replace(/\/+$/, "") || "/";
+  if (norm === "/upcoming") {
+    return {
+      ok: true,
+      category,
+      items: [],
+      page: safePage,
+      perPage: CATALOG_PAGE_SIZE,
+      pageSize: CATALOG_PAGE_SIZE,
+      totalCount: 0,
+      totalItems: 0,
+      isExactTotal: true,
+      totalPages: 1,
+      maxPage: 1,
+      hasMore: false,
+      pager: { page: String(safePage), perPage: CATALOG_PAGE_SIZE, totalCount: 0, totalPages: 1, hasMore: false, nextPage: "" }
+    };
+  }
   const isLatestCat = norm === "/new" || norm === "/latest";
   const isTrendingCat = norm === "/mostwatch/7d" || norm === "/mostwatch" || norm === "/popular";
   const isMlbdOnlyCategory = isLatestCat || isTrendingCat || /^\/(?:language\/(?:dual-audio|gujrati|kannada|marathi|malaysian|vietnamese|german|italian|portuguese|others)|genre\/(?:biographical|historical|musical|sports|superhero|survival|suspense)|category\/|collection\/|collections)/i.test(category);
-  const preserveOrder = isTrendingCat || norm === "/top-rated" || norm === "/upcoming" || norm === "/top10";
+  const preserveOrder = isTrendingCat || norm === "/top-rated" || norm === "/top10";
   const poolKey = buildUnifiedCatalogPoolKey(norm, query);
   const pool = getOrCreateUnifiedCatalogPool(poolKey);
   const targetCount = safePage * CATALOG_PAGE_SIZE;
@@ -2806,8 +2921,8 @@ async function buildMergedHomePayload(query = new URLSearchParams()) {
     getMlbdCatalog({ path: "/language/bangla", page: 1 })
   ]);
   const mlbdDirectOk = isMlbdDirectPlaybackAvailable();
-  const isDirectlyStreamable = x => Boolean(x && x.hasResource !== false && (mlbdDirectOk || x.source !== "movielinkbd" || x.mbSubjectId));
-  const hasPlayableStream = x => Boolean(x && x.hasResource !== false);
+  const isDirectlyStreamable = x => Boolean(isAllowedCatalogItem(x) && (mlbdDirectOk || x.source !== "movielinkbd" || x.mbSubjectId));
+  const hasPlayableStream = x => isAllowedCatalogItem(x);
   const sortByPlayableThenRecency = (a, b) => {
     if (!mlbdDirectOk) {
       const da = isDirectlyStreamable(a) ? 1 : 0;
@@ -2842,9 +2957,9 @@ async function buildMergedHomePayload(query = new URLSearchParams()) {
     categories: rawMb.categories || [],
     banners: [],
     trending: [],
-    upcoming: Array.isArray(rawMb.upcoming) ? rawMb.upcoming.slice(0, 24).map(compactHomeCard) : [],
+    upcoming: [],
     sections: [],
-    curated: rawMb.curated ? { ...rawMb.curated } : {},
+    curated: rawMb.curated ? { ...rawMb.curated, upcoming: [] } : {},
     mlbdSections: [],
     mlbdTrending: [],
     mlbdCategories: [],
@@ -2882,12 +2997,12 @@ async function buildMergedHomePayload(query = new URLSearchParams()) {
 
     const explicitLatestSec = cleanMlbdSecs.find(s => /^\/new$/i.test(String(s?.categoryPath || "").replace(/\/+$/, "")));
     const mergedMlbdLatest = Array.isArray(mlbd.latest) && mlbd.latest.length
-      ? mlbd.latest.filter(x => x && !isNigerianContent(x) && hasPlayableStream(x))
+      ? mlbd.latest.filter(x => hasPlayableStream(x))
       : (explicitLatestSec?.items || []);
     mlbdFreshNewItems = dedupeCatalogItems(mergedMlbdLatest).slice(0, 28).map(compactCatalogCard);
     payload.mlbdSections = cleanMlbdSecs;
     payload.mlbdLatest = mlbdFreshNewItems;
-    payload.mlbdTrending = rankTrendingItems(dedupeCatalogItems((mlbd.trending || []).filter(x => x && !isNigerianContent(x) && hasPlayableStream(x)))).slice(0, 28).map(compactCatalogCard);
+    payload.mlbdTrending = rankTrendingItems(dedupeCatalogItems((mlbd.trending || []).filter(x => hasPlayableStream(x)))).slice(0, 28).map(compactCatalogCard);
     payload.mlbdCategories = mlbd.categories || [];
     const existingCats = new Set((payload.categories || []).map(c => c?.path));
     payload.categories = [
@@ -2903,7 +3018,7 @@ async function buildMergedHomePayload(query = new URLSearchParams()) {
     ? mlbdBanglaRes.value.items
     : [];
   const mergedBanglaPool = dedupeCatalogItems([...mlbdBanglaFeedItems, ...mlbdBanglaSecItems])
-    .filter(x => !isNigerianContent(x) && hasPlayableStream(x));
+    .filter(x => hasPlayableStream(x));
   if (mergedBanglaPool.length) {
     payload.mlbdBangla = rankHomeItems(mergedBanglaPool).slice(0, 28).map(compactHomeCard);
   }
@@ -2912,13 +3027,13 @@ async function buildMergedHomePayload(query = new URLSearchParams()) {
     .filter(s => !isNigerianContent(null, s?.title))
     .map(s => ({
       ...s,
-      items: (s.items || []).filter(x => !isNigerianContent(x, s?.title)).slice(0, 28).map(compactHomeCard)
+      items: (s.items || []).filter(x => !isNigerianContent(x, s?.title) && hasPlayableStream(x)).slice(0, 28).map(compactHomeCard)
     }))
     .filter(s => s.items.length > 0);
   payload.sections = mbSections;
 
   if (Array.isArray(rawMb.trending)) {
-    payload.trending = rawMb.trending.filter(x => !isNigerianContent(x) && !isMusicOrClipSubject(x)).slice(0, 30).map(compactHomeCard);
+    payload.trending = rawMb.trending.filter(x => hasPlayableStream(x)).slice(0, 30).map(compactHomeCard);
   }
 
   if (payload.curated) {
@@ -2926,10 +3041,11 @@ async function buildMergedHomePayload(query = new URLSearchParams()) {
       const arr = payload.curated[key];
       if (!Array.isArray(arr)) continue;
       payload.curated[key] = arr
-        .filter(x => !isNigerianContent(x) && !isMusicOrClipSubject(x))
+        .filter(x => hasPlayableStream(x))
         .slice(0, 30)
         .map(compactHomeCard);
     }
+    payload.curated.upcoming = [];
     const existingIb = Array.isArray(payload.curated.indiaBangladeshTrending) ? payload.curated.indiaBangladeshTrending : [];
     const banglaPool = Array.isArray(payload.mlbdBangla) ? payload.mlbdBangla : [];
     const playablePosteredBangla = banglaPool.filter(x => isDirectlyStreamable(x) && hasCardPoster(x));
@@ -2937,12 +3053,12 @@ async function buildMergedHomePayload(query = new URLSearchParams()) {
     const seen = new Set();
     const prioritized = [
       ...playablePosteredBangla.slice(0, 8),
-      ...existingIb.filter(x => hasCardPoster(x) && !isMusicOrClipSubject(x)),
+      ...existingIb.filter(x => hasCardPoster(x) && hasPlayableStream(x)),
       ...posteredBangla.slice(0, 10),
-      ...existingIb.filter(x => !isMusicOrClipSubject(x))
+      ...existingIb.filter(x => hasPlayableStream(x))
     ];
     payload.curated.indiaBangladeshTrending = prioritized.filter(x => {
-      if (!x || isNigerianContent(x) || isMusicOrClipSubject(x)) return false;
+      if (!hasPlayableStream(x)) return false;
       const k = x.path || x.subjectId || x.title;
       if (!k || seen.has(k)) return false;
       seen.add(k);
@@ -2959,16 +3075,16 @@ async function buildMergedHomePayload(query = new URLSearchParams()) {
     ...(payload.curated?.recentlyUpdated || [])
   ];
   payload.recentlyUploaded = dedupeCatalogItems(
-    recentPoolRaw.filter(x => x && !isNigerianContent(x) && !isMusicOrClipSubject(x) && hasPlayableStream(x) && hasCardPoster(x))
+    recentPoolRaw.filter(x => hasPlayableStream(x) && hasCardPoster(x))
   )
     .sort(sortByPlayableThenRecency)
     .slice(0, 30)
     .map(compactHomeCard);
 
   // Prioritize freshest recent uploads right at the front of Spotlight Banners
-  const mbBanners = (rawMb.banners || []).filter(x => !isNigerianContent(x) && x?.hasResource !== false).map(compactHomeCard);
+  const mbBanners = (rawMb.banners || []).filter(x => hasPlayableStream(x)).map(compactHomeCard);
   const mlbdBanners = (mlbdRes.status === "fulfilled" && Array.isArray(mlbdRes.value?.banners) ? mlbdRes.value.banners : [])
-    .filter(x => !isNigerianContent(x) && hasPlayableStream(x) && hasCardPoster(x))
+    .filter(x => hasPlayableStream(x) && hasCardPoster(x))
     .map(compactHomeCard);
   payload.banners = dedupeCatalogItems([...payload.recentlyUploaded.slice(0, 8), ...mbBanners, ...mlbdBanners])
     .sort(sortByPlayableThenRecency)

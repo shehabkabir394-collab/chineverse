@@ -37,6 +37,14 @@
     return false;
   }
 
+  function isUnavailableOrTrailer(item) {
+    if (!item || typeof item !== "object") return true;
+    if (item.hasResource === false || item.isUpcoming === true || item.trailerOnly === true || item.isTrailer === true) return true;
+    if (/\b(?:trailer|teaser|coming\s*soon|unreleased)\b/i.test(`${item.typeBadge || ""} ${item.quality || ""}`)) return true;
+    if (/\b(?:official\s+trailer|teaser\s+trailer|trailer\s+only)\b/i.test(String(item.title || ""))) return true;
+    return false;
+  }
+
   function normalizeEntry(raw) {
     if (typeof raw === "string") {
       const q = raw.trim();
@@ -167,13 +175,14 @@
     const safe = isFamilySafe();
     if (!force && hotCache && hotLoadedSafeState === safe) return hotCache;
     try {
+      window.CineVerseOffline?.yieldForBrowsing?.(1500);
       const r = await fetch(`/api/movie-api/hot-search${safe ? "?safe=1" : ""}`);
       const d = await r.json();
       hotLoadedSafeState = safe;
-      hotCache = Array.isArray(d?.items) ? d.items.filter(x => typeof x === "string" || (x?.title && !isNigerianItem(x))).slice(0, 14) : [];
-      hotSubjectsCache = Array.isArray(d?.subjects) ? d.subjects.filter(x => !isNigerianItem(x) && (!safe || !isAdultItem(x))).slice(0, 12) : [];
+      hotCache = Array.isArray(d?.items) ? d.items.filter(x => typeof x === "string" || (x?.title && !isNigerianItem(x) && !isUnavailableOrTrailer(x))).slice(0, 14) : [];
+      hotSubjectsCache = Array.isArray(d?.subjects) ? d.subjects.filter(x => !isNigerianItem(x) && !isUnavailableOrTrailer(x) && (!safe || !isAdultItem(x))).slice(0, 12) : [];
       const rk = d?.rankings || {};
-      const cleanList = list => (Array.isArray(list) ? list : []).filter(x => !isNigerianItem(x) && (!safe || !isAdultItem(x))).slice(0, 12);
+      const cleanList = list => (Array.isArray(list) ? list : []).filter(x => !isNigerianItem(x) && !isUnavailableOrTrailer(x) && (!safe || !isAdultItem(x))).slice(0, 12);
       rankingsCache = {
         movie: cleanList(rk.movie?.length ? rk.movie : hotSubjectsCache),
         series: cleanList(rk.series),
@@ -317,7 +326,7 @@
     if (resultsTabs) resultsTabs.hidden = false;
 
     const safe = isFamilySafe();
-    const visibleItems = (Array.isArray(items) ? items : []).filter(it => !isNigerianItem(it) && (!safe || !isAdultItem(it)));
+    const visibleItems = (Array.isArray(items) ? items : []).filter(it => !isNigerianItem(it) && !isUnavailableOrTrailer(it) && (!safe || !isAdultItem(it)));
 
     const suggTitles = [...new Set([
       ...(Array.isArray(suggestions) ? suggestions : []),
@@ -445,6 +454,7 @@
     const typeQs = `&subjectType=${encodeURIComponent(activeType)}`;
 
     try {
+      window.CineVerseOffline?.yieldForBrowsing?.(1500);
       const [suggRes, searchRes] = await Promise.allSettled([
         fetchSearchJson(`/api/suggest?q=${encodeURIComponent(q)}${typeQs}${safeQs}`, ctrl?.signal),
         fetchSearchJson(`/api/movie-api/search?q=${encodeURIComponent(q)}${typeQs}${safeQs}`, ctrl?.signal)
@@ -454,7 +464,7 @@
       const mergedMap = new Map();
       const addAll = list => {
         for (const it of Array.isArray(list) ? list : []) {
-          if (!it || isNigerianItem(it)) continue;
+          if (!it || isNigerianItem(it) || isUnavailableOrTrailer(it)) continue;
           const k = it.path || it.subjectId || String(it.title || "").toLowerCase();
           if (k && !mergedMap.has(k)) mergedMap.set(k, it);
         }

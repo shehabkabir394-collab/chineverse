@@ -1,6 +1,11 @@
 import {
   isNigerianContent,
   isUpcomingUnreleased,
+  isTrailerOnlyItem,
+  isPlayableCatalogItem,
+  isMediaMarkedUnplayable,
+  markMediaUnplayable,
+  clearMediaUnplayable,
   isNoiseVideoClip,
   isMusicOrClipSubject,
   strictTitleMatchScore,
@@ -693,7 +698,7 @@ export function normalizeSubject(raw, extra = {}) {
 function indexList(list, extra = {}) {
   return (Array.isArray(list) ? list : [])
     .map(item => normalizeSubject(item, extra))
-    .filter(item => item && !isNigerianContent(item));
+    .filter(item => item && !isNigerianContent(item) && isPlayableCatalogItem(item));
 }
 
 function parseMbPath(pathStr) {
@@ -1046,7 +1051,7 @@ export async function getHomeFeed() {
   ] = await Promise.allSettled([
     mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/home`, {}, 180000),
     mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/subject/trending?page=1&perPage=36`, {}, 180000),
-    mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/upcoming-subject-list?page=1&perPage=24`, {}, 300000),
+    Promise.resolve(null),
     filterCall({ page: 1, perPage: 36, channelId: 1, classify: "Hindi dub", sort: "Latest" }, { _hindiCatalog: true }),
     filterCall({ page: 1, perPage: 24, channelId: 1, classify: "Hindi dub", sort: "Hottest" }, { _hindiCatalog: true }),
     mbFetch(`${MOVIEBOX_API}/wefeed-h5api-bff/ranking-list/content?id=872031290915189720&page=1&perPage=15`, {}, 180000)
@@ -1095,7 +1100,7 @@ export async function getHomeFeed() {
     const seen = new Set();
     for (const l of lists) {
       for (const x of Array.isArray(l) ? l : []) {
-        if (!x || isNigerianContent(x)) continue;
+        if (!x || isNigerianContent(x) || !isPlayableCatalogItem(x)) continue;
         const k = x?.subjectId || x?.path;
         if (!k || seen.has(k)) continue;
         seen.add(k);
@@ -1109,7 +1114,7 @@ export async function getHomeFeed() {
     const seen = new Set();
     for (const l of lists) {
       for (const x of Array.isArray(l) ? l : []) {
-        if (!x || isNigerianContent(x)) continue;
+        if (!x || isNigerianContent(x) || !isPlayableCatalogItem(x)) continue;
         const k = x?.subjectId || x?.path;
         if (!k || seen.has(k)) continue;
         seen.add(k);
@@ -1156,14 +1161,14 @@ export async function getHomeFeed() {
           previewImage: proxyImageUrl(bannerRawImg, "poster.jpg"),
           ...(bannerRawImg ? { rawPoster: bannerRawImg } : {})
         });
-        if (item && item.subjectId && /^\d+$/.test(item.subjectId) && item.hasResource !== false && !isNigerianContent(item)) {
+        if (item && item.subjectId && /^\d+$/.test(item.subjectId) && !isNigerianContent(item) && isPlayableCatalogItem(item)) {
           banners.push(item);
         }
       }
     } else if (op.type === "SUBJECTS_MOVIE" && Array.isArray(op.subjects) && op.subjects.length) {
       const title = String(op.title || "Featured").trim();
       if (isNigerianContent(null, title)) continue;
-      const rawItems = indexList(op.subjects).filter(x => x.hasResource !== false && !isNigerianContent(x, title));
+      const rawItems = indexList(op.subjects).filter(x => !isNigerianContent(x, title) && isPlayableCatalogItem(x));
       let enriched = rawItems;
       if (/popular\s*series|tv\s*shows/i.test(title)) enriched = mergeLists(latestSeriesPool, rawItems);
       else if (/popular\s*movie/i.test(title)) enriched = mergeLists(latestMoviesPool, rawItems);
@@ -1205,8 +1210,6 @@ export async function getHomeFeed() {
           items
         });
       }
-    } else if (op.type === "APPOINTMENT_LIST" && Array.isArray(op.subjects)) {
-      upcoming.push(...indexList(op.subjects));
     }
   }
 
@@ -1224,27 +1227,27 @@ export async function getHomeFeed() {
 
   const trendingRaw =
     trendingRes.status === "fulfilled"
-      ? indexList(trendingRes.value?.data?.subjectList).filter(x => x.hasResource !== false && !isNigerianContent(x))
+      ? indexList(trendingRes.value?.data?.subjectList).filter(x => !isNigerianContent(x) && isPlayableCatalogItem(x))
       : [];
-  const trendingTop10 = trendingRaw.length ? trendingRaw : (lastGoodHomeFeed?.trending || []).filter(x => !isNigerianContent(x));
+  const trendingTop10 = trendingRaw.length ? trendingRaw : (lastGoodHomeFeed?.trending || []).filter(x => !isNigerianContent(x) && isPlayableCatalogItem(x));
   const trending = mergeOrdered(
     indiaBangladeshTrending.slice(0, 12),
     trendingTop10.slice(0, 12),
     latestMoviesPool.slice(0, 10),
     latestSeriesPool.slice(0, 8)
   );
-  const rawUpcoming =
-    upcomingRes.status === "fulfilled" ? indexList(upcomingRes.value?.data?.items) : [];
-  const upcomingPool = rawUpcoming.length ? rawUpcoming : (upcoming.length ? upcoming : (lastGoodHomeFeed?.upcoming || []));
-  const upcomingList = sortByReleaseNewest(
-    upcomingPool.filter(x => x && !isNigerianContent(x) && isUpcomingUnreleased(x))
-  );
+  const upcomingList = [];
 
   const platforms = Array.isArray(homeData.platformList) && homeData.platformList.length
     ? homeData.platformList.map(p => ({ name: p.name }))
     : (lastGoodHomeFeed?.platforms || []);
 
-  const finalSections = sections.length ? sections : (lastGoodHomeFeed?.sections || []).filter(s => !isNigerianContent(null, s?.title));
+  const finalSections = sections.length
+    ? sections
+    : (lastGoodHomeFeed?.sections || [])
+        .filter(s => !isNigerianContent(null, s?.title))
+        .map(s => ({ ...s, items: (s.items || []).filter(x => !isNigerianContent(x, s?.title) && isPlayableCatalogItem(x)) }))
+        .filter(s => s.items.length > 0);
   const allPool = [
     ...indiaBangladeshTrending,
     ...trending,
@@ -1258,7 +1261,7 @@ export async function getHomeFeed() {
     ...bengaliMerged,
     ...latestSeriesPool,
     ...finalSections.flatMap(s => s.items || [])
-  ].filter(x => x && !isNigerianContent(x));
+  ].filter(x => x && !isNigerianContent(x) && isPlayableCatalogItem(x));
   const uniqPool = [...new Map(allPool.filter(x => x && (x.subjectId || x.path)).map(x => [x.subjectId || x.path, x])).values()];
   const recentTopRatedPool = uniqPool.filter(x => Number(x.rating) > 0 && parseReleaseTs(x) >= minFreshTs);
   const imdbTopRated = [...(recentTopRatedPool.length >= 10 ? recentTopRatedPool : uniqPool.filter(x => Number(x.rating) > 0))]
@@ -1268,32 +1271,32 @@ export async function getHomeFeed() {
   const curated = {
     indiaBangladeshTrending,
     trending,
-    top10: sortByReleaseNewest(pick(top10Res, trendingTop10.slice(0, 10)).filter(x => !isNigerianContent(x)).slice(0, 10)),
+    top10: sortByReleaseNewest(pick(top10Res, trendingTop10.slice(0, 10)).filter(x => !isNigerianContent(x) && isPlayableCatalogItem(x)).slice(0, 10)),
     hindiMovies: sortByReleaseNewest(mergeOrdered(pick(hindiHottestRes), hindiMoviesList)),
-    latestMovies: sortByReleaseNewest(latestMoviesPool),
-    hindiSeries: sortByReleaseNewest(pick(hindiSeriesRes, lastGoodHomeFeed?.curated?.hindiSeries || [])),
-    kDramas: kDramaPool,
+    latestMovies: sortByReleaseNewest(latestMoviesPool.filter(isPlayableCatalogItem)),
+    hindiSeries: sortByReleaseNewest(pick(hindiSeriesRes, lastGoodHomeFeed?.curated?.hindiSeries || []).filter(isPlayableCatalogItem)),
+    kDramas: kDramaPool.filter(isPlayableCatalogItem),
     southIndian: southMerged,
     anime: animeMerged,
-    hollywood: sortByReleaseNewest(pick(hollywoodRes, lastGoodHomeFeed?.curated?.hollywood || [])),
+    hollywood: sortByReleaseNewest(pick(hollywoodRes, lastGoodHomeFeed?.curated?.hollywood || []).filter(isPlayableCatalogItem)),
     bengali: bengaliMerged,
     recentlyAdded: mergeLists(latestMoviesPool, latestSeriesPool, trending).slice(0, 30),
-    recentlyUpdated: sortByReleaseNewest(latestSeriesPool),
+    recentlyUpdated: sortByReleaseNewest(latestSeriesPool.filter(isPlayableCatalogItem)),
     imdbTopRated,
-    upcoming: upcomingList
+    upcoming: []
   };
 
   const mergedBanners = mergeOrdered(
     banners,
     indiaBangladeshTrending.slice(0, 4),
     trending.slice(0, 6)
-  ).filter(x => x && x.poster && x.hasResource !== false && !isNigerianContent(x)).slice(0, 10);
+  ).filter(x => x && x.poster && !isNigerianContent(x) && isPlayableCatalogItem(x)).slice(0, 10);
 
   const result = {
     ok: true,
     categories: CATEGORIES,
     platforms,
-    banners: mergedBanners.length ? mergedBanners : (lastGoodHomeFeed?.banners || []).filter(x => !isNigerianContent(x)),
+    banners: mergedBanners.length ? mergedBanners : (lastGoodHomeFeed?.banners || []).filter(x => !isNigerianContent(x) && isPlayableCatalogItem(x)),
     trending,
     upcoming: upcomingList,
     sections: finalSections,
@@ -1477,6 +1480,7 @@ export async function handleMovieBoxRoute(legacy, query) {
       const addCandidate = (item, bonus = 0, opts = {}) => {
         if (!item || (!item.subjectId && !item.path)) return;
         if (isNigerianContent(item)) return;
+        if (!isPlayableCatalogItem(item)) return;
         if (!allowMusicSearch && isMusicOrClipSubject(item)) return;
         if (!matchesType(item)) return;
 
@@ -1622,7 +1626,7 @@ export async function handleMovieBoxRoute(legacy, query) {
       const safeMode = query.get("safe") === "1";
       if (!keyword) {
         const home = await getHomeFeed().catch(() => ({ trending: [] }));
-        const base = (home?.trending || []).filter(x => (!safeMode || !x.isAdult) && !isNigerianContent(x)).slice(0, 12);
+        const base = (home?.trending || []).filter(x => (!safeMode || !x.isAdult) && !isNigerianContent(x) && isPlayableCatalogItem(x)).slice(0, 12);
         return { ok: true, items: base, suggestions: base.map(x => x.title) };
       }
       return await handleMovieBoxRoute("search", new URLSearchParams({
@@ -1635,7 +1639,7 @@ export async function handleMovieBoxRoute(legacy, query) {
 
     case "hot-search": {
       const safeMode = query.get("safe") === "1";
-      const safeFilter = list => (Array.isArray(list) ? list : []).filter(x => x && (!safeMode || !x.isAdult));
+      const safeFilter = list => (Array.isArray(list) ? list : []).filter(x => x && (!safeMode || !x.isAdult) && isPlayableCatalogItem(x));
       const filterCall = (body, extra = {}) =>
         mbFetch(
           `${MOVIEBOX_API}/wefeed-h5api-bff/subject/filter`,
@@ -1951,17 +1955,7 @@ export async function handleMovieBoxRoute(legacy, query) {
 
     case "upcoming": {
       const page = Math.max(1, Number(query.get("page") || 1));
-      const j = await mbFetch(
-        `${MOVIEBOX_API}/wefeed-h5api-bff/upcoming-subject-list?page=${page}&perPage=24`,
-        {},
-        300000
-      );
-      let items = indexList(j?.data?.items).filter(x => !isNigerianContent(x) && isUpcomingUnreleased(x));
-      if (!items.length && page === 1) {
-        const home = await getHomeFeed();
-        items = (Array.isArray(home.upcoming) ? home.upcoming : []).filter(x => !isNigerianContent(x) && isUpcomingUnreleased(x));
-      }
-      return { ok: true, items, page };
+      return { ok: true, items: [], page };
     }
 
     case "shorts":
@@ -2034,6 +2028,10 @@ export async function handleMovieBoxRoute(legacy, query) {
       }
 
       const subj = normalizeSubject(j.data.subject);
+      if (subj.hasResource === false || isUpcomingUnreleased(subj) || isTrailerOnlyItem(subj)) {
+        subj.hasResource = false;
+        markMediaUnplayable(subj, isTrailerOnlyItem(subj) ? "trailer_only" : isUpcomingUnreleased(subj) ? "upcoming" : "no_direct_stream");
+      }
       const rawDubs = Array.isArray(j.data.dubs)
         ? j.data.dubs
         : Array.isArray(j.data.subject?.dubs)
@@ -2417,26 +2415,7 @@ export async function handleMovieBoxRoute(legacy, query) {
           return (a.format === "HLS" ? 1 : 0) - (b.format === "HLS" ? 1 : 0);
         });
 
-      // Fallback to official trailer MP4 for upcoming/unreleased titles that lack full video streams
-      if (!sources.length) {
-        const detail = await loadDetail();
-        const trailerRaw = String(detail?.data?.subject?.trailer?.videoAddress?.url || "").trim();
-        if (trailerRaw) {
-          isTrailer = true;
-          sources.push({
-            id: "trailer",
-            url: `/api/cinepulse-media?mb=${encodeURIComponent(signMediaToken(trailerRaw))}&res=720`,
-            quality: "720p Trailer",
-            resolution: "720p",
-            size: "",
-            format: "MP4",
-            type: "video/mp4",
-            provider: "Official Trailer",
-            audioLanguage: "",
-            isTrailer: true
-          });
-        }
-      }
+      // Never serve a trailer MP4 as a movie/series stream fallback
 
       const fetchCaptionsForStreams = async (targetSubjectId, targetDetailPath, streamsList, targetReferer) => {
         for (const st of streamsList) {
@@ -2510,35 +2489,38 @@ export async function handleMovieBoxRoute(legacy, query) {
         : [];
 
       const hasRes = playJson?.code === 0
-        ? Boolean(playJson?.data?.hasResource ?? (!isTrailer && sources.length > 0))
-        : (!isTrailer && sources.length > 0);
+        ? Boolean(playJson?.data?.hasResource ?? (sources.length > 0))
+        : (sources.length > 0);
       const isTrulyUpcoming = isUpcomingUnreleased(resolvedMeta || detJson?.data?.subject || { title: rawRecoveryTitle });
       const rateLimited = !sources.length && lastUpstreamCode === 429;
+      const registryTarget = {
+        subjectId: streamSubjectId || subjectId,
+        detailPath: streamDetailPath || detailPath,
+        path: detailPath ? `/mb/${subjectId}/${detailPath}` : (subjectId ? `/mb/${subjectId}` : ""),
+        title: resolvedMeta?.title || detJson?.data?.subject?.title || rawRecoveryTitle
+      };
+      if (sources.length > 0) {
+        clearMediaUnplayable(registryTarget);
+      } else if (!rateLimited && se <= 1 && ep <= 1) {
+        markMediaUnplayable(registryTarget, isTrulyUpcoming ? "upcoming" : "no_direct_stream");
+      }
       return {
         ok: true,
         retryable: rateLimited || !sources.length,
         stream: {
           sources,
           subtitles,
-          hasResource: hasRes,
-          isTrailer,
+          hasResource: sources.length > 0 && hasRes,
+          isTrailer: false,
           vipLocked: Boolean(playJson?.data?.vipLocked)
         },
         sources,
         subtitles,
-        message: isTrailer
-          ? (isTrulyUpcoming
-            ? "Full video not yet released — playing official trailer."
-            : "Full video unavailable on server right now — playing official trailer.")
-          : rateLimited
-            ? "Video server is temporarily busy (rate limit). Please tap Retry in a moment."
-            : !sources.length && !hasRes
-              ? (isTrulyUpcoming
-                ? "This title is marked Upcoming / Unreleased and does not have a playable video yet."
-                : "No playable video stream is available for this title right now.")
-              : !sources.length
-                ? "No playable stream URL is available for this episode right now."
-                : ""
+        message: rateLimited
+          ? "Video server is temporarily busy (rate limit). Please tap Retry in a moment."
+          : !sources.length
+            ? "Direct video stream is unavailable on this server right now."
+            : ""
       };
     }
 

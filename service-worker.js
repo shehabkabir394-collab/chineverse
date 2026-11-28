@@ -3,10 +3,12 @@
 
 const DB_NAME = "moviestreambd_offline_v1";
 const DB_VERSION = 1;
-const CHUNK_SIZE = 4 * 1024 * 1024; // 4 MiB verified chunks
+const CHUNK_SIZE = 2 * 1024 * 1024; // 2 MiB balanced chunks: fast resume without saturating page requests
 const READ_IDLE_TIMEOUT_MS = 28000;
 const MAX_RETRIES = 15;
-const MAX_CONCURRENT_DOWNLOADS = 2;
+const MAX_CONCURRENT_DOWNLOADS = 1;
+const INTER_CHUNK_YIELD_MS = 160;
+const CLIENT_BUSY_YIELD_MS = 450;
 const CHANNEL_NAME = "cv-downloads-v1";
 
 const activeJobs = new Map(); // id -> { abortController, promise, startedAt }
@@ -18,6 +20,24 @@ let bc = null;
 let bootReconcilePromise = null;
 let queueIdleResolve = null;
 let queueIdlePromise = null;
+let clientBusyUntil = 0;
+
+function sleepWithAbort(ms, signal) {
+  const wait = Math.max(0, Number(ms) || 0);
+  if (!wait) return Promise.resolve();
+  if (signal?.aborted) return Promise.reject(new DOMException("Download aborted", "AbortError"));
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      if (signal) signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, wait);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new DOMException("Download aborted", "AbortError"));
+    };
+    if (signal) signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
 
 function getQueueDrainPromise() {
   if (activeJobs.size === 0 && queuedJobs.size === 0) {
@@ -301,6 +321,7 @@ function fetchInitForUrl(targetUrl, extra = {}) {
   return {
     resolvedUrl: resolved,
     init: {
+      priority: extra.priority ?? "low",
       ...extra,
       credentials: isSameOrigin ? "same-origin" : "omit",
       referrerPolicy: "no-referrer"
@@ -418,6 +439,10 @@ async function resumableRangeDownload({
 
   while (totalBytes === 0 || offset < totalBytes) {
     if (signal?.aborted) throw new DOMException("Download aborted", "AbortError");
+    if (offset > initialOffset) {
+      const pauseMs = Date.now() < clientBusyUntil ? CLIENT_BUSY_YIELD_MS : INTER_CHUNK_YIELD_MS;
+      await sleepWithAbort(pauseMs, signal);
+    }
     const reqEnd = totalBytes > 0 ? Math.min(totalBytes - 1, offset + CHUNK_SIZE - 1) : offset + CHUNK_SIZE - 1;
     const connectCtrl = new AbortController();
     const unlinkSignal = linkAbortSignals(signal, connectCtrl);
@@ -847,7 +872,7 @@ async function runSingleSwDownload(opts) {
           if (total > 0) record.totalBytes = total;
           record.downloadedBytes = done;
           const nowMs = Date.now();
-          if (nowMs - lastUiTick > 250) {
+          if (nowMs - lastUiTick >= 800) {
             lastUiTick = nowMs;
             emitProgressChange({ id, status: "downloading", downloadedBytes: done, totalBytes: total, speedBps, mode: "sw", saveToDevice: record.saveToDevice });
           }
@@ -1310,6 +1335,10 @@ self.addEventListener("message", event => {
     );
   } else if (msg.type === "SW_DL_DELETE") {
     event.waitUntil(deleteDownloadRecord(msg.id).then(() => reply({ ok: true })));
+  } else if (msg.type === "SW_DL_CLIENT_YIELD") {
+    const until = Number(msg.until) || Date.now() + 1800;
+    if (until > clientBusyUntil) clientBusyUntil = until;
+    reply({ ok: true });
   } else if (msg.type === "SW_DL_GET_SNAPSHOT") {
     event.waitUntil(
       (async () => {

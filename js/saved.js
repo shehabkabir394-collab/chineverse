@@ -340,11 +340,12 @@
     }
   });
 
-  window.addEventListener("cv:offline-change", () => {
+  window.addEventListener("cv:offline-change", ev => {
     clearTimeout(renderDebounceTimer);
+    const delay = ev?.detail?.status === "downloading" ? 1500 : 140;
     renderDebounceTimer = setTimeout(() => {
       render();
-    }, 180);
+    }, delay);
   });
 
   $("#cvBackupBtn")?.addEventListener("click", () => {

@@ -117,9 +117,9 @@
     });
     if (!mp4s.length) return null;
     const activeQ = String(playerApi?.getState?.()?.activeQuality || "");
-    const nonTrailers = mp4s.filter(s => !s.isTrailer);
-    const pool = nonTrailers.length ? nonTrailers : mp4s;
-    return pool.find(s => activeQ && s.quality === activeQ) || pool[0];
+    const nonTrailers = mp4s.filter(s => !s.isTrailer && !/\btrailer\b/i.test(String(s.quality || "")));
+    if (!nonTrailers.length) return null;
+    return nonTrailers.find(s => activeQ && s.quality === activeQ) || nonTrailers[0];
   }
 
   async function refreshOfflineBar() {
@@ -839,6 +839,7 @@
           streamCache.delete(cacheKey);
           qs.set("retry", "1");
         }
+        window.CineVerseOffline?.yieldForBrowsing?.(2200);
         ({ res: r, data: payload } = await safeFetchJson(`/api/movie-api/stream?${qs.toString()}`, { cache: "no-store" }));
         if (r?.ok && Array.isArray(payload?.sources) && payload.sources.length) {
           streamCache.set(cacheKey, { payload, at: Date.now() });
@@ -882,6 +883,7 @@
       if (explicitList && explicitList.length) {
         explicitList.forEach(item => {
           if (item && typeof item === "object") {
+            if (item.isTrailer === true || /\btrailer\b/i.test(String(item.quality || item.label || ""))) return;
             const fmt = String(item.format || item.type || item.mime || item.mimeType || "");
             if (/\bdash\b|dash\+xml/i.test(fmt)) return;
             const candidate = sourceKeys.map(key => item[key]).find(value => typeof value === "string" && isPlayableStreamUrl(value) && !/\.mpd(?:$|[?#])/i.test(value));
@@ -908,6 +910,7 @@
           format: String(s.format || ""),
           mime,
           audioLanguage: s.audioLanguage || s.audio_language || "",
+          ...(s.isTrailer ? { isTrailer: true } : {}),
           ...(s.proxyUrl || s.proxy_url ? { proxyUrl: String(s.proxyUrl || s.proxy_url) } : {}),
           ...(s.directUrl ? { directUrl: String(s.directUrl) } : {}),
           ...(s.directPlayback !== undefined ? { directPlayback: Boolean(s.directPlayback) } : {}),
@@ -918,10 +921,11 @@
           ...(s.autoSelected ? { autoSelected: true } : {}),
           ...(s.autoFast ? { autoFast: true } : {})
         }];
-      }).values())].filter(s => isPlayableStreamUrl(s.url) && !/\.mpd(?:$|[?#])/i.test(s.url) && !/\bdash\b|dash\+xml/i.test(s.format + " " + s.mime));
+      }).values())].filter(s => !s.isTrailer && !/\btrailer\b/i.test(String(s.quality || "")) && isPlayableStreamUrl(s.url) && !/\.mpd(?:$|[?#])/i.test(s.url) && !/\bdash\b|dash\+xml/i.test(s.format + " " + s.mime));
 
       if (!sources.length && Array.isArray(explicitList) && explicitList.length) {
         sources = explicitList
+          .filter(item => !(item && typeof item === "object" && (item.isTrailer === true || /\btrailer\b/i.test(String(item.quality || item.label || "")))))
           .map(item => {
             const url = typeof item === "string" ? item : sourceKeys.map(k => item?.[k]).find(v => typeof v === "string" && v.trim());
             return url && !/\.mpd(?:$|[?#])/i.test(url)
@@ -938,9 +942,6 @@
       const renderStageRetry = errText => {
         if (streamMsg) streamMsg.textContent = errText;
         const altDub = currentDubs.find(d => d?.path && d.path !== path);
-        const trailerId = String(streamRoot?.trailerYoutubeId || payload?.trailerYoutubeId || watchDetail?.trailerYoutubeId || "").trim();
-        const safeYtId = /^[A-Za-z0-9_-]{8,20}$/.test(trailerId) ? trailerId : "";
-        const upcomingTitle = isWatchUpcoming(watchDetail);
         const stage = root.querySelector(".cv-player-stage");
         if (video) {
           video.controls = false;
@@ -950,8 +951,8 @@
             try { video.removeAttribute("src"); } catch {}
           }
         }
-        const displayMsg = safeYtId && /no direct video stream/i.test(String(errText || ""))
-          ? "Direct stream isn't available on this server right now — watch the official trailer below."
+        const displayMsg = /trailer/i.test(String(errText || ""))
+          ? "Direct video stream is unavailable on this server right now. Tap Retry Stream or browse another title."
           : errText;
         if (streamMsg) streamMsg.textContent = displayMsg;
         if (stage) {
@@ -964,21 +965,10 @@
             `position:absolute;inset:0;z-index:20;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:20px;text-align:center;color:#f3f4f6;border-radius:10px;${bgPoster ? `background:linear-gradient(rgba(10,12,18,.78),rgba(10,12,18,.9)),url('${bgPoster.replace(/'/g, "%27")}') center/cover no-repeat;` : "background:rgba(11,13,16,.94);"}`;
           box.innerHTML = `<div style="max-width:460px;font-size:14px;line-height:1.5">${esc(displayMsg)}</div>
             <div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:center">
-              ${safeYtId ? `<button type="button" data-play-trailer class="cv-action-btn cv-action-btn-trailer" style="cursor:pointer">▶ Watch Official Trailer</button>` : ""}
               <button type="button" data-retry-stream class="cv-action-btn cv-action-btn-retry" style="cursor:pointer">↻ Retry Stream</button>
               ${altDub ? `<button type="button" data-switch-alt-dub class="cv-action-btn" style="cursor:pointer">Switch to ${esc(altDub.language || altDub.lanName || "Original Audio")}</button>` : ""}
+              <a href="index.html" class="cv-action-btn" style="text-decoration:none">Browse Movies</a>
             </div>`;
-          box.querySelector("[data-play-trailer]")?.addEventListener("click", () => {
-            if (!safeYtId) return;
-            box.style.padding = "0";
-            box.style.background = "#000";
-            box.innerHTML = `<iframe title="Official Trailer" src="https://www.youtube.com/embed/${encodeURIComponent(safeYtId)}?autoplay=1&rel=0" style="width:100%;height:100%;border:0" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>`;
-            if (streamMsg) {
-              streamMsg.textContent = upcomingTitle
-                ? "Playing Official Trailer · Full stream releases soon"
-                : "Playing Official Trailer";
-            }
-          });
           box.querySelector("[data-retry-stream]")?.addEventListener("click", () => {
             box.remove();
             playEpisode(idx, { ...opts, retryCount: 0, fromRetryClick: true });
@@ -1006,9 +996,7 @@
         const rawSrvMsg = String(payload?.message || payload?.error || "").trim();
         const errText =
           (upcomingTitle ? rawSrvMsg : rawSrvMsg.replace(/Upcoming \/ Unreleased/gi, "currently unavailable")) ||
-          (upcomingTitle
-            ? "This title is Upcoming / Coming Soon and does not have a playable video yet."
-            : "No direct video stream is available on this server right now. Tap Watch Official Trailer or Retry Stream.");
+          "Direct video stream is unavailable on this server right now. Tap Retry Stream or browse another title.";
         renderStageRetry(errText);
         return;
       }
@@ -1020,11 +1008,8 @@
       refreshOfflineBar();
       if (streamMsg) {
         const uniqueQ = [...new Set(sources.map(s => s.quality))];
-        const upcomingTitle = isWatchUpcoming(watchDetail);
         const fastLabel = sources.some(s => s.autoFast) ? "⚡ Auto Fast Server · " : sources.length > 1 ? "Auto Server · " : "";
-        streamMsg.textContent = streamRoot?.isTrailer
-          ? (upcomingTitle ? "Upcoming title · Playing Official Trailer" : "Full video unavailable on server · Playing Official Trailer")
-          : `${fastLabel}${uniqueQ.join(" · ")}${subtitles.length ? ` · ${subtitles.length} subtitles` : ""}`;
+        streamMsg.textContent = `${fastLabel}${uniqueQ.join(" · ")}${subtitles.length ? ` · ${subtitles.length} subtitles` : ""}`;
       }
 
       const historyMeta = {
@@ -1727,8 +1712,14 @@
         refreshOfflineBar();
         showToast("Removed from offline storage");
       });
+      let offlineBarTimer = null;
       window.addEventListener("cv:offline-change", ev => {
-        if (!ev?.detail?.id || ev.detail.id === currentOfflineKey()) refreshOfflineBar();
+        const d = ev?.detail;
+        if (d?.id && d.id !== currentOfflineKey()) return;
+        clearTimeout(offlineBarTimer);
+        offlineBarTimer = setTimeout(() => {
+          refreshOfflineBar();
+        }, d?.status === "downloading" ? 650 : 60);
       });
 
       $("#cvWatchTopPip")?.addEventListener("click", async () => {

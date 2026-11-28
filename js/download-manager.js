@@ -335,7 +335,7 @@
         },
         paused: {
           title: "No paused downloads",
-          hint: "Paused downloads keep all 4 MB chunks safely saved so you can resume later."
+          hint: "Paused downloads keep downloaded chunks safely saved so you can resume later."
         },
         failed: {
           title: "No failed downloads",
@@ -460,12 +460,62 @@
       if (!state.pollTimer) {
         state.pollTimer = setInterval(() => {
           if (state.open) refresh();
-        }, 1200);
+        }, 3500);
       }
     } else if (state.pollTimer) {
       clearInterval(state.pollTimer);
       state.pollTimer = null;
     }
+  }
+
+  function updateItemProgressInPlace(detail) {
+    if (!detail?.id) return false;
+    const item = state.items.find(x => x && x.id === detail.id);
+    if (!item || item.status === "complete") return false;
+
+    const total = Number(detail.totalBytes || item.totalBytes || 0);
+    const done = Number(detail.downloadedBytes ?? item.downloadedBytes ?? 0);
+    const speedBps = Number(detail.speedBps || 0);
+    item.downloadedBytes = done;
+    if (total > 0) item.totalBytes = total;
+    item.speedBps = speedBps;
+    item.status = "downloading";
+
+    const summary = computeSummary(state.items);
+    renderFab(summary);
+
+    if (!state.open || state.activeTab !== "downloading") return true;
+
+    const listEl = document.getElementById("cvDlList");
+    const rowEl = [...(listEl?.querySelectorAll(".cv-dl-item[data-dl-id]") || [])].find(el => el.dataset.dlId === detail.id);
+    if (!rowEl) return false;
+
+    const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+    const isIndeterminate = total <= 0;
+    const progressEl = rowEl.querySelector(".cv-dl-progress");
+    const barEl = progressEl?.querySelector("i");
+    if (progressEl) {
+      progressEl.classList.toggle("is-indeterminate", isIndeterminate);
+      progressEl.classList.remove("is-paused", "is-failed");
+    }
+    if (barEl) {
+      barEl.style.width = `${isIndeterminate ? 36 : pct}%`;
+    }
+
+    const statusEl = rowEl.querySelector(".cv-dl-status-text");
+    if (statusEl) {
+      const speed = fmtSpeed(speedBps);
+      const pctLabel = total > 0 ? `${pct}%` : "Starting";
+      statusEl.className = "cv-dl-status-text is-active";
+      statusEl.textContent = `${pctLabel}${speed ? ` · ${speed}` : ""}`;
+    }
+
+    const sizeEl = rowEl.querySelector(".cv-dl-size");
+    if (sizeEl) {
+      sizeEl.textContent = total > 0 ? `${fmtBytes(done)} / ${fmtBytes(total)}` : fmtBytes(done);
+    }
+
+    return true;
   }
 
   async function refresh() {
@@ -684,7 +734,13 @@
 
   function boot() {
     ensureRoot();
-    window.addEventListener("cv:offline-change", () => scheduleRefresh(80));
+    window.addEventListener("cv:offline-change", ev => {
+      const detail = ev?.detail;
+      if (detail?.status === "downloading" && updateItemProgressInPlace(detail)) {
+        return;
+      }
+      scheduleRefresh(detail?.status === "downloading" ? 320 : 120);
+    });
     window.addEventListener("cv:offline-complete", ev => {
       scheduleRefresh(50);
       if (ev?.detail) {

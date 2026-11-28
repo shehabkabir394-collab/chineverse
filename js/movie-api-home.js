@@ -56,6 +56,14 @@
     if (/\b(?:upcoming|coming\s*soon|unreleased)\b/i.test(titleBadge) && item.hasResource !== true) return true;
     return false;
   };
+  const isTrailerOrUnavailable = item => {
+    if (!item || typeof item !== "object") return true;
+    if (item.hasResource === false || item.isUpcoming === true || item.trailerOnly === true || item.isTrailer === true) return true;
+    if (/\b(?:trailer|teaser|coming\s*soon|unreleased)\b/i.test(`${item.typeBadge || ""} ${item.quality || ""}`)) return true;
+    if (/\b(?:official\s+trailer|teaser\s+trailer|trailer\s+only)\b/i.test(String(item.title || ""))) return true;
+    if (isUpcomingUnreleased(item)) return true;
+    return false;
+  };
 
   const heroEl = $("#cvHeroSpotlight");
   const catSection = $("#cvCategorySection");
@@ -68,7 +76,7 @@
 
   const WATCHLIST_KEY = "cv_watchlist_v1";
   const SPORTS_REMINDER_KEY = "cv_sports_reminders_v1";
-  const HOME_CACHE_KEY = "cv_home_cache_v3";
+  const HOME_CACHE_KEY = "cv_home_cache_v4";
   const HOME_CACHE_TTL_MS = 20 * 60 * 1000;
 
   const EXPLORE_CATEGORIES = [
@@ -928,7 +936,7 @@
     const titleIndexMap = new Map();
     const out = [];
     for (const item of Array.isArray(list) ? list : []) {
-      if (!item || isNigerian(item)) continue;
+      if (!item || isNigerian(item) || isTrailerOrUnavailable(item)) continue;
       if (item.subjectType === 6 && !/anime|animation/i.test(String(item.genre || item.typeBadge || item.title || ""))) continue;
       if (/\b(?:official\s+video|video\s+song|lyrical(?:\s+video)?|full\s+song|audio\s+song)\b/i.test(String(item.title || ""))) continue;
       const key = item.path || item.subjectId || item.title;
@@ -1211,16 +1219,7 @@
       })
       .filter(Boolean);
 
-    const upcomingItems = dedupeList(curated.upcoming?.length ? curated.upcoming : homeData.upcoming)
-      .filter(x => isUpcomingUnreleased(x) && safeImg(posterOf(x)));
-    const upcomingShelf = {
-      title: "⏳ Upcoming Movies",
-      isUpcomingShelf: true,
-      items: upcomingItems,
-      moreHref: ""
-    };
-
-    const allShelves = [...orderedShelves, ...extraLiveSections, upcomingShelf].filter(s => s.items.length > 0);
+    const allShelves = [...orderedShelves, ...extraLiveSections].filter(s => s.items.length > 0);
 
     const buildShelfHtml = (s, shelfIdx) => {
       const visible = s.items.slice(0, s.top10 ? 10 : 24);
@@ -1272,7 +1271,7 @@
     }
   }
 
-  const TAB_CACHE_KEY = "cv_tab_cache_v1";
+  const TAB_CACHE_KEY = "cv_tab_cache_v2";
   const TAB_CACHE_TTL_MS = 5 * 60 * 1000;
   function readTabCache(key) {
     try {
@@ -1341,6 +1340,7 @@
     }
 
     try {
+      window.CineVerseOffline?.yieldForBrowsing?.(1600);
       const endpoint =
         tabKey === "trending"
           ? `/api/movie-api/trending?page=${appendPage}&perPage=30`
@@ -1348,7 +1348,7 @@
       const r = await fetch(endpoint);
       const d = await r.json();
       if (isHomeView) return;
-      const incoming = (Array.isArray(d?.items) ? d.items : []).filter(x => x && !isNigerian(x));
+      const incoming = (Array.isArray(d?.items) ? d.items : []).filter(x => x && !isNigerian(x) && !isTrailerOrUnavailable(x));
       const merged = dedupeList([...existingItems, ...incoming]);
       const items = sortNewestFirst(merged);
       const hasMore = Boolean(d?.hasMore || (d?.maxPage && appendPage < Number(d.maxPage)) || incoming.length >= 18);
@@ -1513,7 +1513,6 @@
         mlbdSections: trimList(payload.mlbdSections, 6).map(s => ({ ...s, items: trimList(s?.items, 16) })),
         sections: trimList(payload.sections, 8).map(s => ({ ...s, items: trimList(s?.items, 16) })),
         curated: slimCurated,
-        upcoming: trimList(payload.upcoming, 12),
         categories: Array.isArray(payload.categories) ? payload.categories.slice(0, 60) : []
       };
       localStorage.setItem(HOME_CACHE_KEY, JSON.stringify({ savedAt: Date.now(), data: snapshot }));
@@ -1539,6 +1538,7 @@
     loadSportsPreview();
     loadAllCategories();
     try {
+      window.CineVerseOffline?.yieldForBrowsing?.(1600);
       const r = await fetch("/api/movie-api/home");
       const d = await r.json();
       if (!r.ok || d.ok !== true) throw new Error(d.error || "API unavailable");

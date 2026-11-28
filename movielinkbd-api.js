@@ -8,6 +8,12 @@ import {
 import {
   isNigerianContent,
   isUpcomingUnreleased,
+  isTrailerOnlyItem,
+  isPlayableCatalogItem,
+  isMediaMarkedUnplayable,
+  markMediaUnplayable,
+  clearMediaUnplayable,
+  onMediaMarkedUnplayable,
   isMusicOrClipSubject,
   strictTitleMatchScore,
   dedupeRepeatedTitleYear,
@@ -121,6 +127,44 @@ const DEFAULT_FALLBACK_CATEGORIES = [
 ];
 
 const mlbdCache = new Map();
+
+function isMlbdPlayableListItem(item) {
+  return Boolean(item && !isNigerianContent(item) && isPlayableCatalogItem(item));
+}
+
+onMediaMarkedUnplayable(() => {
+  for (const [k, entry] of mlbdCache.entries()) {
+    const val = entry?.val;
+    if (!val || typeof val !== "object") continue;
+    let mutated = false;
+    for (const arrKey of ["items", "archiveItems", "latest", "trending", "banners"]) {
+      if (Array.isArray(val[arrKey])) {
+        const next = val[arrKey].filter(isMlbdPlayableListItem);
+        if (next.length !== val[arrKey].length) {
+          val[arrKey] = next;
+          mutated = true;
+        }
+      }
+    }
+    if (Array.isArray(val.sections)) {
+      for (const sec of val.sections) {
+        if (Array.isArray(sec?.items)) {
+          const next = sec.items.filter(isMlbdPlayableListItem);
+          if (next.length !== sec.items.length) {
+            sec.items = next;
+            mutated = true;
+          }
+        }
+      }
+      val.sections = val.sections.filter(s => Array.isArray(s?.items) && s.items.length > 0);
+    }
+    if (val.detail && isMediaMarkedUnplayable(val.detail)) {
+      mlbdCache.delete(k);
+    } else if (mutated && k.startsWith("catalog:") && Array.isArray(val.items) && val.items.length === 0) {
+      mlbdCache.delete(k);
+    }
+  }
+});
 const mlbdStaleCache = new Map();
 const mlbdInFlight = new Map();
 const mlbdItemRegistry = new Map();
@@ -3069,7 +3113,7 @@ async function getMlbdComCatalog({ path = "/", q = "", page = 1 } = {}) {
     const allowMusic = /\b(?:song|songs|music|ost|pop|lyric|lyrical|remix|album|naat|bhajan|track|audio)\b/i.test(cleanQ);
     const scored = [];
     for (const it of fullIndex) {
-      if (!it || isNigerianContent(it)) continue;
+      if (!isMlbdPlayableListItem(it)) continue;
       if (!allowMusic && isMusicOrClipSubject(it)) continue;
       const sc = Math.max(...qVariants.map(qv => scoreSearchMatch(it, qv, { allowBroadMatch: false })));
       if (sc > 0) scored.push({ it, sc });
@@ -3091,7 +3135,7 @@ async function getMlbdComCatalog({ path = "/", q = "", page = 1 } = {}) {
         if (r.status !== "fulfilled") continue;
         const cards = extractMlbdComCards(r.value.html, r.value.tp);
         for (const c of cards) {
-          if (!isNigerianContent(c) && (matchesMlbdCategoryItem(c, path) || ["/", "/top10", "/recently-updated"].includes(normCat))) {
+          if (isMlbdPlayableListItem(c) && (matchesMlbdCategoryItem(c, path) || ["/", "/top10", "/recently-updated"].includes(normCat))) {
             liveItems.push(c);
           }
         }
@@ -3103,7 +3147,7 @@ async function getMlbdComCatalog({ path = "/", q = "", page = 1 } = {}) {
   const seenKeyByTitle = new Map();
   const merged = [];
   const pushUnique = it => {
-    if (!it || isNigerianContent(it)) return;
+    if (!isMlbdPlayableListItem(it)) return;
     const k = normalizePosterKey(it.searchTitle || it.title) + "|" + (it.year || "");
     const pKey = it.path || k;
     const existing = seenMap.get(pKey) || (k !== "|" ? seenKeyByTitle.get(k) : null);
@@ -3201,7 +3245,7 @@ async function getMlbdComHomeFeed() {
       sort: "latest",
       offset: 0,
       limit: 40
-    }).items.map(it => ({ ...it, fromArchive: true }));
+    }).items.map(it => ({ ...it, fromArchive: true })).filter(isMlbdPlayableListItem);
     const sorted = sortMlbdNewestFirst(archiveItems);
     if (sorted.length) {
       parsedSections.push({ ...spec, sorted });
@@ -3337,7 +3381,7 @@ export function mergeAndDedupeMlbdItems(liveItems = [], archiveItems = [], optio
   const orderedKeys = [];
 
   const ingest = (raw, isArchiveFlag) => {
-    if (!raw || typeof raw !== "object" || isNigerianContent(raw)) return;
+    if (!isMlbdPlayableListItem(raw)) return;
     const item = { ...raw, fromArchive: isArchiveFlag ? true : Boolean(raw.fromArchive) };
     const { pathKey, titleKey } = getMlbdItemDedupeKeys(item);
     if (!pathKey && !titleKey) return;
@@ -3571,10 +3615,10 @@ export async function getMlbdHomeFeed() {
             ok: true,
             source: "movielinkbd",
             activeMirror: rawCp.activeMirror || "CinePulse Gateway",
-            sections,
+            sections: sections.map(s => ({ ...s, items: (s.items || []).filter(isMlbdPlayableListItem) })).filter(s => s.items.length > 0),
             latest: mergeAndDedupeMlbdItems([], archiveLatest, { mode: "latest" }).slice(0, 30),
             trending: mergeAndDedupeMlbdItems(norm.trending || sections.flatMap(s => s.items || []).slice(0, 28), archiveTrend, { mode: "trending" }).slice(0, 30),
-            banners: norm.banners || [],
+            banners: (norm.banners || []).filter(isMlbdPlayableListItem),
             categories: norm.categories?.length ? norm.categories : DEFAULT_FALLBACK_CATEGORIES.map(c => ({ ...c, source: "movielinkbd" }))
           }, 120000);
         }
@@ -3773,7 +3817,7 @@ export async function getMlbdSuggest(rawQuery) {
   const seen = new Set();
   const items = [];
   for (const it of [...sortMlbdNewestFirst(cat.items || []), ...(archiveRes.items || [])]) {
-    if (!it || isNigerianContent(it)) continue;
+    if (!isMlbdPlayableListItem(it)) continue;
     const key = it.path || it.title.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
@@ -4576,7 +4620,7 @@ export async function getMlbdDetails(rawPath, hintTitle = "", extraOpts = {}) {
     subtitles: dedupGlobalSubs,
     episodes,
     downloadButtons: pageDownloadButtons,
-    hasResource: hasStreamSources || episodes.some(e => e.downloadButtons.length > 0)
+    hasResource: hasStreamSources || episodes.some(e => e.downloadButtons.some(b => b.type === "mp4"))
   };
 
   const payloadOut = { ok: true, source: "movielinkbd", detail: attachFastRelatedSeasons(detail, rawPath, finalTitle) };
@@ -4601,7 +4645,7 @@ function attachFastRelatedSeasons(detailObj, rawPath = "", hintTitle = "") {
   if (baseSeriesName && baseSeriesName.length >= 3) {
     const baseLower = baseSeriesName.toLowerCase();
     for (const item of mlbdArchiveRecords) {
-      if (!item?.path || seenPaths.has(item.path)) continue;
+      if (!item?.path || seenPaths.has(item.path) || !isMlbdPlayableListItem(item)) continue;
       if (extractBaseSeriesTitle(item.title).toLowerCase() === baseLower) {
         seenPaths.add(item.path);
         const titleKey = `${String(item.title || "").trim()}`.toLowerCase().replace(/\s+/g, " ").trim();
@@ -4852,6 +4896,21 @@ export async function getMlbdStream({ path = "", se = 0, ep = 1, title = "", dub
     }
   }
 
+  sources = (Array.isArray(sources) ? sources : []).filter(
+    s => s && !s.isTrailer && !/\btrailer\b/i.test(String(s.quality || ""))
+  );
+  const regTarget = {
+    path: detail?.path || path,
+    mlbdOriginalPath: detail?.mlbdOriginalPath || "",
+    title: title || detail?.title || ""
+  };
+  if (sources.length > 0) {
+    clearMediaUnplayable(regTarget);
+  } else if (isMlbdDirectPlaybackAvailable() || !isTrailerOnlyItem(detail)) {
+    // Blacklist entries whose live page + backup + CinePulse all return zero direct stream sources
+    markMediaUnplayable(regTarget, detail?.isUpcoming ? "upcoming" : "no_direct_stream");
+  }
+
   return {
     ok: true,
     source: "movielinkbd",
@@ -4870,9 +4929,7 @@ export async function getMlbdStream({ path = "", se = 0, ep = 1, title = "", dub
     downloadButtons: chosen?.downloadButtons || detail.downloadButtons || [],
     message: sources.length
       ? ""
-      : detail?.isUpcoming
-        ? `Upcoming release (${detail.year || "2026"}) — Official details & trailer available; full stream opens after release.`
-        : "Direct video stream is unavailable on this server right now — watch the official trailer or tap Retry Stream."
+      : "Direct video stream is unavailable on this server right now."
   };
 }
 
