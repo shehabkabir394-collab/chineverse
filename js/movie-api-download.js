@@ -175,19 +175,22 @@
     if (offPlay) offPlay.hidden = true;
     offBtn.hidden = false;
 
-    if (rec && (rec.status === "downloading" || window.CineVerseOffline.isActive(id))) {
+    if (rec && (rec.status === "queued" || window.CineVerseOffline.isQueued?.(id))) {
+      offBtn.innerHTML = `<span>⏳ QUEUED IN BACKGROUND · TAP TO PAUSE<small>Waiting for active slot · Browse freely</small></span><b class="icon">⏸</b>`;
+    } else if (rec && (rec.status === "downloading" || window.CineVerseOffline.isActive(id))) {
       const pct = rec.totalBytes > 0 ? Math.min(100, Math.round((rec.downloadedBytes / rec.totalBytes) * 100)) : 0;
       const doneTxt = formatBytes(rec.downloadedBytes) || "0 MB";
       const totTxt = formatBytes(rec.totalBytes) || "?";
-      offBtn.innerHTML = `<span>⏳ SAVING OFFLINE (${pct}%) · TAP TO PAUSE<small>${doneTxt} / ${totTxt} · Saved inside app</small></span><b class="icon">⏸</b>`;
+      const spdTxt = Number(rec.speedBps) > 0 ? ` · ${formatBytes(rec.speedBps)}/s` : "";
+      offBtn.innerHTML = `<span>⏳ BACKGROUND DOWNLOADING (${pct}%) · TAP TO PAUSE<small>${doneTxt} / ${totTxt}${spdTxt} · Continues if you browse other pages</small></span><b class="icon">⏸</b>`;
     } else if (rec && Number(rec.downloadedBytes || 0) > 0) {
       const pct = rec.totalBytes > 0 ? Math.min(100, Math.round((rec.downloadedBytes / rec.totalBytes) * 100)) : 0;
       const doneTxt = formatBytes(rec.downloadedBytes) || "0 MB";
       const totTxt = formatBytes(rec.totalBytes) || "?";
-      offBtn.innerHTML = `<span>▶ RESUME OFFLINE SAVE (${pct}%)<small>${doneTxt} / ${totTxt} saved · Continues without restarting</small></span><b class="icon">▶</b>`;
+      offBtn.innerHTML = `<span>▶ RESUME BACKGROUND DOWNLOAD (${pct}%)<small>${doneTxt} / ${totTxt} saved · Continues without restarting</small></span><b class="icon">▶</b>`;
     } else {
       const meta = [src?.quality, src?.sizeText].filter(Boolean).join(" · ");
-      offBtn.innerHTML = `<span>📥 SAVE OFFLINE IN APP<small>YouTube-style Offline Playback${meta ? ` · ${esc(meta)}` : ""}</small></span><b class="icon">▶</b>`;
+      offBtn.innerHTML = `<span>📥 BACKGROUND DOWNLOAD (SAVE IN APP)<small>Continues across pages · Watch Offline or Export MP4${meta ? ` · ${esc(meta)}` : ""}</small></span><b class="icon">↓</b>`;
     }
   }
 
@@ -230,14 +233,19 @@
       action.removeAttribute("rel");
     }
     action.setAttribute("aria-disabled", "false");
-    action.innerHTML = `<span>⚡ ONE CLICK DOWNLOAD · ${esc(src.quality)}<small>${esc(metaLabel || "Resumable Verified MP4 · Won't cancel halfway")}</small></span><b class="icon">↓</b>`;
+    action.innerHTML = `<span>⚡ BACKGROUND DIRECT DOWNLOAD · ${esc(src.quality)}<small>${esc(metaLabel || "Saves to Device Storage while you browse the app")}</small></span><b class="icon">↓</b>`;
 
     if (safeBtn) {
       safeBtn.hidden = false;
       safeBtn.dataset.dlUrl = finalUrl;
       safeBtn.dataset.dlFallbackUrl = fallbackUrl;
       safeBtn.dataset.dlFilename = filename;
+      safeBtn.dataset.dlQuality = src.quality || "HD";
+      safeBtn.dataset.dlSize = String(Number(src.size || 0));
+      safeBtn.innerHTML = `<span>⚡ INSTANT BROWSER DOWNLOAD (NO CACHE LIMIT)<small>সরাসরি ব্রাউজারের Downloads-এ পাঠান — বড় ফাইলের জন্য সেরা</small></span><b class="icon">⬇</b>`;
     }
+    action.dataset.dlQuality = src.quality || "HD";
+    action.dataset.dlSize = String(Number(src.size || 0));
     if (rawLink) {
       rawLink.hidden = false;
       rawLink.href = finalUrl;
@@ -290,7 +298,7 @@
         const fb = rawFb && rawFb !== href ? rawFb : "";
         const extAttrs = /^https?:\/\//i.test(href) ? ' referrerpolicy="no-referrer" rel="noopener noreferrer"' : "";
         const sub = [s.sizeText || "Full MP4", s.language || "", s.isTrailer ? "Trailer" : ""].filter(Boolean).join(" · ");
-        return `<a class="ms-download-link" href="${esc(href)}" download="${esc(fname)}" data-dl-url="${esc(href)}" data-dl-fallback-url="${esc(fb)}" data-dl-filename="${esc(fname)}"${extAttrs}><span>Download ${esc(s.quality)}<small>${esc(sub)}</small></span><b>⬇</b></a>`;
+        return `<a class="ms-download-link" href="${esc(href)}" download="${esc(fname)}" data-dl-url="${esc(href)}" data-dl-fallback-url="${esc(fb)}" data-dl-filename="${esc(fname)}" data-dl-quality="${esc(s.quality)}" data-dl-size="${Number(s.size || 0)}"${extAttrs}><span>Download ${esc(s.quality)}<small>${esc(sub)}</small></span><b>⬇</b></a>`;
       })
       .join("");
 
@@ -618,17 +626,116 @@
     setTimeout(() => URL.revokeObjectURL(u), 180000);
   }
 
-  async function startVerifiedSingleDownload(url, filename, fallbackUrl = "") {
-    if (busy || !url) return;
-    busy = true;
-    activeDownloadAbort = new AbortController();
+  async function startBackgroundDeviceDownload(url, filename, fallbackUrl = "", opts = {}) {
+    if (!url) return;
 
-    const action = $("#downloadAction");
-    const cancelBtn = $("#downloadCancelBtn");
     const progress = $("#zipProgress");
     const bar = $("#zipProgressBar");
     const label = $("#zipProgressText");
     const status = $("#downloadStatus");
+    const ep = episodes[selected];
+    const coords = episodeCoords(ep, selected)[0] || { se: 0, ep: 1 };
+    const isSeries = episodes.length > 1 || coords.se > 0;
+    const episodeLabel = isSeries ? ep?.label || `Episode ${selected + 1}` : "";
+    const quality = opts.quality || currentSelectedSource?.quality || "HD";
+    const totalBytes = Number(opts.totalBytes ?? currentSelectedSource?.size ?? 0) || 0;
+
+    if (window.CineVerseOffline?.startDeviceDownload) {
+      if (progress) progress.hidden = false;
+      if (bar) bar.style.width = "4%";
+      if (label) label.textContent = "Background Direct Download শুরু হচ্ছে…";
+      try {
+        const res = await window.CineVerseOffline.startDeviceDownload(
+          {
+            id: currentOfflineId(),
+            path: activePath || detail?.path || path,
+            title: detail?.title || requestedTitle || "MovieStream BD",
+            episodeLabel,
+            se: coords.se,
+            ep: coords.ep,
+            quality,
+            url,
+            fallbackUrl,
+            filename,
+            totalBytes,
+            posterUrl: detail?.poster || "",
+            posterFallbackUrl: detail?.rawPoster || "",
+            subtitles: Array.isArray(ep?.subtitles) ? ep.subtitles : [],
+            forceNativeBrowser: Boolean(opts.forceNativeBrowser)
+          },
+          info => {
+            if (!info) return;
+            if (progress) progress.hidden = false;
+            const total = Number(info.totalBytes || 0);
+            const done = Number(info.downloadedBytes || 0);
+            const pct = info.status === "complete" ? 100 : total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+            const speedText = Number(info.speedBps) > 0 ? ` · ${formatBytes(info.speedBps)}/s` : "";
+            if (bar) bar.style.width = `${pct}%`;
+            if (label) {
+              label.textContent =
+                info.status === "complete"
+                  ? `Complete: ${formatBytes(done || total)} (${filename}) — Saving to Device Storage…`
+                  : info.status === "queued"
+                    ? "Queued in Background Download Manager…"
+                    : `Background Direct Download: ${formatBytes(done)} / ${formatBytes(total) || "?"} (${pct}%)${speedText}`;
+            }
+          }
+        );
+
+        if (res.mode === "sw-background") {
+          if (status) status.textContent = "Background Direct Download চলছে — এখন Home বা অন্য পেজ ব্রাউজ করতে পারেন! শেষ হলে ফাইল অটোমেটিক ডিভাইস স্টোরেজে সেভ হবে।";
+          window.CineVerseDownloadManager?.refresh?.();
+          res.promise
+            .then(() => {
+              if (bar) bar.style.width = "100%";
+              if (label) label.textContent = `Complete: ${filename} (Saved to Device Storage)`;
+              if (status) status.textContent = "ডাউনলোড শেষ হয়েছে — ফাইল সরাসরি আপনার ডিভাইসের Downloads-এ সেভ হচ্ছে!";
+            })
+            .catch(err => {
+              if (err?.name !== "AbortError") {
+                if (label) label.textContent = err?.message || "Download ব্যর্থ হয়েছে।";
+                if (status) status.textContent = `ডাউনলোড সমস্যা: ${err?.message || "Download Manager থেকে Resume করুন"}`;
+              }
+            });
+          return;
+        }
+
+        if (res.mode === "native-browser") {
+          if (bar) bar.style.width = "100%";
+          if (label) label.textContent = `Browser Native Download শুরু হয়েছে (${filename})`;
+          if (status) status.textContent = "Browser Native Download শুরু হয়েছে — ডিভাইসের Downloads-এ সেভ হচ্ছে, আপনি নির্দ্বিধায় অ্যাপ ব্রাউজ করতে পারেন।";
+          return;
+        }
+
+        if (res.mode === "instant-export") {
+          if (bar) bar.style.width = "100%";
+          if (label) label.textContent = `Exported: ${filename}`;
+          if (status) status.textContent = "আগেই ডাউনলোড করা ছিল — ফাইল সরাসরি ডিভাইস স্টোরেজে সেভ হচ্ছে!";
+          return;
+        }
+
+        if (bar) bar.style.width = "100%";
+        if (label) label.textContent = `Complete: ${formatBytes(res.promise?.size || totalBytes)} (${filename})`;
+        if (status) status.textContent = "১০০% সম্পূর্ণ ফাইল সেভ হয়েছে।";
+        return;
+      } catch (e) {
+        if (e?.name === "AbortError") {
+          if (label) label.textContent = "Download cancelled.";
+          if (status) status.textContent = "ডাউনলোড বাতিল করা হয়েছে।";
+        } else {
+          if (label) label.textContent = e?.message || "Download ব্যর্থ হয়েছে।";
+          if (status) status.textContent = `ডাউনলোড ব্যর্থ: ${e?.message || "অন্য Quality চেষ্টা করুন"}`;
+        }
+        return;
+      }
+    }
+
+    // Legacy fallback if offline-downloads module isn't loaded
+    if (busy) return;
+    busy = true;
+    activeDownloadAbort = new AbortController();
+    const action = $("#downloadAction");
+    const cancelBtn = $("#downloadCancelBtn");
     const origHtml = action.innerHTML;
 
     action.setAttribute("aria-disabled", "true");
@@ -689,19 +796,22 @@
     e.preventDefault();
     const filename = action?.dataset.dlFilename || action?.getAttribute("download") || "MovieStreamBD-Video.mp4";
     const fallbackUrl = action?.dataset.dlFallbackUrl || "";
-    startVerifiedSingleDownload(url, filename, fallbackUrl);
+    startBackgroundDeviceDownload(url, filename, fallbackUrl, {
+      quality: action?.dataset.dlQuality || currentSelectedSource?.quality || "HD",
+      totalBytes: Number(action?.dataset.dlSize || currentSelectedSource?.size || 0)
+    });
   });
 
-  $("#downloadOfflineBtn")?.addEventListener("click", () => {
+  $("#downloadOfflineBtn")?.addEventListener("click", async () => {
     if (!window.CineVerseOffline) {
       $("#downloadStatus").textContent = "এই ব্রাউজারে Offline storage পাওয়া যায়নি।";
       return;
     }
     const id = currentOfflineId();
     if (!id) return;
-    if (window.CineVerseOffline.isActive(id)) {
-      window.CineVerseOffline.pauseDownload(id);
-      $("#downloadStatus").textContent = "Offline save পজ করা হয়েছে — চাইলে পরে যেকোনো সময় Resume করতে পারবেন।";
+    if (window.CineVerseOffline.isActive(id) || window.CineVerseOffline.isQueued?.(id)) {
+      await window.CineVerseOffline.pauseDownload(id);
+      $("#downloadStatus").textContent = "Background download পজ করা হয়েছে — চাইলে পরে যেকোনো পেজ থেকে Resume করতে পারবেন।";
       syncOfflineUiState();
       return;
     }
@@ -724,19 +834,25 @@
       if (label) {
         label.textContent = info.status === "complete"
           ? `Offline Ready: ${formatBytes(info.downloadedBytes)}`
-          : `Saving Offline: ${formatBytes(info.downloadedBytes)} / ${formatBytes(info.totalBytes) || "?"} (${pct}%)${speedText}`;
+          : info.status === "queued"
+            ? "Queued in Background Download Manager…"
+            : `Background Download: ${formatBytes(info.downloadedBytes)} / ${formatBytes(info.totalBytes) || "?"} (${pct}%)${speedText}`;
       }
       syncOfflineUiState();
     };
 
     window.CineVerseOffline.getDownload(id).then(existing => {
-      if (existing && existing.sourceUrl && existing.status !== "complete") {
-        if (status) status.textContent = "Offline save পুনরায় চালু হয়েছে…";
+      const sameQuality =
+        !existing?.quality ||
+        !currentSelectedSource?.quality ||
+        String(existing.quality).toLowerCase() === String(currentSelectedSource.quality).toLowerCase();
+      if (existing && existing.sourceUrl && existing.status !== "complete" && (sameQuality || Number(existing.downloadedBytes || 0) > 0)) {
+        if (status) status.textContent = "Background download পুনরায় চালু হয়েছে — অন্য পেজে গেলেও চলবে।";
         window.CineVerseOffline.resumeDownload(id, handleProgress).then(() => {
-          if (status) status.textContent = "অফলাইন প্লেব্যাকের জন্য সম্পূর্ণ ভিডিও সেভ হয়েছে! এখন ইন্টারনেট ছাড়াই Play করতে পারবেন।";
+          if (status) status.textContent = "অফলাইন প্লেব্যাকের জন্য সম্পূর্ণ ভিডিও সেভ হয়েছে! Download Manager বা My List থেকে Play / Save MP4 করতে পারবেন।";
           syncOfflineUiState();
         }).catch(err => {
-          if (err?.name !== "AbortError" && status) status.textContent = `Offline save error: ${err?.message || "Try resuming"}`;
+          if (err?.name !== "AbortError" && status) status.textContent = `Download error: ${err?.message || "Try resuming"}`;
           syncOfflineUiState();
         });
         syncOfflineUiState();
@@ -748,7 +864,7 @@
       const finalUrl = decorateMediaUrl(currentSelectedSource.url, filename);
       const rawFallback = currentSelectedSource.proxyUrl ? decorateMediaUrl(currentSelectedSource.proxyUrl, filename) : "";
       const fallbackUrl = rawFallback && rawFallback !== finalUrl ? rawFallback : "";
-      if (status) status.textContent = "ইন-অ্যাপ অফলাইন সেভ শুরু হয়েছে (YouTube Style) — শেষ হলে নেট ছাড়াই প্লে হবে।";
+      if (status) status.textContent = "Background Download শুরু হয়েছে — এখন Home বা অন্য মুভি ব্রাউজ করলেও ডাউনলোড চলতে থাকবে!";
       window.CineVerseOffline
         .startDownload(
           {
@@ -759,6 +875,7 @@
             se: coords.se,
             ep: coords.ep,
             quality: currentSelectedSource.quality || "HD",
+            totalBytes: Number(currentSelectedSource.size || 0),
             url: finalUrl,
             fallbackUrl,
             posterUrl: detail?.poster || "",
@@ -768,11 +885,11 @@
           handleProgress
         )
         .then(() => {
-          if (status) status.textContent = "অফলাইন প্লেব্যাকের জন্য সম্পূর্ণ ভিডিও সেভ হয়েছে! এখন Play Offline বা Downloads পেজ থেকে দেখুন।";
+          if (status) status.textContent = "সম্পূর্ণ ভিডিও সেভ হয়েছে! ডানপাশের Download Manager আইকন বা My List থেকে Play / Save MP4 করুন।";
           syncOfflineUiState();
         })
         .catch(err => {
-          if (err?.name !== "AbortError" && status) status.textContent = `Offline save error: ${err?.message || "Try resuming"}`;
+          if (err?.name !== "AbortError" && status) status.textContent = `Download error: ${err?.message || "Try resuming"}`;
           syncOfflineUiState();
         });
       syncOfflineUiState();
@@ -792,7 +909,11 @@
     const fallbackUrl = safeBtn?.dataset.dlFallbackUrl || action?.dataset.dlFallbackUrl || "";
     const filename = safeBtn?.dataset.dlFilename || action?.dataset.dlFilename || action?.getAttribute("download") || "MovieStreamBD-Video.mp4";
     if (!url || url === "#") return;
-    startVerifiedSingleDownload(url, filename, fallbackUrl);
+    startBackgroundDeviceDownload(url, filename, fallbackUrl, {
+      quality: safeBtn?.dataset.dlQuality || currentSelectedSource?.quality || "HD",
+      totalBytes: Number(safeBtn?.dataset.dlSize || currentSelectedSource?.size || 0),
+      forceNativeBrowser: true
+    });
   });
 
   $("#downloadDirectRaw")?.addEventListener("click", async e => {
@@ -837,7 +958,10 @@
     const url = link.dataset.dlUrl || href;
     const fallbackUrl = link.dataset.dlFallbackUrl || "";
     const filename = link.dataset.dlFilename || link.getAttribute("download") || "MovieStreamBD-Video.mp4";
-    startVerifiedSingleDownload(url, filename, fallbackUrl);
+    startBackgroundDeviceDownload(url, filename, fallbackUrl, {
+      quality: link.dataset.dlQuality || currentSelectedSource?.quality || "HD",
+      totalBytes: Number(link.dataset.dlSize || 0)
+    });
   });
 
   async function fetchEpisodeBlobOnly(item, index) {

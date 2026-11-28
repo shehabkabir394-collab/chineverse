@@ -96,7 +96,21 @@
   }
 
   function pickOfflineMp4Source() {
-    const mp4s = currentPlayableSources.filter(s => {
+    const ep = episodes[selectedEpIdx];
+    const epRaw = [
+      ...(Array.isArray(ep?.sources) ? ep.sources : []),
+      ...(Array.isArray(ep?.downloadButtons) ? ep.downloadButtons : [])
+    ].map(s => ({
+      url: s?.downloadUrl || s?.download_url || s?.url || s?.link || s?.fileUrl || "",
+      proxyUrl: s?.proxyUrl || s?.proxy_url || "",
+      quality: s?.quality || "",
+      size: Number(s?.size || 0),
+      mime: s?.mimeType || s?.type || "",
+      format: s?.format || "",
+      isTrailer: Boolean(s?.isTrailer)
+    }));
+    const combined = [...currentPlayableSources, ...epRaw];
+    const mp4s = combined.filter(s => {
       const u = String(s?.url || "");
       const m = String(s?.mime || "") + " " + String(s?.format || "");
       return u && !/\.m3u8(?:$|[?#])/i.test(u) && !/hls|m3u8|dash/i.test(m) && !/\/api\/mlbd-hls\.m3u8/i.test(u);
@@ -153,6 +167,21 @@
         playLink.href = `watch.html?offline=${encodeURIComponent(rec.id)}`;
       }
       if (rmBtn) rmBtn.hidden = false;
+    } else if (rec.status === "queued" || window.CineVerseOffline.isQueued?.(id)) {
+      btn.classList.add("active");
+      if (span) span.textContent = "Queued";
+      if (bar) {
+        bar.hidden = false;
+        bar.style.display = "flex";
+      }
+      if (barText) barText.textContent = "Waiting in background download queue…";
+      if (barFill) barFill.style.width = `${pct}%`;
+      if (pauseBtn) {
+        pauseBtn.hidden = false;
+        pauseBtn.textContent = "Pause";
+      }
+      if (playLink) playLink.hidden = true;
+      if (rmBtn) rmBtn.hidden = false;
     } else if (rec.status === "downloading" || window.CineVerseOffline.isActive(id)) {
       btn.classList.add("active");
       if (span) span.textContent = total > 0 ? `Saving ${pct}%` : "Saving…";
@@ -160,7 +189,8 @@
         bar.hidden = false;
         bar.style.display = "flex";
       }
-      if (barText) barText.textContent = `Downloading offline: ${fmt(done)} / ${total > 0 ? fmt(total) : "?"} (${pct}%)`;
+      const speedTxt = Number(rec.speedBps) > 0 ? ` · ${fmt(rec.speedBps)}/s` : "";
+      if (barText) barText.textContent = `Background download: ${fmt(done)} / ${total > 0 ? fmt(total) : "?"} (${pct}%)${speedTxt}`;
       if (barFill) barFill.style.width = `${pct}%`;
       if (pauseBtn) {
         pauseBtn.hidden = false;
@@ -199,16 +229,16 @@
     if (existing?.status === "complete") {
       const bar = $("#cvOfflineBar");
       if (bar) bar.hidden = false;
-      showToast("Already saved offline! Tap Play Offline or visit My List.");
+      showToast("Already saved offline! Tap Play Offline or open Download Manager.");
       return;
     }
-    if (existing && window.CineVerseOffline.isActive(id)) {
-      window.CineVerseOffline.pauseDownload(id);
-      showToast("Offline download paused");
+    if (existing && (window.CineVerseOffline.isActive(id) || window.CineVerseOffline.isQueued?.(id))) {
+      await window.CineVerseOffline.pauseDownload(id);
+      showToast("Background download paused");
       return;
     }
     if (existing && existing.sourceUrl) {
-      showToast("Resuming offline download…");
+      showToast("Resuming background download…");
       window.CineVerseOffline.resumeDownload(id).catch(err => {
         if (err?.name !== "AbortError") showToast(err?.message || "Offline download paused");
       });
@@ -218,7 +248,7 @@
 
     const mp4 = pickOfflineMp4Source();
     if (!mp4) {
-      showToast("Direct MP4 offline source unavailable for this stream yet");
+      showToast("Video server still loading — wait a second or use Download button.");
       return;
     }
     const ep = episodes[selectedEpIdx];
@@ -227,7 +257,7 @@
     const isSeries = episodes.length > 1 || se > 0;
     const episodeLabel = isSeries ? ep?.label || `S${String(Math.max(1, se)).padStart(2, "0")} E${String(epNum).padStart(2, "0")}` : "";
 
-    showToast("Saving video for offline playback…");
+    showToast("Background download started — you can browse other movies!");
     window.CineVerseOffline
       .startDownload({
         id,
@@ -237,6 +267,7 @@
         se,
         ep: epNum,
         quality: mp4.quality || "HD",
+        totalBytes: Number(mp4.size || 0),
         url: decorateOfflineUrl(mp4.url),
         fallbackUrl: mp4.proxyUrl && mp4.proxyUrl !== mp4.url ? decorateOfflineUrl(mp4.proxyUrl) : "",
         posterUrl: safeImg(watchDetail?.poster || ""),
@@ -244,7 +275,7 @@
         subtitles: currentSubtitles
       })
       .then(() => {
-        showToast("Saved offline! Watch anytime in Downloads.");
+        showToast("Download complete! Watch anytime in Download Manager.");
       })
       .catch(err => {
         if (err?.name !== "AbortError") showToast(err?.message || "Offline download failed");

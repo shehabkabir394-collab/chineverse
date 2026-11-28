@@ -80,7 +80,9 @@
         const fbAttr = rawFb && rawFb !== poster ? ` data-fallback-src="${esc(rawFb)}"` : "";
         const loadAttr = (idx < 6 ? 'loading="eager"' : 'loading="lazy"') + (idx < 4 ? ' fetchpriority="high"' : "");
         const isComplete = item.status === "complete";
-        const isDownloading = item.status === "downloading" || Boolean(window.CineVerseOffline?.isActive?.(item.id));
+        const isQueued = item.status === "queued" || Boolean(window.CineVerseOffline?.isQueued?.(item.id));
+        const isDownloading = !isComplete && !isQueued && (item.status === "downloading" || Boolean(window.CineVerseOffline?.isActive?.(item.id)));
+        const isFailed = !isComplete && !isQueued && !isDownloading && item.status === "error";
         const total = Number(item.totalBytes || 0);
         const done = Number(item.downloadedBytes || 0);
         const pct = isComplete ? 100 : total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
@@ -88,8 +90,12 @@
           ? "Offline Ready"
           : isDownloading
             ? `Saving ${pct}%`
-            : `Paused ${pct}%`;
-        const statusColor = isComplete ? "#86efac" : isDownloading ? "#fda4af" : "#fcd34d";
+            : isQueued
+              ? "Waiting for Download"
+              : isFailed
+                ? "Failed · Tap Resume"
+                : `Paused ${pct}%`;
+        const statusColor = isComplete ? "#86efac" : isDownloading ? "#fda4af" : isQueued ? "#cbd5e1" : isFailed ? "#fca5a5" : "#fcd34d";
         const playHref = isComplete
           ? `watch.html?offline=${encodeURIComponent(item.id)}`
           : item.path
@@ -128,7 +134,7 @@
                 isComplete
                   ? `<a class="cv-saved-mini-btn fav" href="${esc(playHref)}" style="text-decoration:none;text-align:center">▶ Play</a>
                      <button type="button" class="cv-saved-mini-btn" data-offline-export="${esc(item.id)}" title="Save MP4 file to device">⬇ MP4</button>`
-                  : isDownloading
+                  : isDownloading || isQueued
                     ? `<button type="button" class="cv-saved-mini-btn" data-offline-pause="${esc(item.id)}">⏸ Pause</button>`
                     : `<button type="button" class="cv-saved-mini-btn fav" data-offline-resume="${esc(item.id)}">▶ Resume</button>`
               }

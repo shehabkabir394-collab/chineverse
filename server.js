@@ -3022,7 +3022,10 @@ app.use(
   express.static(__dirname, {
     extensions: ["html"],
     setHeaders: (res, filePath) => {
-      if (/\.html$/i.test(filePath)) {
+      if (/[\\/]service-worker\.js$/i.test(filePath)) {
+        res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+        res.setHeader("Service-Worker-Allowed", "/");
+      } else if (/\.html$/i.test(filePath)) {
         res.setHeader("Cache-Control", "no-cache, must-revalidate");
       } else if (/\.(?:js|css)$/i.test(filePath)) {
         res.setHeader("Cache-Control", "public, max-age=60, must-revalidate");
