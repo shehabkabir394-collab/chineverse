@@ -2350,15 +2350,34 @@ function pickBetterCatalogItem(prev, next) {
   return mergeMeta(prev, next);
 }
 
+function normalizeCatalogPathKey(item) {
+  const raw = String(item?.path || item?.detailPath || "").trim().toLowerCase().replace(/\/+$/, "");
+  return raw && raw !== "/" ? raw : "";
+}
+
 function dedupeCatalogItems(items = []) {
   const byKey = new Map();
+  const byPath = new Map();
+  const ordered = [];
   for (const item of items) {
     if (!item || typeof item !== "object") continue;
     const key = normalizeCatalogDedupeKey(item);
-    if (!key) continue;
-    byKey.set(key, pickBetterCatalogItem(byKey.get(key), item));
+    const pKey = normalizeCatalogPathKey(item);
+    if (!key && !pKey) continue;
+    const existing = (pKey && byPath.get(pKey)) || (key && byKey.get(key)) || null;
+    if (existing) {
+      const merged = pickBetterCatalogItem(existing.item, item);
+      existing.item = merged;
+      if (key && !byKey.has(key)) byKey.set(key, existing);
+      if (pKey && !byPath.has(pKey)) byPath.set(pKey, existing);
+      continue;
+    }
+    const slot = { item };
+    ordered.push(slot);
+    if (key) byKey.set(key, slot);
+    if (pKey) byPath.set(pKey, slot);
   }
-  return [...byKey.values()];
+  return ordered.map(s => s.item);
 }
 
 function compactHomeCard(item) {
@@ -2594,19 +2613,20 @@ async function fetchUnifiedCatalogUpstreamBatch({ category, norm, upstreamPage, 
 
 function mergeBatchIntoUnifiedPool(pool, rawItems, { preserveOrder = false, allowResortWhole = false } = {}) {
   const arr = Array.isArray(rawItems) ? rawItems : [];
-  const hasLiveInPool = pool.items.some(x => x && x.fromArchive !== true);
-  const hasLiveInBatch = arr.some(x => x && x.fromArchive !== true);
-  const separatedBatch = (hasLiveInPool || hasLiveInBatch)
-    ? arr.filter(x => x && x.fromArchive !== true)
-    : arr;
-  const dedupedBatch = dedupeCatalogItems(separatedBatch);
+  if (!pool.pathIndex) pool.pathIndex = new Map();
+  const dedupedBatch = dedupeCatalogItems(arr);
   const newOnes = [];
   for (const item of dedupedBatch) {
     const key = normalizeCatalogDedupeKey(item);
-    if (!key) continue;
-    const existingIdx = pool.keyIndex.get(key);
+    const pKey = normalizeCatalogPathKey(item);
+    if (!key && !pKey) continue;
+    let existingIdx = pKey ? pool.pathIndex.get(pKey) : undefined;
+    if (existingIdx === undefined && key) existingIdx = pool.keyIndex.get(key);
     if (existingIdx !== undefined) {
-      pool.items[existingIdx] = compactCatalogCard(pickBetterCatalogItem(pool.items[existingIdx], item));
+      const merged = compactCatalogCard(pickBetterCatalogItem(pool.items[existingIdx], item));
+      pool.items[existingIdx] = merged;
+      if (key && !pool.keyIndex.has(key)) pool.keyIndex.set(key, existingIdx);
+      if (pKey && !pool.pathIndex.has(pKey)) pool.pathIndex.set(pKey, existingIdx);
     } else {
       newOnes.push(item);
     }
@@ -2618,9 +2638,12 @@ function mergeBatchIntoUnifiedPool(pool, rawItems, { preserveOrder = false, allo
     const ordered = preserveOrder ? combined : sortCatalogNewestFirst(combined);
     pool.items = ordered.map(compactCatalogCard);
     pool.keyIndex = new Map();
+    pool.pathIndex = new Map();
     pool.items.forEach((it, idx) => {
       const k = normalizeCatalogDedupeKey(it);
+      const pk = normalizeCatalogPathKey(it);
       if (k && !pool.keyIndex.has(k)) pool.keyIndex.set(k, idx);
+      if (pk && !pool.pathIndex.has(pk)) pool.pathIndex.set(pk, idx);
     });
     return;
   }
@@ -2628,9 +2651,12 @@ function mergeBatchIntoUnifiedPool(pool, rawItems, { preserveOrder = false, allo
   const orderedNew = preserveOrder ? newOnes : sortCatalogNewestFirst(newOnes);
   for (const rawNew of orderedNew) {
     const k = normalizeCatalogDedupeKey(rawNew);
-    if (!k || pool.keyIndex.has(k)) continue;
+    const pk = normalizeCatalogPathKey(rawNew);
+    if ((!k && !pk) || (k && pool.keyIndex.has(k)) || (pk && pool.pathIndex.has(pk))) continue;
     const compact = compactCatalogCard(rawNew);
-    pool.keyIndex.set(k, pool.items.length);
+    const idx = pool.items.length;
+    if (k) pool.keyIndex.set(k, idx);
+    if (pk) pool.pathIndex.set(pk, idx);
     pool.items.push(compact);
   }
 }
@@ -2834,10 +2860,11 @@ async function buildMergedHomePayload(query = new URLSearchParams()) {
         .map((item, idx) => ({
           item,
           idx,
+          isLive: item?.fromArchive ? 0 : 1,
           score: (isDirectlyStreamable(item) ? 4 : 0) + (hasCardPoster(item) ? 2 : 0),
           views: Number(item?.views) || 0
         }))
-        .sort((a, b) => (b.score - a.score) || (b.views - a.views) || (a.idx - b.idx))
+        .sort((a, b) => (b.isLive - a.isLive) || (b.views - a.views) || (b.score - a.score) || (a.idx - b.idx))
         .map(x => x.item);
     };
     const cleanMlbdSecs = (mlbd.sections || [])
@@ -2847,19 +2874,19 @@ async function buildMergedHomePayload(query = new URLSearchParams()) {
         const postered = validItems.filter(hasCardPoster);
         const isMostWatchSec = /^\/mostwatch/i.test(String(s?.categoryPath || ""));
         const sorter = isMostWatchSec ? rankTrendingItems : rankHomeItems;
-        const curatedItems = (postered.length >= 4 ? sorter(postered) : sorter(validItems)).slice(0, 28).map(compactHomeCard);
+        const curatedItems = (postered.length >= 4 ? sorter(postered) : sorter(validItems)).slice(0, 28).map(compactCatalogCard);
         return { ...s, items: curatedItems };
       })
       .filter(s => s.items.length > 0);
 
     const explicitLatestSec = cleanMlbdSecs.find(s => /^\/new$/i.test(String(s?.categoryPath || "").replace(/\/+$/, "")));
-    const liveMlbdLatest = Array.isArray(mlbd.latest) && mlbd.latest.length
-      ? mlbd.latest.filter(x => x && x.fromArchive !== true && !isNigerianContent(x) && hasPlayableStream(x))
-      : (explicitLatestSec?.items || []).filter(x => x && x.fromArchive !== true);
-    mlbdFreshNewItems = liveMlbdLatest.slice(0, 28).map(compactCatalogCard);
+    const mergedMlbdLatest = Array.isArray(mlbd.latest) && mlbd.latest.length
+      ? mlbd.latest.filter(x => x && !isNigerianContent(x) && hasPlayableStream(x))
+      : (explicitLatestSec?.items || []);
+    mlbdFreshNewItems = dedupeCatalogItems(mergedMlbdLatest).slice(0, 28).map(compactCatalogCard);
     payload.mlbdSections = cleanMlbdSecs;
     payload.mlbdLatest = mlbdFreshNewItems;
-    payload.mlbdTrending = rankTrendingItems((mlbd.trending || []).filter(x => x && x.fromArchive !== true && !isNigerianContent(x) && hasPlayableStream(x))).slice(0, 28).map(compactCatalogCard);
+    payload.mlbdTrending = rankTrendingItems(dedupeCatalogItems((mlbd.trending || []).filter(x => x && !isNigerianContent(x) && hasPlayableStream(x)))).slice(0, 28).map(compactCatalogCard);
     payload.mlbdCategories = mlbd.categories || [];
     const existingCats = new Set((payload.categories || []).map(c => c?.path));
     payload.categories = [
