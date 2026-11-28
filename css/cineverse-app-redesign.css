@@ -1244,24 +1244,31 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   align-items: center;
   gap: 8px;
   overflow-x: auto;
-  scrollbar-width: none;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(248, 113, 113, 0.35) transparent;
   padding-bottom: 4px;
 }
 
 .cv-ep-strip.expanded {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(58px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(56px, 1fr));
+  gap: 8px;
   overflow-x: visible;
 }
 
 .cv-ep-strip::-webkit-scrollbar {
-  display: none;
+  height: 4px;
+}
+
+.cv-ep-strip::-webkit-scrollbar-thumb {
+  background: rgba(248, 113, 113, 0.35);
+  border-radius: 999px;
 }
 
 .cv-ep-btn {
-  min-width: 58px;
-  height: 46px;
-  padding: 0 12px;
+  min-width: 54px;
+  height: 44px;
+  padding: 0 10px;
   border-radius: 10px;
   border: 1px solid var(--cv-border);
   background: var(--cv-surface-2);

@@ -371,11 +371,13 @@
     const strip = $("#cvEpisodeStrip");
     if (!strip) return;
     const activeGroup = groups.get(selectedSeasonNum) || [...groups.values()][0] || [];
-    strip.classList.toggle("expanded", showAllEpisodes);
+    const autoExpanded = activeGroup.length > 1 && activeGroup.length <= 18;
+    const isExpanded = showAllEpisodes || autoExpanded;
+    strip.classList.toggle("expanded", isExpanded);
 
     const allBtn =
-      activeGroup.length > 1
-        ? `<button type="button" class="cv-ep-btn ${showAllEpisodes ? "active" : ""}" id="cvToggleAllEps">All</button>`
+      activeGroup.length > 18
+        ? `<button type="button" class="cv-ep-btn cv-ep-toggle-all ${showAllEpisodes ? "is-expanded" : ""}" id="cvToggleAllEps">${showAllEpisodes ? "Collapse" : `All (${activeGroup.length})`}</button>`
         : "";
     const btns = activeGroup
       .map(({ ep, idx }) => {
@@ -778,11 +780,15 @@
       const targetEp = episodes[targetEpIdx];
       const tSe = Number(targetEp?.seasonNumber ?? targetEp?.se ?? 0) || 0;
       const tEpNum = targetEp?.ep != null ? Number(targetEp.ep) : Number(targetEp?.episodeNumber ?? targetEp?.number ?? 1);
+      const streamTitle =
+        requestedTitle && /\bEp(?:isode)?s?\s*\d+/i.test(requestedTitle) && !/\bEp(?:isode)?s?\s*\d+/i.test(watchDetail?.title || "")
+          ? requestedTitle
+          : (watchDetail?.title || requestedTitle || "");
       return new URLSearchParams({
         path: String(path || watchDetail?.path || ""),
         subjectId: String(watchDetail?.subjectId || watchDetail?.id || ""),
         detailPath: String(watchDetail?.detailPath || ""),
-        title: String(watchDetail?.title || ""),
+        title: String(streamTitle),
         se: String(tSe),
         ep: String(tEpNum),
         ...(manualDubSelected || optsObj.dubLock ? { dubLock: "1" } : {})
@@ -793,12 +799,16 @@
       const qs = buildStreamQs(idx, opts);
       const cacheKey = qs.toString();
       let r, payload;
-      const cachedStream = !opts.retryCount && streamCache.get(cacheKey);
+      const cachedStream = !opts.retryCount && !opts.fromRetryClick && streamCache.get(cacheKey);
       if (cachedStream && Date.now() - cachedStream.at < 120000) {
         r = { ok: true };
         payload = cachedStream.payload;
       } else {
-        ({ res: r, data: payload } = await safeFetchJson(`/api/movie-api/stream?${cacheKey}`, { cache: "no-store" }));
+        if (opts.fromRetryClick) {
+          streamCache.delete(cacheKey);
+          qs.set("retry", "1");
+        }
+        ({ res: r, data: payload } = await safeFetchJson(`/api/movie-api/stream?${qs.toString()}`, { cache: "no-store" }));
         if (r?.ok && Array.isArray(payload?.sources) && payload.sources.length) {
           streamCache.set(cacheKey, { payload, at: Date.now() });
         }
@@ -940,7 +950,7 @@
           });
           box.querySelector("[data-retry-stream]")?.addEventListener("click", () => {
             box.remove();
-            playEpisode(idx, { ...opts, retryCount: 0 });
+            playEpisode(idx, { ...opts, retryCount: 0, fromRetryClick: true });
           });
           box.querySelector("[data-switch-alt-dub]")?.addEventListener("click", () => {
             box.remove();
@@ -1069,10 +1079,10 @@
           box.style.cssText =
             "position:absolute;inset:0;z-index:20;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:20px;text-align:center;background:rgba(11,13,16,.88);color:#f3f4f6;border-radius:10px;";
           box.innerHTML = `<div style="max-width:460px;font-size:14px;line-height:1.5">${esc(msg)}</div>
-            <button type="button" data-retry-stream class="cv-action-btn" style="background:var(--cv-red,#f87171);border-color:var(--cv-red,#f87171);color:#fff;cursor:pointer">↻ Retry Stream</button>`;
+            <button type="button" data-retry-stream class="cv-action-btn cv-action-btn-retry" style="cursor:pointer">↻ Retry Stream</button>`;
           box.querySelector("[data-retry-stream]")?.addEventListener("click", () => {
             box.remove();
-            playEpisode(idx, { ...opts, retryCount: 0 });
+            playEpisode(idx, { ...opts, retryCount: 0, fromRetryClick: true });
           });
           stage.appendChild(box);
         }

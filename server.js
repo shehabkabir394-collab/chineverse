@@ -1759,7 +1759,8 @@ app.all("/api/movie-api/*", async (req, res) => {
           se: query.get("se") || 0,
           ep: query.get("ep") || 1,
           title: String(query.get("title") || ""),
-          dubLock: query.get("dubLock") === "1"
+          dubLock: query.get("dubLock") === "1",
+          bypassCache: query.get("retry") === "1"
         })
       );
       recordStreamEvent({
