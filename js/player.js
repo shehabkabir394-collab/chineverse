@@ -1635,7 +1635,9 @@
         );
       }
     });
-    video.addEventListener("ended", () => localStorage.removeItem(storageKey));
+    video.addEventListener("ended", () => {
+      try { localStorage.removeItem(storageKey); } catch {}
+    });
 
     wrap.tabIndex = 0;
     wrap.addEventListener("keydown", e => {

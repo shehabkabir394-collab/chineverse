@@ -83,6 +83,16 @@ function recordStreamEvent(evt) {
 
 app.set("trust proxy", true);
 
+// Force HTTPS on production domain when accessed over plain HTTP (helps social/FB links)
+app.use((req, res, next) => {
+  const host = String(req.get("host") || "").split(":")[0].toLowerCase();
+  const proto = String(req.get("x-forwarded-proto") || req.protocol || "").split(",")[0].trim().toLowerCase();
+  if ((host === "moviestreambd.fun" || host === "www.moviestreambd.fun") && proto === "http") {
+    return res.redirect(301, `https://${host}${req.originalUrl || "/"}`);
+  }
+  next();
+});
+
 // Fast gzip compression for API JSON & text assets (>= 1 KB)
 app.use((req, res, next) => {
   const acceptEnc = String(req.headers["accept-encoding"] || "");
@@ -3042,11 +3052,21 @@ app.use(async (req, res, next) => {
 
   let reqPath = req.path || "/";
   if (reqPath === "/") reqPath = "/index.html";
-  const ext = path.extname(reqPath).toLowerCase();
+  let ext = path.extname(reqPath).toLowerCase();
+  if (!ext && !reqPath.endsWith("/") && !reqPath.startsWith("/api/")) {
+    reqPath = `${reqPath}.html`;
+    ext = ".html";
+  }
   const mime = STATIC_TEXT_MIME[ext];
   if (!mime) return next();
 
-  const resolved = path.resolve(__dirname, "." + decodeURIComponent(reqPath));
+  let decodedPath = "";
+  try {
+    decodedPath = decodeURIComponent(reqPath);
+  } catch {
+    return next();
+  }
+  const resolved = path.resolve(__dirname, "." + decodedPath);
   if (!resolved.startsWith(__dirname + path.sep) && resolved !== path.join(__dirname, "index.html")) {
     return next();
   }

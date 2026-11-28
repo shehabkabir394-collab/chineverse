@@ -38,9 +38,9 @@ export async function onRequest(context) {
   // access remains restricted by the Origin allowlist below; host allowlist
   // above also remains enforced.
 
-  // If a browser sends Origin, it must be the production CineVerse origin.
-  let originAllowed = !origin;
-  if (origin) {
+  // If a browser sends Origin, it must be the production CineVerse origin (allow "null" from sandboxed in-app WebViews).
+  let originAllowed = !origin || origin === "null";
+  if (origin && origin !== "null") {
     try { originAllowed = ALLOWED_ORIGINS.has(origin) || isAllowedHostname(new URL(origin).hostname); }
     catch { originAllowed = false; }
   }

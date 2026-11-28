@@ -1122,11 +1122,13 @@
           : [{ label: d.title || "Play", number: 1, seasonNumber: 0, episodeNumber: 1, se: 0, ep: 0 }];
       currentDubs = Array.isArray(d.dubs) ? d.dubs : currentDubs;
 
-      history.replaceState(
-        null,
-        "",
-        `watch.html?path=${encodeURIComponent(path)}&title=${encodeURIComponent(d.title || "")}`
-      );
+      try {
+        history.replaceState(
+          null,
+          "",
+          `watch.html?path=${encodeURIComponent(path)}&title=${encodeURIComponent(d.title || "")}`
+        );
+      } catch {}
       document.title = `${d.title || "Watch"} — MovieStream BD`;
 
       const titleHeading = root.querySelector(".cv-watch-title");
