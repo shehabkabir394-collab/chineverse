@@ -219,9 +219,9 @@ function convertSrtToVtt(rawText) {
   return `WEBVTT\n\n${cues.join("\n\n")}\n`;
 }
 
-const IMAGE_CACHE_MAX_ENTRIES = 400;
-const IMAGE_CACHE_MAX_BYTES = 1.5 * 1024 * 1024;
-const IMAGE_CACHE_MAX_TOTAL_BYTES = 48 * 1024 * 1024;
+const IMAGE_CACHE_MAX_ENTRIES = 200;
+const IMAGE_CACHE_MAX_BYTES = 1024 * 1024;
+const IMAGE_CACHE_MAX_TOTAL_BYTES = 20 * 1024 * 1024;
 const IMAGE_CACHE_TTL_MS = 12 * 3600 * 1000;
 const IMAGE_ERR_TTL_MS = 45 * 1000;
 const IMAGE_CACHE_CONTROL = "public, max-age=604800, s-maxage=2592000, stale-while-revalidate=86400";

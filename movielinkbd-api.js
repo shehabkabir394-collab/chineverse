@@ -310,16 +310,29 @@ function populateArchiveFromRawJson(raw) {
   mlbdArchiveRecords = [...mlbdArchiveByPath.values()];
 }
 
+function readMlbdArchiveRawSync(fs) {
+  const gzUrl = new URL("./data/mlbd-archive.json.gz", import.meta.url);
+  if (fs.existsSync(gzUrl)) {
+    const zlib = typeof process !== "undefined" ? process.getBuiltinModule?.("zlib") : null;
+    if (zlib?.gunzipSync) {
+      return zlib.gunzipSync(fs.readFileSync(gzUrl)).toString("utf8");
+    }
+  }
+  const archiveUrl = new URL("./data/mlbd-archive.json", import.meta.url);
+  if (fs.existsSync(archiveUrl)) {
+    return fs.readFileSync(archiveUrl, "utf8");
+  }
+  return "";
+}
+
 function loadMlbdArchiveFromDisk() {
   if (mlbdArchiveLoaded) return;
   try {
     const fs = typeof process !== "undefined" ? process.getBuiltinModule?.("fs") : null;
     if (!fs) return;
     mlbdArchiveLoaded = true;
-    const archiveUrl = new URL("./data/mlbd-archive.json", import.meta.url);
-    if (!fs.existsSync(archiveUrl)) return;
-    const raw = fs.readFileSync(archiveUrl, "utf8");
-    populateArchiveFromRawJson(raw);
+    const raw = readMlbdArchiveRawSync(fs);
+    if (raw) populateArchiveFromRawJson(raw);
   } catch (err) {
     console.warn("[MovieStreamBD archive load]", err?.message || err);
   }
@@ -337,11 +350,21 @@ async function ensureMlbdArchiveLoaded() {
         return;
       }
       const fs = await import("node:fs");
-      const archiveUrl = new URL("./data/mlbd-archive.json", import.meta.url);
-      if (fs.existsSync(archiveUrl)) {
-        const raw = await fs.promises.readFile(archiveUrl, "utf8");
-        populateArchiveFromRawJson(raw);
+      const gzUrl = new URL("./data/mlbd-archive.json.gz", import.meta.url);
+      let raw = "";
+      if (fs.existsSync(gzUrl)) {
+        const zlib = await import("node:zlib");
+        const { promisify } = await import("node:util");
+        const gunzipAsync = promisify(zlib.gunzip);
+        const gzBuf = await fs.promises.readFile(gzUrl);
+        raw = (await gunzipAsync(gzBuf)).toString("utf8");
+      } else {
+        const archiveUrl = new URL("./data/mlbd-archive.json", import.meta.url);
+        if (fs.existsSync(archiveUrl)) {
+          raw = await fs.promises.readFile(archiveUrl, "utf8");
+        }
       }
+      if (raw) populateArchiveFromRawJson(raw);
       mlbdArchiveLoaded = true;
     } catch (err) {
       console.warn("[MovieStreamBD async archive load]", err?.message || err);
