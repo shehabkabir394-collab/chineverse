@@ -470,9 +470,17 @@
       grid.innerHTML = "";
     }
     try {
-      const r = await fetch("/api/movie-api/sports");
-      const data = await r.json();
-      if (!r.ok) throw Error(data.error || "HTTP " + r.status);
+      let data = null;
+      const pre = window.__cvSportsPreload;
+      if (pre) {
+        window.__cvSportsPreload = null;
+        data = await pre.catch(() => null);
+      }
+      if (!data) {
+        const r = await fetch("/api/movie-api/sports", { headers: { Accept: "application/json" } });
+        data = await r.json();
+        if (!r.ok) throw Error(data.error || "HTTP " + r.status);
+      }
       const freshItems = findArray(data);
       if (!freshItems.length) {
         if (!paintedCached) status.textContent = "API connected, কিন্তু channel list পাওয়া যায়নি।";

@@ -96,30 +96,16 @@
   }
 
   function pickOfflineMp4Source() {
-    const ep = episodes[selectedEpIdx];
-    const epRaw = [
-      ...(Array.isArray(ep?.sources) ? ep.sources : []),
-      ...(Array.isArray(ep?.downloadButtons) ? ep.downloadButtons : [])
-    ].map(s => ({
-      url: s?.downloadUrl || s?.download_url || s?.url || s?.link || s?.fileUrl || "",
-      proxyUrl: s?.proxyUrl || s?.proxy_url || "",
-      quality: s?.quality || "",
-      size: Number(s?.size || 0),
-      mime: s?.mimeType || s?.type || "",
-      format: s?.format || "",
-      isTrailer: Boolean(s?.isTrailer)
-    }));
-    const combined = [...currentPlayableSources, ...epRaw];
-    const mp4s = combined.filter(s => {
+    const mp4s = currentPlayableSources.filter(s => {
       const u = String(s?.url || "");
       const m = String(s?.mime || "") + " " + String(s?.format || "");
       return u && !/\.m3u8(?:$|[?#])/i.test(u) && !/hls|m3u8|dash/i.test(m) && !/\/api\/mlbd-hls\.m3u8/i.test(u);
     });
     if (!mp4s.length) return null;
     const activeQ = String(playerApi?.getState?.()?.activeQuality || "");
-    const nonTrailers = mp4s.filter(s => !s.isTrailer && !/\btrailer\b/i.test(String(s.quality || "")));
-    if (!nonTrailers.length) return null;
-    return nonTrailers.find(s => activeQ && s.quality === activeQ) || nonTrailers[0];
+    const nonTrailers = mp4s.filter(s => !s.isTrailer);
+    const pool = nonTrailers.length ? nonTrailers : mp4s;
+    return pool.find(s => activeQ && s.quality === activeQ) || pool[0];
   }
 
   async function refreshOfflineBar() {
@@ -167,21 +153,6 @@
         playLink.href = `watch.html?offline=${encodeURIComponent(rec.id)}`;
       }
       if (rmBtn) rmBtn.hidden = false;
-    } else if (rec.status === "queued" || window.CineVerseOffline.isQueued?.(id)) {
-      btn.classList.add("active");
-      if (span) span.textContent = "Queued";
-      if (bar) {
-        bar.hidden = false;
-        bar.style.display = "flex";
-      }
-      if (barText) barText.textContent = "Waiting in background download queue…";
-      if (barFill) barFill.style.width = `${pct}%`;
-      if (pauseBtn) {
-        pauseBtn.hidden = false;
-        pauseBtn.textContent = "Pause";
-      }
-      if (playLink) playLink.hidden = true;
-      if (rmBtn) rmBtn.hidden = false;
     } else if (rec.status === "downloading" || window.CineVerseOffline.isActive(id)) {
       btn.classList.add("active");
       if (span) span.textContent = total > 0 ? `Saving ${pct}%` : "Saving…";
@@ -189,8 +160,7 @@
         bar.hidden = false;
         bar.style.display = "flex";
       }
-      const speedTxt = Number(rec.speedBps) > 0 ? ` · ${fmt(rec.speedBps)}/s` : "";
-      if (barText) barText.textContent = `Background download: ${fmt(done)} / ${total > 0 ? fmt(total) : "?"} (${pct}%)${speedTxt}`;
+      if (barText) barText.textContent = `Downloading offline: ${fmt(done)} / ${total > 0 ? fmt(total) : "?"} (${pct}%)`;
       if (barFill) barFill.style.width = `${pct}%`;
       if (pauseBtn) {
         pauseBtn.hidden = false;
@@ -229,16 +199,16 @@
     if (existing?.status === "complete") {
       const bar = $("#cvOfflineBar");
       if (bar) bar.hidden = false;
-      showToast("Already saved offline! Tap Play Offline or open Download Manager.");
+      showToast("Already saved offline! Tap Play Offline or visit My List.");
       return;
     }
-    if (existing && (window.CineVerseOffline.isActive(id) || window.CineVerseOffline.isQueued?.(id))) {
-      await window.CineVerseOffline.pauseDownload(id);
-      showToast("Background download paused");
+    if (existing && window.CineVerseOffline.isActive(id)) {
+      window.CineVerseOffline.pauseDownload(id);
+      showToast("Offline download paused");
       return;
     }
     if (existing && existing.sourceUrl) {
-      showToast("Resuming background download…");
+      showToast("Resuming offline download…");
       window.CineVerseOffline.resumeDownload(id).catch(err => {
         if (err?.name !== "AbortError") showToast(err?.message || "Offline download paused");
       });
@@ -248,7 +218,7 @@
 
     const mp4 = pickOfflineMp4Source();
     if (!mp4) {
-      showToast("Video server still loading — wait a second or use Download button.");
+      showToast("Direct MP4 offline source unavailable for this stream yet");
       return;
     }
     const ep = episodes[selectedEpIdx];
@@ -257,7 +227,7 @@
     const isSeries = episodes.length > 1 || se > 0;
     const episodeLabel = isSeries ? ep?.label || `S${String(Math.max(1, se)).padStart(2, "0")} E${String(epNum).padStart(2, "0")}` : "";
 
-    showToast("Background download started — you can browse other movies!");
+    showToast("Saving video for offline playback…");
     window.CineVerseOffline
       .startDownload({
         id,
@@ -267,7 +237,6 @@
         se,
         ep: epNum,
         quality: mp4.quality || "HD",
-        totalBytes: Number(mp4.size || 0),
         url: decorateOfflineUrl(mp4.url),
         fallbackUrl: mp4.proxyUrl && mp4.proxyUrl !== mp4.url ? decorateOfflineUrl(mp4.proxyUrl) : "",
         posterUrl: safeImg(watchDetail?.poster || ""),
@@ -275,7 +244,7 @@
         subtitles: currentSubtitles
       })
       .then(() => {
-        showToast("Download complete! Watch anytime in Download Manager.");
+        showToast("Saved offline! Watch anytime in Downloads.");
       })
       .catch(err => {
         if (err?.name !== "AbortError") showToast(err?.message || "Offline download failed");
@@ -402,13 +371,11 @@
     const strip = $("#cvEpisodeStrip");
     if (!strip) return;
     const activeGroup = groups.get(selectedSeasonNum) || [...groups.values()][0] || [];
-    const autoExpanded = activeGroup.length > 1 && activeGroup.length <= 18;
-    const isExpanded = showAllEpisodes || autoExpanded;
-    strip.classList.toggle("expanded", isExpanded);
+    strip.classList.toggle("expanded", showAllEpisodes);
 
     const allBtn =
-      activeGroup.length > 18
-        ? `<button type="button" class="cv-ep-btn cv-ep-toggle-all ${showAllEpisodes ? "is-expanded" : ""}" id="cvToggleAllEps">${showAllEpisodes ? "Collapse" : `All (${activeGroup.length})`}</button>`
+      activeGroup.length > 1
+        ? `<button type="button" class="cv-ep-btn ${showAllEpisodes ? "active" : ""}" id="cvToggleAllEps">All</button>`
         : "";
     const btns = activeGroup
       .map(({ ep, idx }) => {
@@ -811,15 +778,11 @@
       const targetEp = episodes[targetEpIdx];
       const tSe = Number(targetEp?.seasonNumber ?? targetEp?.se ?? 0) || 0;
       const tEpNum = targetEp?.ep != null ? Number(targetEp.ep) : Number(targetEp?.episodeNumber ?? targetEp?.number ?? 1);
-      const streamTitle =
-        requestedTitle && /\bEp(?:isode)?s?\s*\d+/i.test(requestedTitle) && !/\bEp(?:isode)?s?\s*\d+/i.test(watchDetail?.title || "")
-          ? requestedTitle
-          : (watchDetail?.title || requestedTitle || "");
       return new URLSearchParams({
         path: String(path || watchDetail?.path || ""),
         subjectId: String(watchDetail?.subjectId || watchDetail?.id || ""),
         detailPath: String(watchDetail?.detailPath || ""),
-        title: String(streamTitle),
+        title: String(watchDetail?.title || ""),
         se: String(tSe),
         ep: String(tEpNum),
         ...(manualDubSelected || optsObj.dubLock ? { dubLock: "1" } : {})
@@ -830,17 +793,12 @@
       const qs = buildStreamQs(idx, opts);
       const cacheKey = qs.toString();
       let r, payload;
-      const cachedStream = !opts.retryCount && !opts.fromRetryClick && streamCache.get(cacheKey);
+      const cachedStream = !opts.retryCount && streamCache.get(cacheKey);
       if (cachedStream && Date.now() - cachedStream.at < 120000) {
         r = { ok: true };
         payload = cachedStream.payload;
       } else {
-        if (opts.fromRetryClick) {
-          streamCache.delete(cacheKey);
-          qs.set("retry", "1");
-        }
-        window.CineVerseOffline?.yieldForBrowsing?.(2200);
-        ({ res: r, data: payload } = await safeFetchJson(`/api/movie-api/stream?${qs.toString()}`, { cache: "no-store" }));
+        ({ res: r, data: payload } = await safeFetchJson(`/api/movie-api/stream?${cacheKey}`, { cache: "no-store" }));
         if (r?.ok && Array.isArray(payload?.sources) && payload.sources.length) {
           streamCache.set(cacheKey, { payload, at: Date.now() });
         }
@@ -883,7 +841,6 @@
       if (explicitList && explicitList.length) {
         explicitList.forEach(item => {
           if (item && typeof item === "object") {
-            if (item.isTrailer === true || /\btrailer\b/i.test(String(item.quality || item.label || ""))) return;
             const fmt = String(item.format || item.type || item.mime || item.mimeType || "");
             if (/\bdash\b|dash\+xml/i.test(fmt)) return;
             const candidate = sourceKeys.map(key => item[key]).find(value => typeof value === "string" && isPlayableStreamUrl(value) && !/\.mpd(?:$|[?#])/i.test(value));
@@ -910,7 +867,6 @@
           format: String(s.format || ""),
           mime,
           audioLanguage: s.audioLanguage || s.audio_language || "",
-          ...(s.isTrailer ? { isTrailer: true } : {}),
           ...(s.proxyUrl || s.proxy_url ? { proxyUrl: String(s.proxyUrl || s.proxy_url) } : {}),
           ...(s.directUrl ? { directUrl: String(s.directUrl) } : {}),
           ...(s.directPlayback !== undefined ? { directPlayback: Boolean(s.directPlayback) } : {}),
@@ -921,11 +877,10 @@
           ...(s.autoSelected ? { autoSelected: true } : {}),
           ...(s.autoFast ? { autoFast: true } : {})
         }];
-      }).values())].filter(s => !s.isTrailer && !/\btrailer\b/i.test(String(s.quality || "")) && isPlayableStreamUrl(s.url) && !/\.mpd(?:$|[?#])/i.test(s.url) && !/\bdash\b|dash\+xml/i.test(s.format + " " + s.mime));
+      }).values())].filter(s => isPlayableStreamUrl(s.url) && !/\.mpd(?:$|[?#])/i.test(s.url) && !/\bdash\b|dash\+xml/i.test(s.format + " " + s.mime));
 
       if (!sources.length && Array.isArray(explicitList) && explicitList.length) {
         sources = explicitList
-          .filter(item => !(item && typeof item === "object" && (item.isTrailer === true || /\btrailer\b/i.test(String(item.quality || item.label || "")))))
           .map(item => {
             const url = typeof item === "string" ? item : sourceKeys.map(k => item?.[k]).find(v => typeof v === "string" && v.trim());
             return url && !/\.mpd(?:$|[?#])/i.test(url)
@@ -942,6 +897,9 @@
       const renderStageRetry = errText => {
         if (streamMsg) streamMsg.textContent = errText;
         const altDub = currentDubs.find(d => d?.path && d.path !== path);
+        const trailerId = String(streamRoot?.trailerYoutubeId || payload?.trailerYoutubeId || watchDetail?.trailerYoutubeId || "").trim();
+        const safeYtId = /^[A-Za-z0-9_-]{8,20}$/.test(trailerId) ? trailerId : "";
+        const upcomingTitle = isWatchUpcoming(watchDetail);
         const stage = root.querySelector(".cv-player-stage");
         if (video) {
           video.controls = false;
@@ -951,8 +909,8 @@
             try { video.removeAttribute("src"); } catch {}
           }
         }
-        const displayMsg = /trailer/i.test(String(errText || ""))
-          ? "Direct video stream is unavailable on this server right now. Tap Retry Stream or browse another title."
+        const displayMsg = safeYtId && /no direct video stream/i.test(String(errText || ""))
+          ? "Direct stream isn't available on this server right now — watch the official trailer below."
           : errText;
         if (streamMsg) streamMsg.textContent = displayMsg;
         if (stage) {
@@ -965,13 +923,24 @@
             `position:absolute;inset:0;z-index:20;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:20px;text-align:center;color:#f3f4f6;border-radius:10px;${bgPoster ? `background:linear-gradient(rgba(10,12,18,.78),rgba(10,12,18,.9)),url('${bgPoster.replace(/'/g, "%27")}') center/cover no-repeat;` : "background:rgba(11,13,16,.94);"}`;
           box.innerHTML = `<div style="max-width:460px;font-size:14px;line-height:1.5">${esc(displayMsg)}</div>
             <div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:center">
+              ${safeYtId ? `<button type="button" data-play-trailer class="cv-action-btn cv-action-btn-trailer" style="cursor:pointer">▶ Watch Official Trailer</button>` : ""}
               <button type="button" data-retry-stream class="cv-action-btn cv-action-btn-retry" style="cursor:pointer">↻ Retry Stream</button>
               ${altDub ? `<button type="button" data-switch-alt-dub class="cv-action-btn" style="cursor:pointer">Switch to ${esc(altDub.language || altDub.lanName || "Original Audio")}</button>` : ""}
-              <a href="index.html" class="cv-action-btn" style="text-decoration:none">Browse Movies</a>
             </div>`;
+          box.querySelector("[data-play-trailer]")?.addEventListener("click", () => {
+            if (!safeYtId) return;
+            box.style.padding = "0";
+            box.style.background = "#000";
+            box.innerHTML = `<iframe title="Official Trailer" src="https://www.youtube.com/embed/${encodeURIComponent(safeYtId)}?autoplay=1&rel=0" style="width:100%;height:100%;border:0" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>`;
+            if (streamMsg) {
+              streamMsg.textContent = upcomingTitle
+                ? "Playing Official Trailer · Full stream releases soon"
+                : "Playing Official Trailer";
+            }
+          });
           box.querySelector("[data-retry-stream]")?.addEventListener("click", () => {
             box.remove();
-            playEpisode(idx, { ...opts, retryCount: 0, fromRetryClick: true });
+            playEpisode(idx, { ...opts, retryCount: 0 });
           });
           box.querySelector("[data-switch-alt-dub]")?.addEventListener("click", () => {
             box.remove();
@@ -996,7 +965,9 @@
         const rawSrvMsg = String(payload?.message || payload?.error || "").trim();
         const errText =
           (upcomingTitle ? rawSrvMsg : rawSrvMsg.replace(/Upcoming \/ Unreleased/gi, "currently unavailable")) ||
-          "Direct video stream is unavailable on this server right now. Tap Retry Stream or browse another title.";
+          (upcomingTitle
+            ? "This title is Upcoming / Coming Soon and does not have a playable video yet."
+            : "No direct video stream is available on this server right now. Tap Watch Official Trailer or Retry Stream.");
         renderStageRetry(errText);
         return;
       }
@@ -1008,8 +979,11 @@
       refreshOfflineBar();
       if (streamMsg) {
         const uniqueQ = [...new Set(sources.map(s => s.quality))];
+        const upcomingTitle = isWatchUpcoming(watchDetail);
         const fastLabel = sources.some(s => s.autoFast) ? "⚡ Auto Fast Server · " : sources.length > 1 ? "Auto Server · " : "";
-        streamMsg.textContent = `${fastLabel}${uniqueQ.join(" · ")}${subtitles.length ? ` · ${subtitles.length} subtitles` : ""}`;
+        streamMsg.textContent = streamRoot?.isTrailer
+          ? (upcomingTitle ? "Upcoming title · Playing Official Trailer" : "Full video unavailable on server · Playing Official Trailer")
+          : `${fastLabel}${uniqueQ.join(" · ")}${subtitles.length ? ` · ${subtitles.length} subtitles` : ""}`;
       }
 
       const historyMeta = {
@@ -1095,10 +1069,10 @@
           box.style.cssText =
             "position:absolute;inset:0;z-index:20;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:20px;text-align:center;background:rgba(11,13,16,.88);color:#f3f4f6;border-radius:10px;";
           box.innerHTML = `<div style="max-width:460px;font-size:14px;line-height:1.5">${esc(msg)}</div>
-            <button type="button" data-retry-stream class="cv-action-btn cv-action-btn-retry" style="cursor:pointer">↻ Retry Stream</button>`;
+            <button type="button" data-retry-stream class="cv-action-btn" style="background:var(--cv-red,#f87171);border-color:var(--cv-red,#f87171);color:#fff;cursor:pointer">↻ Retry Stream</button>`;
           box.querySelector("[data-retry-stream]")?.addEventListener("click", () => {
             box.remove();
-            playEpisode(idx, { ...opts, retryCount: 0, fromRetryClick: true });
+            playEpisode(idx, { ...opts, retryCount: 0 });
           });
           stage.appendChild(box);
         }
@@ -1403,21 +1377,13 @@
     }
   }
 
-  const WATCH_DETAIL_CACHE_KEY = "cv_watch_detail_v2";
+  const WATCH_DETAIL_CACHE_KEY = "cv_watch_detail_v1";
   const WATCH_DETAIL_TTL_MS = 3 * 60 * 1000;
   function readCachedWatchDetail(targetPath) {
     try {
       const m = JSON.parse(sessionStorage.getItem(WATCH_DETAIL_CACHE_KEY) || "{}");
       const hit = m[targetPath];
       if (hit && hit.ts && Date.now() - hit.ts < WATCH_DETAIL_TTL_MS && hit.detail && hit.detail.hasResource !== false && Array.isArray(hit.detail.episodes) && hit.detail.episodes.length > 0) {
-        if (hit.detail.source === "movielinkbd-bridge" && requestedTitle) {
-          const epM = /\bEp(?:isode)?s?\s*0*(\d{1,3})(?:\s*[-–to]+\s*0*(\d{1,3}))?/i.exec(requestedTitle);
-          if (epM) {
-            const wantEp = Number(epM[1]) || 0;
-            const hasEp = hit.detail.episodes.some(e => Number(e?.episodeNumber ?? e?.ep ?? e?.number ?? 0) === wantEp);
-            if (!hasEp) return null;
-          }
-        }
         return hit.detail;
       }
     } catch {}
@@ -1479,9 +1445,7 @@
 
       if (d.path && d.path !== path) {
         path = d.path;
-        const preserveRequested = requestedTitle && /\bEp(?:isode)?s?\s*\d+/i.test(requestedTitle) && !/\bEp(?:isode)?s?\s*\d+/i.test(d.title || "");
-        const urlTitle = preserveRequested ? requestedTitle : (d.title || requestedTitle || "");
-        const nextUrl = `watch.html?path=${encodeURIComponent(path)}&title=${encodeURIComponent(urlTitle)}${params.get("episode") ? `&episode=${encodeURIComponent(params.get("episode"))}` : ""}`;
+        const nextUrl = `watch.html?path=${encodeURIComponent(path)}&title=${encodeURIComponent(d.title || requestedTitle || "")}${params.get("episode") ? `&episode=${encodeURIComponent(params.get("episode"))}` : ""}`;
         try { history.replaceState(null, "", nextUrl); } catch {}
       }
       d.poster = posterOf(d);
@@ -1712,14 +1676,8 @@
         refreshOfflineBar();
         showToast("Removed from offline storage");
       });
-      let offlineBarTimer = null;
       window.addEventListener("cv:offline-change", ev => {
-        const d = ev?.detail;
-        if (d?.id && d.id !== currentOfflineKey()) return;
-        clearTimeout(offlineBarTimer);
-        offlineBarTimer = setTimeout(() => {
-          refreshOfflineBar();
-        }, d?.status === "downloading" ? 650 : 60);
+        if (!ev?.detail?.id || ev.detail.id === currentOfflineKey()) refreshOfflineBar();
       });
 
       $("#cvWatchTopPip")?.addEventListener("click", async () => {
@@ -1826,20 +1784,6 @@
       if (fb && !img.dataset.triedFb) {
         img.dataset.triedFb = "1";
         img.src = fb;
-        return;
-      }
-      const curSrc = img.getAttribute("src") || "";
-      if (!img.dataset.retried && curSrc.startsWith("/api/moviebox-image/")) {
-        img.dataset.retried = "1";
-        setTimeout(() => {
-          if (!img.isConnected) return;
-          img.src = curSrc + (curSrc.includes("?") ? "&" : "?") + "r=1";
-        }, 450);
-        return;
-      }
-      if (!img.dataset.svgFb && img.alt) {
-        img.dataset.svgFb = "1";
-        img.src = `/api/poster/${encodeURIComponent(img.alt.slice(0, 80))}.svg`;
         return;
       }
       const sib = img.nextElementSibling;

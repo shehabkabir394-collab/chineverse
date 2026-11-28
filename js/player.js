@@ -249,15 +249,16 @@
     };
 
     const initial = best();
-    const saved = Number(localStorage.getItem(storageKey) || 0);
-    const savedRawVol = Number(localStorage.getItem("cv-player-volume"));
+    const readStorage = k => { try { return localStorage.getItem(k); } catch { return null; } };
+    const saved = Number(readStorage(storageKey) || 0);
+    const savedRawVol = Number(readStorage("cv-player-volume"));
     const savedVolume = Number.isFinite(savedRawVol) && savedRawVol > 0 ? Math.min(1, savedRawVol) : 1;
     video.volume = savedVolume;
     video.muted = false;
     video.defaultMuted = false;
 
-    let soundBoostPct = Math.max(100, Math.min(400, Number(localStorage.getItem(BOOST_KEY) || 100)));
-    let brightnessPct = Math.max(30, Math.min(180, Number(localStorage.getItem(BRIGHT_KEY) || 100)));
+    let soundBoostPct = Math.max(100, Math.min(400, Number(readStorage(BOOST_KEY) || 100)));
+    let brightnessPct = Math.max(30, Math.min(180, Number(readStorage(BRIGHT_KEY) || 100)));
     let ambientMode = (() => {
       try { return localStorage.getItem(AMBIENT_KEY) !== "0"; } catch { return true; }
     })();

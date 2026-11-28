@@ -56,14 +56,6 @@
     if (/\b(?:upcoming|coming\s*soon|unreleased)\b/i.test(titleBadge) && item.hasResource !== true) return true;
     return false;
   };
-  const isTrailerOrUnavailable = item => {
-    if (!item || typeof item !== "object") return true;
-    if (item.hasResource === false || item.isUpcoming === true || item.trailerOnly === true || item.isTrailer === true) return true;
-    if (/\b(?:trailer|teaser|coming\s*soon|unreleased)\b/i.test(`${item.typeBadge || ""} ${item.quality || ""}`)) return true;
-    if (/\b(?:official\s+trailer|teaser\s+trailer|trailer\s+only)\b/i.test(String(item.title || ""))) return true;
-    if (isUpcomingUnreleased(item)) return true;
-    return false;
-  };
 
   const heroEl = $("#cvHeroSpotlight");
   const catSection = $("#cvCategorySection");
@@ -76,7 +68,7 @@
 
   const WATCHLIST_KEY = "cv_watchlist_v1";
   const SPORTS_REMINDER_KEY = "cv_sports_reminders_v1";
-  const HOME_CACHE_KEY = "cv_home_cache_v4";
+  const HOME_CACHE_KEY = "cv_home_cache_v3";
   const HOME_CACHE_TTL_MS = 20 * 60 * 1000;
 
   const EXPLORE_CATEGORIES = [
@@ -192,6 +184,8 @@
   let detailsModalSeq = 0;
   let isHomeView = true;
   let deferredShelfRaf = 0;
+  let shelfObserver = null;
+  let shelfAppendTimer = 0;
 
   function showToast(msg) {
     document.querySelector(".cv-toast")?.remove();
@@ -748,7 +742,7 @@
           <span class="cv-top10-rank tabular-nums" aria-hidden="true">${rank}</span>
           <div class="cv-card-thumb">
             ${poster
-              ? `<img ${posterImgAttrs(poster, rawPoster, title, true)}><div class="cv-card-fallback" hidden>${esc(title)}</div>`
+              ? `<img ${posterImgAttrs(poster, rawPoster, title, false)}><div class="cv-card-fallback" hidden>${esc(title)}</div>`
               : `<div class="cv-card-fallback">${esc(title)}</div>`}
             <div class="cv-card-hover-play" aria-hidden="true">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
@@ -823,7 +817,7 @@
                 const sMeta = [s.year, String(s.genre || s.typeBadge || "").split(",")[0]].filter(Boolean).join(" · ");
                 return `
                   <div class="cv-spot-mini ${i === activeIdx ? "active" : ""}" data-spot-card="${i}" role="button" tabindex="0" aria-label="Select ${esc(s.title || "title")}">
-                    ${sImg ? `<img class="cv-spot-mini-thumb" decoding="async" referrerpolicy="no-referrer" src="${esc(sImg)}"${sRawImg && sRawImg !== sImg ? ` data-fallback-src="${esc(sRawImg)}"` : ""} alt="${esc(s.title || "Poster")}" data-poster-img="1">` : `<div class="cv-spot-mini-thumb"></div>`}
+                    ${sImg ? `<img class="cv-spot-mini-thumb" loading="${i < 2 ? "eager" : "lazy"}" decoding="async" referrerpolicy="no-referrer" src="${esc(sImg)}"${sRawImg && sRawImg !== sImg ? ` data-fallback-src="${esc(sRawImg)}"` : ""} alt="${esc(s.title || "Poster")}" data-poster-img="1">` : `<div class="cv-spot-mini-thumb"></div>`}
                     <div class="cv-spot-mini-info">
                       <b>${esc(s.title || "Featured")}</b>
                       <span>${esc(sMeta || lang)}</span>
@@ -908,35 +902,11 @@
   }
 
   function dedupeList(list) {
-    const extractEpBatchScore = title => {
-      const s = String(title || "");
-      const seM = /\bS(\d{1,2})\b/i.exec(s) || /\bSeason\s*(\d{1,2})\b/i.exec(s);
-      const epM = /\bEp(?:isode)?s?\s*0*(\d{1,3})(?:\s*[-–to]+\s*0*(\d{1,3}))?/i.exec(s);
-      const se = seM ? Number(seM[1]) || 0 : 0;
-      const epEnd = epM ? Number(epM[2] || epM[1]) || 0 : 0;
-      return se * 10000 + epEnd;
-    };
-    const isBetterCandidate = (prev, next) => {
-      const pPoster = safeImg(posterOf(prev)) ? 1 : 0;
-      const nPoster = safeImg(posterOf(next)) ? 1 : 0;
-      if (nPoster !== pPoster) return nPoster > pPoster;
-      const pLive = prev?.fromArchive ? 0 : 1;
-      const nLive = next?.fromArchive ? 0 : 1;
-      if (nLive !== pLive) return nLive > pLive;
-      const pTime = releaseTime(prev);
-      const nTime = releaseTime(next);
-      if (nTime !== pTime) return nTime > pTime;
-      const pBatch = extractEpBatchScore(prev?.title);
-      const nBatch = extractEpBatchScore(next?.title);
-      if (nBatch !== pBatch) return nBatch > pBatch;
-      return false;
-    };
-
     const seen = new Set();
-    const titleIndexMap = new Map();
+    const seenTitles = new Set();
     const out = [];
     for (const item of Array.isArray(list) ? list : []) {
-      if (!item || isNigerian(item) || isTrailerOrUnavailable(item)) continue;
+      if (!item || isNigerian(item)) continue;
       if (item.subjectType === 6 && !/anime|animation/i.test(String(item.genre || item.typeBadge || item.title || ""))) continue;
       if (/\b(?:official\s+video|video\s+song|lyrical(?:\s+video)?|full\s+song|audio\s+song)\b/i.test(String(item.title || ""))) continue;
       const key = item.path || item.subjectId || item.title;
@@ -948,15 +918,9 @@
         .replace(/[^a-z0-9\u0980-\u09ff]+/g, " ")
         .trim();
       const titleYearKey = coreTitle ? `${coreTitle}|${String(item.year || "").slice(0, 4)}` : "";
+      if (titleYearKey && seenTitles.has(titleYearKey)) continue;
       seen.add(key);
-      if (titleYearKey && titleIndexMap.has(titleYearKey)) {
-        const idx = titleIndexMap.get(titleYearKey);
-        if (isBetterCandidate(out[idx], item)) {
-          out[idx] = item;
-        }
-        continue;
-      }
-      if (titleYearKey) titleIndexMap.set(titleYearKey, out.length);
+      if (titleYearKey) seenTitles.add(titleYearKey);
       out.push(item);
     }
     return out;
@@ -1219,16 +1183,25 @@
       })
       .filter(Boolean);
 
-    const allShelves = [...orderedShelves, ...extraLiveSections].filter(s => s.items.length > 0);
+    const upcomingItems = dedupeList(curated.upcoming?.length ? curated.upcoming : homeData.upcoming)
+      .filter(x => isUpcomingUnreleased(x) && safeImg(posterOf(x)));
+    const upcomingShelf = {
+      title: "⏳ Upcoming Movies",
+      isUpcomingShelf: true,
+      items: upcomingItems,
+      moreHref: ""
+    };
+
+    const allShelves = [...orderedShelves, ...extraLiveSections, upcomingShelf].filter(s => s.items.length > 0);
 
     const buildShelfHtml = (s, shelfIdx) => {
-      const visible = s.items.slice(0, s.top10 ? 10 : 24);
+      const visible = s.items.slice(0, s.top10 ? 10 : 18);
       const rowClass = s.top10 ? "cv-shelf-row cv-shelf-top10" : "cv-shelf-row";
       const cardsHtml = s.top10
         ? visible.map((item, idx) => cardTop10Markup(item, idx + 1)).join("")
         : s.isUpcomingShelf
           ? visible.map(upcomingPosterCardMarkup).join("")
-          : visible.map((item, cardIdx) => cardMarkup(item, shelfIdx < 2 && cardIdx < 6, shelfIdx === 0 && cardIdx < 4)).join("");
+          : visible.map((item, cardIdx) => cardMarkup(item, shelfIdx === 0 && cardIdx < 5, shelfIdx === 0 && cardIdx < 3)).join("");
 
       return `
         <section class="cv-section${s.isUpcomingShelf ? " cv-section-upcoming" : ""}"${s.isUpcomingShelf ? ' data-section="upcoming"' : ""}>
@@ -1249,6 +1222,14 @@
       cancelAnimationFrame(deferredShelfRaf);
       deferredShelfRaf = 0;
     }
+    if (shelfObserver) {
+      shelfObserver.disconnect();
+      shelfObserver = null;
+    }
+    if (shelfAppendTimer) {
+      clearTimeout(shelfAppendTimer);
+      shelfAppendTimer = 0;
+    }
 
     if (!allShelves.length) {
       sectionsRoot.innerHTML = `<div class="cv-status-banner">No titles available right now.</div>`;
@@ -1256,22 +1237,59 @@
       return;
     }
 
-    const firstBatch = allShelves.slice(0, 4);
-    const restBatch = allShelves.slice(4);
+    const initialCount = 3;
+    const firstBatch = allShelves.slice(0, initialCount);
+    const restBatch = allShelves.slice(initialCount);
     sectionsRoot.innerHTML = firstBatch.map((s, idx) => buildShelfHtml(s, idx)).join("");
     statusEl.hidden = true;
 
     if (restBatch.length) {
-      deferredShelfRaf = requestAnimationFrame(() => {
-        deferredShelfRaf = 0;
-        if (!isHomeView) return;
-        const extraHtml = restBatch.map((s, idx) => buildShelfHtml(s, idx + 4)).join("");
-        sectionsRoot.insertAdjacentHTML("beforeend", extraHtml);
-      });
+      let cursor = 0;
+      const chunkSize = 4;
+      const sentinel = document.createElement("div");
+      sentinel.id = "cvShelfSentinel";
+      sentinel.style.height = "1px";
+      sectionsRoot.appendChild(sentinel);
+
+      const appendNextChunk = () => {
+        if (!isHomeView || !sentinel.isConnected) return;
+        const slice = restBatch.slice(cursor, cursor + chunkSize);
+        if (!slice.length) {
+          shelfObserver?.disconnect();
+          shelfObserver = null;
+          sentinel.remove();
+          return;
+        }
+        const offset = initialCount + cursor;
+        cursor += slice.length;
+        sentinel.insertAdjacentHTML("beforebegin", slice.map((s, idx) => buildShelfHtml(s, offset + idx)).join(""));
+        if (cursor >= restBatch.length) {
+          shelfObserver?.disconnect();
+          shelfObserver = null;
+          sentinel.remove();
+        }
+      };
+
+      if ("IntersectionObserver" in window) {
+        shelfObserver = new IntersectionObserver(entries => {
+          if (entries.some(en => en.isIntersecting)) {
+            appendNextChunk();
+          }
+        }, { rootMargin: "900px 0px" });
+        shelfObserver.observe(sentinel);
+      } else {
+        const scheduleNext = () => {
+          shelfAppendTimer = setTimeout(() => {
+            appendNextChunk();
+            if (cursor < restBatch.length && isHomeView) scheduleNext();
+          }, 120);
+        };
+        scheduleNext();
+      }
     }
   }
 
-  const TAB_CACHE_KEY = "cv_tab_cache_v2";
+  const TAB_CACHE_KEY = "cv_tab_cache_v1";
   const TAB_CACHE_TTL_MS = 5 * 60 * 1000;
   function readTabCache(key) {
     try {
@@ -1320,6 +1338,14 @@
 
   async function renderFilteredTab(tabKey, label, appendPage = 1, existingItems = []) {
     isHomeView = false;
+    if (shelfObserver) {
+      shelfObserver.disconnect();
+      shelfObserver = null;
+    }
+    if (shelfAppendTimer) {
+      clearTimeout(shelfAppendTimer);
+      shelfAppendTimer = 0;
+    }
     clearInterval(spotlightTimer);
     heroEl.hidden = true;
     catSection.hidden = true;
@@ -1340,7 +1366,6 @@
     }
 
     try {
-      window.CineVerseOffline?.yieldForBrowsing?.(1600);
       const endpoint =
         tabKey === "trending"
           ? `/api/movie-api/trending?page=${appendPage}&perPage=30`
@@ -1348,7 +1373,7 @@
       const r = await fetch(endpoint);
       const d = await r.json();
       if (isHomeView) return;
-      const incoming = (Array.isArray(d?.items) ? d.items : []).filter(x => x && !isNigerian(x) && !isTrailerOrUnavailable(x));
+      const incoming = (Array.isArray(d?.items) ? d.items : []).filter(x => x && !isNigerian(x));
       const merged = dedupeList([...existingItems, ...incoming]);
       const items = sortNewestFirst(merged);
       const hasMore = Boolean(d?.hasMore || (d?.maxPage && appendPage < Number(d.maxPage)) || incoming.length >= 18);
@@ -1442,34 +1467,46 @@
 
   window.addEventListener("resize", closeMoreDropdown, { passive: true });
 
-  async function loadSportsPreview() {
+  async function loadSportsPreview(delayFetchMs = 0) {
+    let hasCached = false;
     try {
       const c = JSON.parse(localStorage.getItem("cv_sports_cache_v1") || "null");
       if (c && c.ts && Date.now() - c.ts < 3 * 60 * 1000 && Array.isArray(c.channels) && c.channels.length) {
         sportsChannels = c.channels;
         renderLiveSportsSection();
+        hasCached = true;
       }
     } catch {}
-    try {
-      const r = await fetch("/api/movie-api/sports");
-      const d = await r.json();
-      if (r.ok && d?.ok && Array.isArray(d.channels) && d.channels.length) {
-        sportsChannels = d.channels;
-        try { localStorage.setItem("cv_sports_cache_v1", JSON.stringify({ ts: Date.now(), channels: d.channels.slice(0, 24) })); } catch {}
-        renderLiveSportsSection();
-      }
-    } catch {}
+    const fetchFresh = async () => {
+      try {
+        const r = await fetch("/api/movie-api/sports", { priority: "low" });
+        const d = await r.json();
+        if (r.ok && d?.ok && Array.isArray(d.channels) && d.channels.length) {
+          sportsChannels = d.channels;
+          try { localStorage.setItem("cv_sports_cache_v1", JSON.stringify({ ts: Date.now(), channels: d.channels.slice(0, 24) })); } catch {}
+          renderLiveSportsSection();
+        }
+      } catch {}
+    };
+    if (delayFetchMs > 0 && !hasCached) {
+      setTimeout(fetchFresh, delayFetchMs);
+    } else {
+      fetchFresh();
+    }
   }
 
-  async function loadAllCategories() {
+  async function loadAllCategories(skipNetworkIfCached = false) {
+    let hasCached = false;
     try {
       const c = JSON.parse(localStorage.getItem("cv_categories_cache_v1") || "null");
       if (c && c.ts && Date.now() - c.ts < 60 * 60 * 1000 && Array.isArray(c.val) && c.val.length) {
         renderMoreCategories(c.val);
+        hasCached = true;
       }
     } catch {}
+    if (skipNetworkIfCached && hasCached) return;
     try {
-      const r = await fetch("/api/movie-api/categories");
+      const r = await fetch("/api/movie-api/categories", { priority: "low" });
       const d = await r.json();
       if (r.ok && d?.ok && Array.isArray(d.categories) && d.categories.length) {
         try { localStorage.setItem("cv_categories_cache_v1", JSON.stringify({ ts: Date.now(), val: d.categories })); } catch {}
@@ -1506,13 +1543,14 @@
         mlbdDirectAvailable: payload.mlbdDirectAvailable !== false,
         banners: trimList(payload.banners, 8),
         recentlyUploaded: trimList(payload.recentlyUploaded, 20),
-        mlbdLatest: trimList(payload.mlbdLatest, 20),
+        mlbdLatest: trimList(payload.mlbdLatest, 18),
         trending: trimList(payload.trending, 18),
         mlbdBangla: trimList(payload.mlbdBangla, 16),
         mlbdTrending: trimList(payload.mlbdTrending, 16),
         mlbdSections: trimList(payload.mlbdSections, 6).map(s => ({ ...s, items: trimList(s?.items, 16) })),
         sections: trimList(payload.sections, 8).map(s => ({ ...s, items: trimList(s?.items, 16) })),
         curated: slimCurated,
+        upcoming: trimList(payload.upcoming, 12),
         categories: Array.isArray(payload.categories) ? payload.categories.slice(0, 60) : []
       };
       localStorage.setItem(HOME_CACHE_KEY, JSON.stringify({ savedAt: Date.now(), data: snapshot }));
@@ -1535,29 +1573,39 @@
       statusEl.textContent = "Loading featured movies and dramas…";
     }
 
-    loadSportsPreview();
-    loadAllCategories();
+    loadSportsPreview(renderedFromCache ? 0 : 250);
     try {
-      window.CineVerseOffline?.yieldForBrowsing?.(1600);
-      const r = await fetch("/api/movie-api/home");
-      const d = await r.json();
-      if (!r.ok || d.ok !== true) throw new Error(d.error || "API unavailable");
+      let d = null;
+      const pre = window.__cvHomePreload;
+      if (pre) {
+        window.__cvHomePreload = null;
+        d = await pre.catch(() => null);
+      }
+      if (!d || d.ok !== true) {
+        const r = await fetch("/api/movie-api/home", { headers: { Accept: "application/json" } });
+        d = await r.json();
+        if (!r.ok || d.ok !== true) throw new Error(d.error || "API unavailable");
+      }
       homeData = d;
       writeCachedHomeSnapshot(d);
       if (Array.isArray(d.categories) && d.categories.length) {
+        try { localStorage.setItem("cv_categories_cache_v1", JSON.stringify({ ts: Date.now(), val: d.categories })); } catch {}
         renderMoreCategories(d.categories);
+      } else {
+        loadAllCategories(true);
       }
       if (isHomeView && (!renderedFromCache || window.scrollY < 180)) {
         renderHomeView();
       }
     } catch (err) {
+      loadAllCategories(false);
       if (!renderedFromCache) {
         statusEl.textContent = "Could not load catalog: " + (err?.message || "Network error");
       }
     }
   }
 
-  // Multi-stage poster recovery: direct rawPoster -> proxy retry -> SVG poster -> text fallback
+  // Fast poster recovery: try direct fallback once, then show clean card title block without network retry loops
   if (!window.__cvPosterRecoveryInstalled) {
     window.__cvPosterRecoveryInstalled = true;
     document.addEventListener("error", e => {
@@ -1567,20 +1615,6 @@
       if (fb && !img.dataset.triedFb) {
         img.dataset.triedFb = "1";
         img.src = fb;
-        return;
-      }
-      const curSrc = img.getAttribute("src") || "";
-      if (!img.dataset.retried && curSrc.startsWith("/api/moviebox-image/")) {
-        img.dataset.retried = "1";
-        setTimeout(() => {
-          if (!img.isConnected) return;
-          img.src = curSrc + (curSrc.includes("?") ? "&" : "?") + "r=1";
-        }, 450);
-        return;
-      }
-      if (!img.dataset.svgFb && img.alt) {
-        img.dataset.svgFb = "1";
-        img.src = `/api/poster/${encodeURIComponent(img.alt.slice(0, 80))}.svg`;
         return;
       }
       const sib = img.nextElementSibling;

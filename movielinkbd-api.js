@@ -8,17 +8,10 @@ import {
 import {
   isNigerianContent,
   isUpcomingUnreleased,
-  isTrailerOnlyItem,
-  isPlayableCatalogItem,
-  isMediaMarkedUnplayable,
-  markMediaUnplayable,
-  clearMediaUnplayable,
-  onMediaMarkedUnplayable,
   isMusicOrClipSubject,
   strictTitleMatchScore,
   dedupeRepeatedTitleYear,
   parseEpisodeRangeFromTitle,
-  matchEpisodesToRequestedRange,
   cleanSearchTitleText,
   splitSearchTitleVariants,
   expandSearchQueryVariants,
@@ -127,44 +120,6 @@ const DEFAULT_FALLBACK_CATEGORIES = [
 ];
 
 const mlbdCache = new Map();
-
-function isMlbdPlayableListItem(item) {
-  return Boolean(item && !isNigerianContent(item) && isPlayableCatalogItem(item));
-}
-
-onMediaMarkedUnplayable(() => {
-  for (const [k, entry] of mlbdCache.entries()) {
-    const val = entry?.val;
-    if (!val || typeof val !== "object") continue;
-    let mutated = false;
-    for (const arrKey of ["items", "archiveItems", "latest", "trending", "banners"]) {
-      if (Array.isArray(val[arrKey])) {
-        const next = val[arrKey].filter(isMlbdPlayableListItem);
-        if (next.length !== val[arrKey].length) {
-          val[arrKey] = next;
-          mutated = true;
-        }
-      }
-    }
-    if (Array.isArray(val.sections)) {
-      for (const sec of val.sections) {
-        if (Array.isArray(sec?.items)) {
-          const next = sec.items.filter(isMlbdPlayableListItem);
-          if (next.length !== sec.items.length) {
-            sec.items = next;
-            mutated = true;
-          }
-        }
-      }
-      val.sections = val.sections.filter(s => Array.isArray(s?.items) && s.items.length > 0);
-    }
-    if (val.detail && isMediaMarkedUnplayable(val.detail)) {
-      mlbdCache.delete(k);
-    } else if (mutated && k.startsWith("catalog:") && Array.isArray(val.items) && val.items.length === 0) {
-      mlbdCache.delete(k);
-    }
-  }
-});
 const mlbdStaleCache = new Map();
 const mlbdInFlight = new Map();
 const mlbdItemRegistry = new Map();
@@ -176,214 +131,12 @@ let mlbdArchiveRecords = [];
 let mlbdArchiveLoaded = false;
 let mlbdArchiveLoadPromise = null;
 let activeResolvedOrigin = "https://rnztvk.movielinkbd.de";
+let mirrorsBlockedUntil = 0;
 let mlbdDirectMirrorsBlocked = false;
 let mlbdCinePulseHasContent = false;
-const mirrorFailureStates = new Map();
-
-export function getMirrorOriginKey(baseUrl = "") {
-  const raw = String(baseUrl || "").trim();
-  if (!raw) return "";
-  try {
-    return new URL(raw).origin.toLowerCase();
-  } catch {
-    return raw.replace(/\/+$/, "").toLowerCase();
-  }
-}
-
-export function getMirrorState(baseUrl = "") {
-  const origin = getMirrorOriginKey(baseUrl);
-  if (!origin) return null;
-  let st = mirrorFailureStates.get(origin);
-  if (!st) {
-    st = {
-      origin,
-      consecutiveFailures: 0,
-      cooldownUntil: 0,
-      lastFailureAt: 0,
-      lastSuccessAt: 0,
-      lastStatus: 0,
-      lastReason: "ok",
-      lastError: "",
-      totalSuccesses: 0,
-      totalFailures: 0
-    };
-    mirrorFailureStates.set(origin, st);
-  }
-  return st;
-}
-
-export function isMirrorInCooldown(baseUrl = "", now = Date.now()) {
-  const origin = getMirrorOriginKey(baseUrl);
-  if (!origin) return false;
-  const st = mirrorFailureStates.get(origin);
-  if (!st) return false;
-  if (st.cooldownUntil > now) return true;
-  return false;
-}
-
-export function parseRetryAfterMs(rawHeader, now = Date.now()) {
-  const raw = String(rawHeader || "").trim();
-  if (!raw) return 0;
-  if (/^\d+(?:\.\d+)?$/.test(raw)) {
-    const sec = Number(raw);
-    if (Number.isFinite(sec) && sec > 0) {
-      return Math.min(60000, Math.max(500, Math.round(sec * 1000)));
-    }
-    return 0;
-  }
-  const dateMs = Date.parse(raw);
-  if (Number.isFinite(dateMs) && dateMs > now) {
-    return Math.min(60000, Math.max(500, dateMs - now));
-  }
-  return 0;
-}
-
-export function classifyMirrorFailure({
-  status = 0,
-  headers = null,
-  text = "",
-  blockedRedirect = "",
-  isPortalLanding = false,
-  err = null,
-  now = Date.now()
-} = {}) {
-  const st = Number(status || err?.status || 0);
-  if (blockedRedirect) {
-    return {
-      reason: "trap_redirect",
-      status: st || 302,
-      isCloudflareBlock: false,
-      isAuthError: false,
-      isRateLimit: false,
-      isTemporary: false,
-      retryAfterMs: 0,
-      cooldownMs: 120000
-    };
-  }
-  const isCf = isCloudflareBlockedResponse(st, headers, text) || Boolean(err?.isCloudflareBlock);
-  if (isCf) {
-    return {
-      reason: "cf_challenge",
-      status: st || 403,
-      isCloudflareBlock: true,
-      isAuthError: false,
-      isRateLimit: false,
-      isTemporary: false,
-      retryAfterMs: 0,
-      cooldownMs: 45000
-    };
-  }
-  if (st === 429) {
-    const retryAfterMs = parseRetryAfterMs(headers?.get?.("retry-after"), now) || 15000;
-    return {
-      reason: "rate_limit_429",
-      status: 429,
-      isCloudflareBlock: false,
-      isAuthError: false,
-      isRateLimit: true,
-      isTemporary: true,
-      retryAfterMs,
-      cooldownMs: retryAfterMs
-    };
-  }
-  if (st === 401 || st === 403) {
-    return {
-      reason: st === 401 ? "http_401" : "http_403",
-      status: st,
-      isCloudflareBlock: false,
-      isAuthError: st === 401,
-      isRateLimit: false,
-      isTemporary: false,
-      retryAfterMs: 0,
-      cooldownMs: 20000
-    };
-  }
-  if (isPortalLanding) {
-    return {
-      reason: "portal_landing",
-      status: st || 200,
-      isCloudflareBlock: false,
-      isAuthError: false,
-      isRateLimit: false,
-      isTemporary: false,
-      retryAfterMs: 0,
-      cooldownMs: 120000
-    };
-  }
-  if (st >= 500) {
-    return {
-      reason: "http_5xx",
-      status: st,
-      isCloudflareBlock: false,
-      isAuthError: false,
-      isRateLimit: false,
-      isTemporary: true,
-      retryAfterMs: 0,
-      cooldownMs: 15000
-    };
-  }
-  return {
-    reason: "network",
-    status: st,
-    isCloudflareBlock: false,
-    isAuthError: false,
-    isRateLimit: false,
-    isTemporary: true,
-    retryAfterMs: 0,
-    cooldownMs: 10000
-  };
-}
-
-export function recordMirrorFailure(baseUrl, failureInfo = {}, now = Date.now()) {
-  const st = getMirrorState(baseUrl);
-  if (!st) return null;
-  st.consecutiveFailures += 1;
-  st.totalFailures += 1;
-  st.lastFailureAt = now;
-  st.lastStatus = Number(failureInfo.status || 0);
-  st.lastReason = String(failureInfo.reason || "network");
-  st.lastError = String(failureInfo.message || failureInfo.reason || "");
-
-  const baseCooldown = Math.max(2000, Number(failureInfo.cooldownMs || 15000));
-  const multiplier = Math.min(3, st.consecutiveFailures);
-  const maxCap = st.lastReason === "cf_challenge" ? 180000 : st.lastReason === "trap_redirect" ? 300000 : 120000;
-  const computedCooldown = Math.min(maxCap, baseCooldown * multiplier);
-  st.cooldownUntil = Math.max(st.cooldownUntil, now + computedCooldown);
-  return { ...st };
-}
-
-export function recordMirrorSuccess(baseUrl, now = Date.now()) {
-  const st = getMirrorState(baseUrl);
-  if (!st) return null;
-  st.consecutiveFailures = 0;
-  st.cooldownUntil = 0;
-  st.lastSuccessAt = now;
-  st.lastStatus = 200;
-  st.lastReason = "ok";
-  st.lastError = "";
-  st.totalSuccesses += 1;
-  return { ...st };
-}
-
-export function getMirrorHealthSnapshot() {
-  const out = {};
-  for (const [origin, st] of mirrorFailureStates.entries()) {
-    out[origin] = { ...st, inCooldown: st.cooldownUntil > Date.now() };
-  }
-  return out;
-}
-
-export function resetMirrorStates() {
-  mirrorFailureStates.clear();
-  mlbdDirectMirrorsBlocked = false;
-  activeResolvedOrigin = "https://rnztvk.movielinkbd.de";
-  mlbdCache.clear();
-  mlbdStaleCache.clear();
-}
 
 export function isMlbdDirectPlaybackAvailable() {
-  const anyMirrorReady = MLBD_MIRRORS.some(m => !/movielinkbd\.com$/i.test(m.baseUrl) && !isMirrorInCooldown(m.baseUrl));
-  return Boolean(!mlbdDirectMirrorsBlocked || anyMirrorReady || mlbdCinePulseHasContent);
+  return Boolean(!mlbdDirectMirrorsBlocked || mlbdCinePulseHasContent);
 }
 
 function normalizePosterKey(title = "") {
@@ -1033,11 +786,11 @@ function ensureTrailingSlashPath(pathWithQuery) {
   return (p.endsWith("/") ? p : p + "/") + q;
 }
 
-export function isCloudflareBlockedResponse(status, headers, text) {
-  if (status !== 403 && status !== 503 && status !== 520) return false;
+function isCloudflareBlockedResponse(status, headers, text) {
+  if (status !== 403 && status !== 503) return false;
   const cfMit = headers?.get?.("cf-mitigated") || "";
   if (/challenge/i.test(cfMit)) return true;
-  return /Just a moment\.\.\.|Attention Required|cf-browser-verification|Enable JavaScript and cookies to continue|\/cdn-cgi\/challenge-platform|_cf_chl_opt/i.test(String(text || ""));
+  return /Just a moment\.\.\.|Attention Required|cf-browser-verification|Enable JavaScript and cookies to continue/i.test(String(text || ""));
 }
 
 async function fetchMirrorOnce(baseUrl, pathWithQuery, extraHeaders = {}, timeoutMs = 14000) {
@@ -1218,49 +971,28 @@ export async function mlbdFetchPage(upstreamPath = "/", options = {}) {
     if (cached) return cached;
   }
 
-  const hasCustomFetcher = typeof options.fetchMirrorFn === "function";
-  const fetcherFn = hasCustomFetcher ? options.fetchMirrorFn : fetchMirrorOnce;
-  const discoverFn = typeof options.discoverMirrorsFn === "function" ? options.discoverMirrorsFn : discoverLiveMirrorOrigin;
-  const retryDelayCapMs = Number.isFinite(options.retryDelayCapMs) ? Math.max(0, options.retryDelayCapMs) : 2500;
+  if (!options.bypassCache && Date.now() < mirrorsBlockedUntil) {
+    const blockedErr = new Error("MovieStreamBD mirrors temporarily blocked by Cloudflare (HTTP 403)");
+    blockedErr.status = 403;
+    blockedErr.isCloudflareBlock = true;
+    throw blockedErr;
+  }
 
-  if (!hasCustomFetcher && !options.bypassCache && mlbdInFlight.has(cacheKey)) {
+  if (mlbdInFlight.has(cacheKey)) {
     return await mlbdInFlight.get(cacheKey);
   }
 
   const job = (async () => {
-    const now = Date.now();
     const cachedOrigins = getCached("portal:mirrors") || [];
-    const rawCandidateBases = [...new Set([
-      ...(Array.isArray(options.mirrors) ? options.mirrors : []),
+    const candidateBases = [...new Set([
       activeResolvedOrigin,
       ...cachedOrigins,
       ...MLBD_MIRRORS.map(m => m.baseUrl)
     ])].filter(b => {
       try { return !isTrapMirrorHost(new URL(b).hostname); } catch { return false; }
     });
-
-    const readyMirrors = [];
-    const cooldownMirrors = [];
-    for (const base of rawCandidateBases) {
-      if (!options.bypassCache && isMirrorInCooldown(base, now)) {
-        cooldownMirrors.push(base);
-      } else {
-        readyMirrors.push(base);
-      }
-    }
-
-    const candidateBases = readyMirrors.length
-      ? readyMirrors
-      : (options.allowCooldownFallback ? cooldownMirrors : []);
-
-    if (!candidateBases.length) {
-      const allCooldownErr = new Error("All MovieStreamBD mirrors are currently in independent cooldown");
-      allCooldownErr.status = 503;
-      allCooldownErr.isTemporary = true;
-      throw allCooldownErr;
-    }
-
     const tried = new Set();
+
     const slashVariant = ensureTrailingSlashPath(cleanPath);
     const pathVariants = [...new Set(
       cleanPath === "/"
@@ -1270,7 +1002,7 @@ export async function mlbdFetchPage(upstreamPath = "/", options = {}) {
 
     let lastErr = null;
     let portalChecked = false;
-    const perMirrorTimeoutMs = options.timeoutMs || 9000;
+    const perMirrorTimeoutMs = options.timeoutMs || 6500;
 
     for (let i = 0; i < candidateBases.length; i++) {
       const base = candidateBases[i];
@@ -1281,9 +1013,9 @@ export async function mlbdFetchPage(upstreamPath = "/", options = {}) {
       if (/^https?:\/\/(?:www\.)?movielinkbd\.com$/i.test(base)) {
         if (!portalChecked) {
           portalChecked = true;
-          const discovered = await discoverFn(6000, true).catch(() => []);
+          const discovered = await discoverLiveMirrorOrigin(4500, true);
           for (const d of discovered) {
-            if (!tried.has(d) && !candidateBases.includes(d) && (options.bypassCache || !isMirrorInCooldown(d))) {
+            if (!tried.has(d) && !candidateBases.includes(d)) {
               candidateBases.splice(i + 1, 0, d);
             }
           }
@@ -1291,76 +1023,34 @@ export async function mlbdFetchPage(upstreamPath = "/", options = {}) {
         continue;
       }
 
-      let rateLimitRetried = false;
-      for (let vIdx = 0; vIdx < pathVariants.length; vIdx++) {
-        const reqVariant = pathVariants[vIdx];
+      for (const reqVariant of pathVariants) {
         try {
           const extra = options.headers || {};
-          const out = await fetcherFn(base, reqVariant, extra, perMirrorTimeoutMs);
-
-          if (out?.blockedRedirect) {
-            const failure = classifyMirrorFailure({ blockedRedirect: out.blockedRedirect });
-            recordMirrorFailure(base, { ...failure, message: `Blocked redirect (${out.blockedRedirect})` });
+          const out = await fetchMirrorOnce(base, reqVariant, extra, perMirrorTimeoutMs);
+          if (out.blockedRedirect) {
             lastErr = new Error(`Blocked redirect (${out.blockedRedirect}) from ${base}`);
-            lastErr.mirrorOrigin = base;
             break;
           }
-
-          const status = Number(out?.res?.status || 0);
-          const isCfChallenge = isCloudflareBlockedResponse(status, out?.res?.headers, out?.text);
-
-          if (isCfChallenge) {
-            const failure = classifyMirrorFailure({ status, headers: out?.res?.headers, text: out?.text });
-            recordMirrorFailure(base, { ...failure, message: `Cloudflare challenge from ${base}` });
-            lastErr = new Error(`Cloudflare challenge (${status || 403}) from ${base}`);
-            lastErr.status = status || 403;
-            lastErr.isCloudflareBlock = true;
-            lastErr.isAuthError = false;
-            lastErr.mirrorOrigin = base;
+          const isCfChallenge = isCloudflareBlockedResponse(out.res.status, out.res.headers, out.text);
+          if (isCfChallenge || out.res.status === 403 || out.res.status === 401) {
+            lastErr = new Error(
+              isCfChallenge
+                ? `Cloudflare challenge (403) from ${base}`
+                : `HTTP ${out.res.status} from ${base}${reqVariant}`
+            );
+            lastErr.status = out.res.status;
+            lastErr.isCloudflareBlock = isCfChallenge;
+            lastErr.isAuthError = out.res.status === 401;
             break;
           }
-
-          if (status === 429) {
-            const failure = classifyMirrorFailure({ status: 429, headers: out?.res?.headers, text: out?.text });
-            const shortDelay = Math.min(retryDelayCapMs, failure.retryAfterMs || 800);
-            if (!rateLimitRetried && shortDelay > 0) {
-              rateLimitRetried = true;
-              await new Promise(r => setTimeout(r, shortDelay));
-              vIdx -= 1;
-              continue;
-            }
-            recordMirrorFailure(base, { ...failure, message: `HTTP 429 rate limited on ${base}` });
-            lastErr = new Error(`HTTP 429 rate limited on ${base}${reqVariant}`);
-            lastErr.status = 429;
-            lastErr.isTemporary = true;
-            lastErr.isRateLimit = true;
-            lastErr.retryAfterMs = failure.retryAfterMs;
-            lastErr.mirrorOrigin = base;
-            break;
-          }
-
-          if (status === 403 || status === 401) {
-            const failure = classifyMirrorFailure({ status, headers: out?.res?.headers, text: out?.text });
-            recordMirrorFailure(base, { ...failure, message: `HTTP ${status} from ${base}` });
-            lastErr = new Error(`HTTP ${status} from ${base}${reqVariant}`);
-            lastErr.status = status;
-            lastErr.isCloudflareBlock = false;
-            lastErr.isAuthError = status === 401;
-            lastErr.mirrorOrigin = base;
-            break;
-          }
-
-          if (out?.res?.ok && out.text && out.text.length > 400) {
+          if (out.res.ok && out.text && out.text.length > 400) {
             if (isPortalLandingHtml(out.text)) {
               for (const discovered of extractMirrorOriginsFromPortal(out.text)) {
-                if (!tried.has(discovered) && !candidateBases.includes(discovered) && (options.bypassCache || !isMirrorInCooldown(discovered))) {
+                if (!tried.has(discovered) && !candidateBases.includes(discovered)) {
                   candidateBases.splice(i + 1, 0, discovered);
                 }
               }
-              const failure = classifyMirrorFailure({ status, isPortalLanding: true });
-              recordMirrorFailure(base, { ...failure, message: `Portal landing from ${base}` });
               lastErr = new Error(`Portal landing or challenge page from ${base}`);
-              lastErr.mirrorOrigin = base;
               break;
             }
             if (cleanPath !== "/") {
@@ -1384,10 +1074,8 @@ export async function mlbdFetchPage(upstreamPath = "/", options = {}) {
                 continue;
               }
             }
-            const resolvedOrigin = out.finalOrigin || base;
-            activeResolvedOrigin = resolvedOrigin;
-            recordMirrorSuccess(base);
-            if (resolvedOrigin !== base) recordMirrorSuccess(resolvedOrigin);
+            activeResolvedOrigin = out.finalOrigin || base;
+            mirrorsBlockedUntil = 0;
             mlbdDirectMirrorsBlocked = false;
             const result = {
               html: out.text,
@@ -1398,44 +1086,31 @@ export async function mlbdFetchPage(upstreamPath = "/", options = {}) {
             };
             return setCached(cacheKey, result, ttlMs);
           }
-
-          const failure = classifyMirrorFailure({ status, headers: out?.res?.headers, text: out?.text });
-          const httpErr = new Error(`HTTP ${status} from ${base}${reqVariant}`);
-          httpErr.status = status;
-          httpErr.isTemporary = failure.isTemporary;
-          httpErr.mirrorOrigin = base;
+          const httpErr = new Error(`HTTP ${out.res.status} from ${base}${reqVariant}`);
+          httpErr.status = out.res.status;
+          httpErr.isTemporary = out.res.status === 429 || out.res.status >= 500;
           lastErr = httpErr;
-          if (status >= 500 || status === 0) {
-            recordMirrorFailure(base, { ...failure, message: httpErr.message });
-            break;
-          }
+          if (out.res.status === 429 || out.res.status >= 500) break;
         } catch (err) {
           err.isTemporary = true;
-          err.mirrorOrigin = base;
           lastErr = err;
-          const failure = classifyMirrorFailure({ err });
-          recordMirrorFailure(base, { ...failure, message: err?.message || "Mirror fetch error" });
-          break;
         }
       }
 
       if (!portalChecked) {
         portalChecked = true;
-        const discovered = await discoverFn(6000, true).catch(() => []);
+        const discovered = await discoverLiveMirrorOrigin(4500, true);
         for (const d of discovered) {
-          if (!tried.has(d) && !candidateBases.includes(d) && (options.bypassCache || !isMirrorInCooldown(d))) {
+          if (!tried.has(d) && !candidateBases.includes(d)) {
             candidateBases.splice(i + 1, 0, d);
           }
         }
       }
     }
 
-    const anyMirrorStillReady = MLBD_MIRRORS.some(
-      m => !/movielinkbd\.com$/i.test(m.baseUrl) && !isMirrorInCooldown(m.baseUrl)
-    );
-    mlbdDirectMirrorsBlocked = !anyMirrorStillReady;
-
     if (isAuthOrForbiddenError(lastErr)) {
+      mirrorsBlockedUntil = Date.now() + 15000;
+      mlbdDirectMirrorsBlocked = true;
       deleteStaleCached(cacheKey);
       throw lastErr;
     }
@@ -1445,12 +1120,10 @@ export async function mlbdFetchPage(upstreamPath = "/", options = {}) {
       if (stale) return stale;
     }
 
+    mirrorsBlockedUntil = Date.now() + 15000;
+    mlbdDirectMirrorsBlocked = true;
     throw lastErr || new Error("All MovieStreamBD mirrors are currently unreachable");
   })();
-
-  if (hasCustomFetcher) {
-    return await job;
-  }
 
   mlbdInFlight.set(cacheKey, job);
   try {
@@ -1689,24 +1362,6 @@ export async function getMlbdServerHealth(options = {}) {
     })
   );
 
-  for (const c of checks) {
-    if (c.live || c.partialLive) {
-      recordMirrorSuccess(c.baseUrl);
-      if (c.resolvedUrl) {
-        try { recordMirrorSuccess(new URL(c.resolvedUrl).origin); } catch {}
-      }
-    }
-    const st = getMirrorState(c.baseUrl);
-    if (st) {
-      c.mirrorState = {
-        consecutiveFailures: st.consecutiveFailures,
-        lastReason: st.lastReason,
-        cooldownUntil: st.cooldownUntil,
-        inCooldown: st.cooldownUntil > Date.now()
-      };
-    }
-  }
-
   const nonPortalLiveMirrors = checks
     .filter(c => (c.live || c.partialLive) && !/\/\/(?:www\.)?movielinkbd\.com$/i.test(c.baseUrl))
     .sort((a, b) =>
@@ -1721,6 +1376,7 @@ export async function getMlbdServerHealth(options = {}) {
       if (!/\/\/(?:www\.)?movielinkbd\.com$/i.test(nextOrigin)) {
         activeResolvedOrigin = nextOrigin;
         mlbdDirectMirrorsBlocked = false;
+        mirrorsBlockedUntil = 0;
       }
     } catch {}
   } else {
@@ -2244,7 +1900,7 @@ async function fetchMlbdComPage(pagePath = "/") {
   throw new Error(`HTTP ${cRes?.status || 502} from movielinkbd.com${clean}`);
 }
 
-export function buildMlbdComItem({ title, rawPoster = "", rating = "", year = "", typeText = "", href = "", languageHint = "", genreHint = "", uploadedAtMs = 0, uploadTime = "" }) {
+function buildMlbdComItem({ title, rawPoster = "", rating = "", year = "", typeText = "", href = "", languageHint = "", genreHint = "", uploadedAtMs = 0, uploadTime = "" }) {
   const cleanTitle = dedupeRepeatedTitleYear(stripTags(title).replace(/<small>[\s\S]*?<\/small>/gi, "").trim());
   if (!cleanTitle) return null;
   const yr = extractPlausibleYear(cleanTitle, year, href);
@@ -2253,46 +1909,18 @@ export function buildMlbdComItem({ title, rawPoster = "", rating = "", year = ""
   const isAnime = /^\/anime\//i.test(href) || /anime/i.test(`${typeText} ${cleanTitle} ${genreHint}`);
 
   let itemPath = normalizeMlbdItemPath(href);
-  const searchTitle = cleanMlbdSearchTitle(cleanTitle);
-  const absPoster = rawPoster && /^https?:\/\//i.test(rawPoster) ? rawPoster : "";
-  const regHit = lookupPosterRegistry(searchTitle, yr);
-  const archHit = mlbdArchiveByNormTitle.get(normalizePosterKey(searchTitle)) || null;
   if (!itemPath) {
-    const reqRange = parseEpisodeRangeFromTitle(cleanTitle);
-    const findKnownBatchPath = () => {
-      const wantBase = extractBaseSeriesTitle(cleanTitle).toLowerCase();
-      if (!wantBase) return "";
-      const pools = [mlbdItemRegistry.values(), mlbdArchiveRecords];
-      for (const pool of pools) {
-        for (const cand of pool) {
-          if (!cand?.path || !/\/(?:movie|series|drama|anime)\//i.test(cand.path)) continue;
-          if (extractBaseSeriesTitle(cand.title || "").toLowerCase() !== wantBase) continue;
-          if (reqRange) {
-            const cRange = parseEpisodeRangeFromTitle(cand.title || "");
-            if (!cRange || cRange.season !== reqRange.season || cRange.startEp !== reqRange.startEp || cRange.endEp !== reqRange.endEp) {
-              continue;
-            }
-          }
-          return normalizeUpstreamPath(cand.path);
-        }
-      }
-      return "";
-    };
-    const knownPath = findKnownBatchPath();
-    if (knownPath) {
-      itemPath = knownPath.startsWith("/mlbd/") ? knownPath : `/mlbd${knownPath}`;
-    } else {
-      const slug = slugifyMlbdTitle(cleanTitle);
-      const kind = isAnime ? "anime" : isSeries ? "series" : "movie";
-      const batchSuffix = reqRange && (reqRange.endEp > reqRange.startEp || reqRange.startEp > 1)
-        ? `-s${String(reqRange.season).padStart(2, "0")}-ep-${reqRange.startEp}-${reqRange.endEp}`
-        : (reqRange && reqRange.season > 1 ? `-s${String(reqRange.season).padStart(2, "0")}` : "");
-      itemPath = `/mlbd/${kind}/${slug}${yr ? `-${yr}` : ""}${batchSuffix}`;
-    }
+    const slug = slugifyMlbdTitle(cleanTitle);
+    const kind = isAnime ? "anime" : isSeries ? "series" : "movie";
+    itemPath = `/mlbd/${kind}/${slug}${yr ? `-${yr}` : ""}`;
   } else {
     itemPath = `/mlbd${itemPath}`;
   }
 
+  const searchTitle = cleanMlbdSearchTitle(cleanTitle);
+  const absPoster = rawPoster && /^https?:\/\//i.test(rawPoster) ? rawPoster : "";
+  const regHit = lookupPosterRegistry(searchTitle, yr);
+  const archHit = mlbdArchiveByNormTitle.get(normalizePosterKey(searchTitle)) || null;
   const resolvedRawPoster = absPoster || regHit?.rawPoster || archHit?.rawPoster || "";
   const isHindi = /hindi|dual\s*audio/i.test(`${cleanTitle} ${languageHint}`);
   const isBangla = /bangla|bengali/i.test(`${cleanTitle} ${languageHint}`);
@@ -2324,7 +1952,7 @@ export function buildMlbdComItem({ title, rawPoster = "", rating = "", year = ""
     hasResource: !/upcoming|release soon/i.test(cleanTitle),
     isHindiDubbed: isHindi,
     source: "movielinkbd",
-    detailsEndpoint: `/api/details?path=${encodeURIComponent(itemPath)}&title=${encodeURIComponent(cleanTitle)}`
+    detailsEndpoint: `/api/details?path=${encodeURIComponent(itemPath)}&title=${encodeURIComponent(searchTitle)}`
   };
   registerMlbdItem(item);
   return item;
@@ -3113,7 +2741,7 @@ async function getMlbdComCatalog({ path = "/", q = "", page = 1 } = {}) {
     const allowMusic = /\b(?:song|songs|music|ost|pop|lyric|lyrical|remix|album|naat|bhajan|track|audio)\b/i.test(cleanQ);
     const scored = [];
     for (const it of fullIndex) {
-      if (!isMlbdPlayableListItem(it)) continue;
+      if (!it || isNigerianContent(it)) continue;
       if (!allowMusic && isMusicOrClipSubject(it)) continue;
       const sc = Math.max(...qVariants.map(qv => scoreSearchMatch(it, qv, { allowBroadMatch: false })));
       if (sc > 0) scored.push({ it, sc });
@@ -3135,7 +2763,7 @@ async function getMlbdComCatalog({ path = "/", q = "", page = 1 } = {}) {
         if (r.status !== "fulfilled") continue;
         const cards = extractMlbdComCards(r.value.html, r.value.tp);
         for (const c of cards) {
-          if (isMlbdPlayableListItem(c) && (matchesMlbdCategoryItem(c, path) || ["/", "/top10", "/recently-updated"].includes(normCat))) {
+          if (!isNigerianContent(c) && (matchesMlbdCategoryItem(c, path) || ["/", "/top10", "/recently-updated"].includes(normCat))) {
             liveItems.push(c);
           }
         }
@@ -3147,7 +2775,7 @@ async function getMlbdComCatalog({ path = "/", q = "", page = 1 } = {}) {
   const seenKeyByTitle = new Map();
   const merged = [];
   const pushUnique = it => {
-    if (!isMlbdPlayableListItem(it)) return;
+    if (!it || isNigerianContent(it)) return;
     const k = normalizePosterKey(it.searchTitle || it.title) + "|" + (it.year || "");
     const pKey = it.path || k;
     const existing = seenMap.get(pKey) || (k !== "|" ? seenKeyByTitle.get(k) : null);
@@ -3168,20 +2796,17 @@ async function getMlbdComCatalog({ path = "/", q = "", page = 1 } = {}) {
     merged.push(it);
   };
 
-  // Merge Live + Archive seamlessly, preferring Live over Archive when deduplicating by path and title
-  for (const it of liveItems) pushUnique({ ...it, fromArchive: false });
-  for (const it of archiveRes.items) pushUnique({ ...it, fromArchive: true });
+  // Never mix archive into live items; only return archive when live is unavailable
+  const useArchiveOnly = isTrendingFallback || isLatestFallback || liveItems.length === 0;
+  if (useArchiveOnly) {
+    for (const it of archiveRes.items) pushUnique({ ...it, fromArchive: true });
+  } else {
+    for (const it of liveItems) pushUnique({ ...it, fromArchive: false });
+  }
 
-  const orderedMerged = isTrendingFallback
-    ? [
-        ...orderMlbdTrendingItems(merged.filter(x => x.fromArchive !== true)),
-        ...orderMlbdTrendingItems(merged.filter(x => x.fromArchive === true))
-      ]
-    : (!cleanQ && sortMode === "latest")
-      ? sortMlbdNewestFirst(merged)
-      : merged;
+  const orderedMerged = (!cleanQ && sortMode === "latest") ? sortMlbdNewestFirst(merged) : merged;
   const perPage = 30;
-  const totalCount = Math.max(orderedMerged.length, archiveRes.total || 0);
+  const totalCount = useArchiveOnly ? Math.max(orderedMerged.length, archiveRes.total || 0) : orderedMerged.length;
   const startIdx = (pageNum - 1) * perPage;
   const slice = orderedMerged.slice(startIdx, startIdx + perPage);
   if (slice.some(x => !x.poster || !x.mbSubjectId)) {
@@ -3190,7 +2815,6 @@ async function getMlbdComCatalog({ path = "/", q = "", page = 1 } = {}) {
   const maxPage = Math.max(1, Math.ceil(totalCount / perPage));
   const archiveCount = slice.filter(x => x?.fromArchive === true).length;
   const liveCount = slice.length - archiveCount;
-  const archiveOnlyItems = slice.filter(x => x?.fromArchive === true);
 
   return {
     ok: true,
@@ -3201,16 +2825,16 @@ async function getMlbdComCatalog({ path = "/", q = "", page = 1 } = {}) {
     heading: cleanQ
       ? `Search: ${cleanQ}`
       : isTrendingFallback
-        ? (liveCount > 0 ? "Trending Now" : "Trending Now (Archive Fallback)")
+        ? "Trending Now (Archive Fallback)"
         : isLatestFallback
-          ? (liveCount > 0 ? "Latest Releases" : "Latest Releases (Archive Fallback)")
+          ? "Latest Releases (Archive Fallback)"
           : "All Movies & Series",
-    contentSource: liveCount > 0 && archiveCount > 0 ? "merged" : archiveCount > 0 ? "archive" : "portal",
-    isArchiveFallback: liveCount === 0 && archiveCount > 0,
+    contentSource: archiveCount > 0 ? "archive" : "portal",
+    isArchiveFallback: archiveCount > 0 || isTrendingFallback || isLatestFallback,
     liveCount,
     archiveCount,
     items: slice,
-    archiveItems: archiveOnlyItems,
+    archiveItems: archiveCount > 0 ? slice : [],
     page: pageNum,
     maxPage,
     totalPages: maxPage,
@@ -3245,7 +2869,7 @@ async function getMlbdComHomeFeed() {
       sort: "latest",
       offset: 0,
       limit: 40
-    }).items.map(it => ({ ...it, fromArchive: true })).filter(isMlbdPlayableListItem);
+    }).items.map(it => ({ ...it, fromArchive: true }));
     const sorted = sortMlbdNewestFirst(archiveItems);
     if (sorted.length) {
       parsedSections.push({ ...spec, sorted });
@@ -3324,116 +2948,13 @@ export async function getMlbdCategories() {
   );
 }
 
-function getMlbdItemDedupeKeys(item) {
-  if (!item || typeof item !== "object") return { pathKey: "", titleKey: "" };
-  const normPath = item.path ? normalizeUpstreamPath(item.path).toLowerCase().replace(/\/+$/, "") : "";
-  const pathKey = normPath && normPath !== "/" ? normPath : "";
-  const cleanT = cleanMlbdSearchTitle(item.searchTitle || item.title || "");
-  const normT = normalizePosterKey(cleanT);
-  const kind = item.isAnime ? "a" : item.isSeries ? "s" : "m";
-  const yr = extractPlausibleYear(item.title || "", item.year || "", normPath);
-  const titleKey = normT ? `${normT}|${yr || ""}|${kind}` : "";
-  return { pathKey, titleKey };
-}
-
-function mergeDuplicateMlbdPair(existing, incoming) {
-  if (!existing) return incoming;
-  if (!incoming) return existing;
-  const exLive = existing.fromArchive !== true ? 1 : 0;
-  const inLive = incoming.fromArchive !== true ? 1 : 0;
-  const exPoster = existing.poster ? 1 : 0;
-  const inPoster = incoming.poster ? 1 : 0;
-  const exUp = Number(existing.uploadedAtMs || 0);
-  const inUp = Number(incoming.uploadedAtMs || 0);
-
-  let winner = existing;
-  let loser = incoming;
-  if (inLive !== exLive) {
-    winner = inLive > exLive ? incoming : existing;
-    loser = winner === incoming ? existing : incoming;
-  } else if (inPoster !== exPoster) {
-    winner = inPoster > exPoster ? incoming : existing;
-    loser = winner === incoming ? existing : incoming;
-  } else if (inUp !== exUp) {
-    winner = inUp > exUp ? incoming : existing;
-    loser = winner === incoming ? existing : incoming;
-  }
-
-  return {
-    ...winner,
-    poster: winner.poster || loser.poster || "",
-    rawPoster: winner.rawPoster || loser.rawPoster || "",
-    mbSubjectId: winner.mbSubjectId || loser.mbSubjectId || "",
-    mbDetailPath: winner.mbDetailPath || loser.mbDetailPath || "",
-    rating: winner.rating || loser.rating || "",
-    views: Math.max(Number(winner.views || 0), Number(loser.views || 0)),
-    viewsText: winner.viewsText || loser.viewsText || "",
-    hypeScore: Math.max(Number(winner.hypeScore || 0), Number(loser.hypeScore || 0)),
-    uploadedAtMs: Math.max(exUp, inUp),
-    fromArchive: winner.fromArchive === true && loser.fromArchive === true
-  };
-}
-
-export function mergeAndDedupeMlbdItems(liveItems = [], archiveItems = [], options = {}) {
-  const mode = options.mode || "latest"; // "latest" | "trending" | "preserve"
-  const byPath = new Map();
-  const byTitle = new Map();
-  const orderedKeys = [];
-
-  const ingest = (raw, isArchiveFlag) => {
-    if (!isMlbdPlayableListItem(raw)) return;
-    const item = { ...raw, fromArchive: isArchiveFlag ? true : Boolean(raw.fromArchive) };
-    const { pathKey, titleKey } = getMlbdItemDedupeKeys(item);
-    if (!pathKey && !titleKey) return;
-
-    const existing = (pathKey && byPath.get(pathKey)) || (titleKey && byTitle.get(titleKey)) || null;
-    if (existing) {
-      const merged = mergeDuplicateMlbdPair(existing.item, item);
-      existing.item = merged;
-      if (pathKey && !byPath.has(pathKey)) byPath.set(pathKey, existing);
-      if (titleKey && !byTitle.has(titleKey)) byTitle.set(titleKey, existing);
-      return;
-    }
-
-    const slot = { item };
-    orderedKeys.push(slot);
-    if (pathKey) byPath.set(pathKey, slot);
-    if (titleKey) byTitle.set(titleKey, slot);
-  };
-
-  for (const it of Array.isArray(liveItems) ? liveItems : []) {
-    ingest(it, it?.fromArchive === true);
-  }
-  for (const it of Array.isArray(archiveItems) ? archiveItems : []) {
-    ingest(it, true);
-  }
-
-  const deduped = orderedKeys.map(s => s.item);
-  if (mode === "trending") {
-    const livePart = deduped.filter(x => x.fromArchive !== true);
-    const archivePart = deduped.filter(x => x.fromArchive === true);
-    const orderedLive = orderMlbdTrendingItems(livePart);
-    const orderedArchive = [...archivePart].sort(
-      (a, b) =>
-        ((Number(b.views) || 0) - (Number(a.views) || 0)) ||
-        ((Number(b.hypeScore) || 0) - (Number(a.hypeScore) || 0)) ||
-        ((Number(b.uploadedAtMs) || 0) - (Number(a.uploadedAtMs) || 0))
-    );
-    return [...orderedLive, ...orderedArchive];
-  }
-  if (mode === "preserve") {
-    return deduped;
-  }
-  return sortMlbdNewestFirst(deduped);
-}
-
 export async function getMlbdHomeFeed() {
   await ensureMlbdArchiveLoaded();
   const cached = getCached("home-feed");
   if (cached) return cached;
 
   try {
-    const page = await mlbdFetchPage("/", { ttlMs: 120000 });
+    const page = await mlbdFetchPage("/", { ttlMs: 120000, timeoutMs: 5500 });
     let sections = extractHomeSections(page.html, page.origin);
     const categories = extractCategoriesFromHtml(page.html);
 
@@ -3446,17 +2967,20 @@ export async function getMlbdHomeFeed() {
         { id: "mlbd-anim", title: "🎨 ANIMATION", path: "/genre/animation/" }
       ];
       const settled = await Promise.allSettled(
-        extraShelves.map(s => getMlbdCatalog({ path: s.path, page: 1 }))
+        extraShelves.map(s => Promise.race([
+          getMlbdCatalog({ path: s.path, page: 1 }),
+          new Promise(r => setTimeout(() => r(null), 5000))
+        ]))
       );
       const built = [];
       for (let i = 0; i < extraShelves.length; i++) {
         const res = settled[i];
-        if (res.status === "fulfilled" && Array.isArray(res.value?.items) && res.value.items.length) {
+        if (res.status === "fulfilled" && res.value && !res.value?.isArchiveFallback && Array.isArray(res.value?.items) && res.value.items.length) {
           built.push({
             id: extraShelves[i].id,
             title: extraShelves[i].title,
             categoryPath: extraShelves[i].path.replace(/\/+$/, "") || "/",
-            items: res.value.items.slice(0, 28),
+            items: res.value.items.filter(x => x && x.fromArchive !== true).slice(0, 20),
             source: "movielinkbd"
           });
         }
@@ -3466,98 +2990,28 @@ export async function getMlbdHomeFeed() {
 
     // Fetch true /new (Latest) and true /mostwatch/7d (7-day Trending) routes separately; never substitute Homepage sections
     const [liveLatestRes, liveTrendingRes] = await Promise.allSettled([
-      getMlbdCatalog({ path: "/new", page: 1 }),
-      getMlbdCatalog({ path: "/mostwatch/7d", page: 1 })
+      Promise.race([getMlbdCatalog({ path: "/new", page: 1 }), new Promise(r => setTimeout(() => r(null), 5000))]),
+      Promise.race([getMlbdCatalog({ path: "/mostwatch/7d", page: 1 }), new Promise(r => setTimeout(() => r(null), 5000))])
     ]);
 
-    const archiveLatestItems = queryMlbdArchive({
-      category: "/",
-      includeAdult: false,
-      sort: "latest",
-      offset: 0,
-      limit: 40
-    }).items.map(x => ({ ...x, fromArchive: true }));
-
-    const archiveTrendingItems = queryMlbdArchive({
-      category: "/",
-      includeAdult: false,
-      sort: "popular",
-      offset: 0,
-      limit: 40
-    }).items.map(x => ({ ...x, fromArchive: true }));
-
-    const liveLatestRaw = (liveLatestRes.status === "fulfilled" && Array.isArray(liveLatestRes.value?.items))
-      ? liveLatestRes.value.items
+    const latest = (liveLatestRes.status === "fulfilled" && !liveLatestRes.value?.isArchiveFallback && Array.isArray(liveLatestRes.value?.items))
+      ? liveLatestRes.value.items.filter(x => x && x.fromArchive !== true)
       : [];
-    const latest = mergeAndDedupeMlbdItems(liveLatestRaw, archiveLatestItems, { mode: "latest" }).slice(0, 36);
 
     const top10Sec = sections.find(s => /top\s*10/i.test(s.title));
     const mostWatchSec = sections.find(s => s !== top10Sec && /^\/mostwatch/i.test(String(s?.categoryPath || "")));
-    let liveTrendingRaw = (liveTrendingRes.status === "fulfilled" && Array.isArray(liveTrendingRes.value?.items))
-      ? liveTrendingRes.value.items
+    let trending = (liveTrendingRes.status === "fulfilled" && !liveTrendingRes.value?.isArchiveFallback && Array.isArray(liveTrendingRes.value?.items))
+      ? liveTrendingRes.value.items.filter(x => x && x.fromArchive !== true)
       : [];
-    if (!liveTrendingRaw.length && mostWatchSec) {
-      liveTrendingRaw = mostWatchSec.items || [];
+    if (!trending.length && mostWatchSec) {
+      trending = (mostWatchSec.items || []).filter(x => x && x.fromArchive !== true);
     }
-    const trending = mergeAndDedupeMlbdItems(liveTrendingRaw, archiveTrendingItems, { mode: "trending" }).slice(0, 36);
 
-    const mergedSections = sections
-      .map(s => {
-        const catPath = String(s?.categoryPath || "/").replace(/\/+$/, "") || "/";
-        const isMostWatch = /^\/mostwatch/i.test(catPath) || /top\s*10/i.test(s?.title || "");
-        const catArchive = queryMlbdArchive({
-          category: catPath,
-          includeAdult: false,
-          sort: isMostWatch ? "popular" : "latest",
-          offset: 0,
-          limit: 24
-        }).items.map(x => ({ ...x, fromArchive: true }));
-        const mergedItems = mergeAndDedupeMlbdItems(
-          s.items || [],
-          catArchive,
-          { mode: isMostWatch ? "trending" : "latest" }
-        ).slice(0, 30);
-        return { ...s, items: mergedItems };
-      })
+    const cleanLiveSections = sections
+      .map(s => ({ ...s, items: (s.items || []).filter(x => x && x.fromArchive !== true) }))
       .filter(s => s.items.length > 0);
-
-    // Ensure key archive-backed category shelves appear directly on homepage if not already covered by live sections
-    const coveredCats = new Set(mergedSections.map(s => String(s?.categoryPath || "/").toLowerCase().replace(/\/+$/, "") || "/"));
-    const archiveShelvesToCheck = [
-      { id: "mlbd-archive-highlights", title: "🎞️ Archive Highlights", categoryPath: "/" },
-      { id: "mlbd-bangla", title: "🇧🇩 Bangla & Dubbed", categoryPath: "/language/bangla" },
-      { id: "mlbd-hindi-dubbed", title: "🎙️ Hindi Dubbed", categoryPath: "/language/hindi-dubbed" },
-      { id: "mlbd-south", title: "💫 South Indian", categoryPath: "/southIndian" },
-      { id: "mlbd-kdrama", title: "🇰🇷 Korean Drama", categoryPath: "/language/korean" },
-      { id: "mlbd-anime", title: "🍥 Anime & Animation", categoryPath: "/anime" }
-    ];
-    for (const spec of archiveShelvesToCheck) {
-      const normCat = spec.categoryPath.toLowerCase();
-      if (coveredCats.has(normCat)) continue;
-      const archItems = queryMlbdArchive({
-        category: spec.categoryPath,
-        includeAdult: false,
-        sort: "latest",
-        offset: 0,
-        limit: 24
-      }).items.map(x => ({ ...x, fromArchive: true }));
-      const dedupedArch = mergeAndDedupeMlbdItems([], archItems, { mode: "latest" }).slice(0, 24);
-      if (dedupedArch.length) {
-        coveredCats.add(normCat);
-        mergedSections.push({
-          id: spec.id,
-          title: spec.title,
-          categoryPath: spec.categoryPath,
-          items: dedupedArch,
-          source: "movielinkbd"
-        });
-      }
-    }
-
-    const allItems = mergedSections.flatMap(s => s.items);
-    const deduped = mergeAndDedupeMlbdItems(allItems, [], { mode: "latest" });
-    const hasLive = deduped.some(x => x.fromArchive !== true) || latest.some(x => x.fromArchive !== true);
-    const hasArchive = deduped.some(x => x.fromArchive === true) || latest.some(x => x.fromArchive === true);
+    const allItems = cleanLiveSections.flatMap(s => s.items);
+    const deduped = [...new Map(allItems.map(it => [it.path, it])).values()];
     const banners = (latest.length ? latest : deduped).filter(it => it.poster).slice(0, 10);
 
     return setCached(
@@ -3566,9 +3020,9 @@ export async function getMlbdHomeFeed() {
         ok: true,
         source: "movielinkbd",
         activeMirror: page.origin,
-        contentSource: hasLive && hasArchive ? "merged" : hasArchive ? "archive" : "live",
-        isArchiveFallback: !hasLive && hasArchive,
-        sections: mergedSections,
+        contentSource: "live",
+        isArchiveFallback: false,
+        sections: cleanLiveSections,
         latest,
         trending,
         banners,
@@ -3604,21 +3058,13 @@ export async function getMlbdHomeFeed() {
         }
         if (sections.length || norm.trending?.length) {
           mlbdCinePulseHasContent = true;
-          for (const sec of sections) {
-            for (const it of sec.items || []) registerMlbdItem(it);
-          }
-          for (const it of norm.trending || []) registerMlbdItem(it);
-          for (const it of norm.banners || []) registerMlbdItem(it);
-          const archiveLatest = queryMlbdArchive({ category: "/", includeAdult: false, sort: "latest", offset: 0, limit: 30 }).items.map(x => ({ ...x, fromArchive: true }));
-          const archiveTrend = queryMlbdArchive({ category: "/", includeAdult: false, sort: "popular", offset: 0, limit: 30 }).items.map(x => ({ ...x, fromArchive: true }));
           return setCached("home-feed", {
             ok: true,
             source: "movielinkbd",
             activeMirror: rawCp.activeMirror || "CinePulse Gateway",
-            sections: sections.map(s => ({ ...s, items: (s.items || []).filter(isMlbdPlayableListItem) })).filter(s => s.items.length > 0),
-            latest: mergeAndDedupeMlbdItems([], archiveLatest, { mode: "latest" }).slice(0, 30),
-            trending: mergeAndDedupeMlbdItems(norm.trending || sections.flatMap(s => s.items || []).slice(0, 28), archiveTrend, { mode: "trending" }).slice(0, 30),
-            banners: (norm.banners || []).filter(isMlbdPlayableListItem),
+            sections,
+            trending: norm.trending || sections.flatMap(s => s.items || []).slice(0, 28),
+            banners: norm.banners || [],
             categories: norm.categories?.length ? norm.categories : DEFAULT_FALLBACK_CATEGORIES.map(c => ({ ...c, source: "movielinkbd" }))
           }, 120000);
         }
@@ -3692,44 +3138,34 @@ export async function getMlbdCatalog({ path = "/", q = "", page = 1 } = {}) {
   const cached = getCached(cacheKey);
   if (cached) return cached;
 
-  const isAdultRoute = normBase === "/adult18plus" || normBase === "/midnight" || normBase.startsWith("/genre/adult") || normBase.startsWith("/genre/erotic") || normBase.startsWith("/genre/hot");
-  const archiveSort = isTrendingRoute ? "popular" : normBase === "/top-rated" ? "rating" : "latest";
-  const archiveOffset = pageNum === 1 ? 0 : (pageNum - 1) * 30;
-  const archiveRes = queryMlbdArchive({
-    q: cleanQuery,
-    category: basePath,
-    includeAdult: Boolean(cleanQuery || isAdultRoute),
-    sort: archiveSort,
-    offset: archiveOffset,
-    limit: pageNum === 1 ? 45 : 30
-  });
-  const archiveSlice = (archiveRes.items || []).map(x => ({ ...x, fromArchive: true }));
-
   try {
     const pageData = await mlbdFetchPage(upstreamPath, { ttlMs: 90000 });
     const rawLiveItems = extractCardsFromHtml(pageData.html, pageData.origin)
       .filter(item => item && item.fromArchive !== true)
       .map(item => ({ ...item, fromArchive: false }));
 
-    if ((isTrendingRoute || isLatestRoute) && rawLiveItems.length === 0 && archiveSlice.length === 0) {
+    if ((isTrendingRoute || isLatestRoute) && rawLiveItems.length === 0) {
       throw new Error(`Live ${upstreamPath} returned zero items`);
     }
 
-    const mergeMode = isTrendingRoute
-      ? "trending"
-      : (preserveRankingOrder || Boolean(cleanQuery))
-        ? "preserve"
-        : "latest";
-
-    const mergedItems = mergeAndDedupeMlbdItems(rawLiveItems, archiveSlice, { mode: mergeMode });
-    const liveCount = mergedItems.filter(x => x.fromArchive !== true).length;
-    const archiveCount = mergedItems.filter(x => x.fromArchive === true).length;
-    const archiveItems = mergedItems.filter(x => x.fromArchive === true);
+    const items = isTrendingRoute
+      ? orderMlbdTrendingItems(rawLiveItems)
+      : preserveRankingOrder
+        ? rawLiveItems
+        : sortMlbdNewestFirst(rawLiveItems);
 
     const pagination = extractPagination(pageData.html, pageNum);
-    const archiveMaxPage = Math.max(1, Math.ceil((archiveRes.total || 0) / 30));
-    const maxPage = Math.max(pagination.maxPage, archiveMaxPage);
     const titleMatch = pageData.html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
+
+    // Keep live items and archive content strictly separate (never inject archive items into live results)
+    let archiveItems = [];
+    if (!isTrendingRoute && !isLatestRoute && items.length < 10 && pageNum === 1) {
+      const seen = new Set(items.map(x => x.path));
+      archiveItems = queryMlbdArchive({ q: cleanQuery, category: basePath, includeAdult: true, limit: 30 })
+        .items
+        .filter(x => x && !seen.has(x.path))
+        .map(x => ({ ...x, fromArchive: true }));
+    }
 
     return setCached(
       cacheKey,
@@ -3742,16 +3178,13 @@ export async function getMlbdCatalog({ path = "/", q = "", page = 1 } = {}) {
         heading: titleMatch
           ? stripSiteBrandFromLabel(stripTags(titleMatch[1]))
           : (isTrendingRoute ? "Trending Now" : isLatestRoute ? "Latest Releases" : ""),
-        contentSource: liveCount > 0 && archiveCount > 0 ? "merged" : archiveCount > 0 ? "archive" : "live",
-        isArchiveFallback: liveCount === 0 && archiveCount > 0,
-        liveCount,
-        archiveCount,
-        items: mergedItems,
+        contentSource: "live",
+        isArchiveFallback: false,
+        liveCount: items.length,
+        archiveCount: 0,
+        items,
         archiveItems,
-        ...pagination,
-        maxPage,
-        totalPages: maxPage,
-        hasMore: pageNum < maxPage
+        ...pagination
       },
       90000
     );
@@ -3773,15 +3206,7 @@ export async function getMlbdCatalog({ path = "/", q = "", page = 1 } = {}) {
       if (cp.ok && Array.isArray(rawCp?.items) && rawCp.items.length > 0) {
         mlbdCinePulseHasContent = true;
         const norm = normalizeCinePulsePayload(cpRoute, rawCp);
-        const cpLiveItems = (norm.items || []).map(it => {
-          const item = { ...it, fromArchive: false };
-          registerMlbdItem(item);
-          return item;
-        });
-        const mergeMode = isTrendingRoute ? "trending" : (preserveRankingOrder || Boolean(cleanQuery)) ? "preserve" : "latest";
-        const mergedItems = mergeAndDedupeMlbdItems(cpLiveItems, archiveSlice, { mode: mergeMode });
-        const liveCount = mergedItems.filter(x => x.fromArchive !== true).length;
-        const archiveCount = mergedItems.filter(x => x.fromArchive === true).length;
+        const cpItems = (norm.items || []).map(it => ({ ...it, fromArchive: false }));
         return setCached(cacheKey, {
           ...norm,
           ok: true,
@@ -3789,12 +3214,12 @@ export async function getMlbdCatalog({ path = "/", q = "", page = 1 } = {}) {
           activeMirror: rawCp.activeMirror || "CinePulse Gateway",
           path: isTrendingRoute ? "/mostwatch/7d" : isLatestRoute ? "/new" : basePath,
           upstreamPath,
-          contentSource: liveCount > 0 && archiveCount > 0 ? "cinepulse-merged" : "cinepulse-live",
-          isArchiveFallback: liveCount === 0 && archiveCount > 0,
-          liveCount,
-          archiveCount,
-          items: mergedItems,
-          archiveItems: mergedItems.filter(x => x.fromArchive === true),
+          contentSource: "cinepulse-live",
+          isArchiveFallback: false,
+          liveCount: cpItems.length,
+          archiveCount: 0,
+          items: cpItems,
+          archiveItems: [],
           page: pageNum
         }, 90000);
       }
@@ -3817,7 +3242,7 @@ export async function getMlbdSuggest(rawQuery) {
   const seen = new Set();
   const items = [];
   for (const it of [...sortMlbdNewestFirst(cat.items || []), ...(archiveRes.items || [])]) {
-    if (!isMlbdPlayableListItem(it)) continue;
+    if (!it || isNigerianContent(it)) continue;
     const key = it.path || it.title.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
@@ -4016,14 +3441,11 @@ async function resolveMlbdTitleViaMovieBox(rawPath, hintTitle = "", extraQuery =
 async function fetchPlayerFrameData(frameSrc, page) {
   if (!frameSrc) return { pd2: null, inlineData: null };
   const pUrl = new URL(frameSrc, page.origin);
-  const rawOrigins = [...new Set([
+  const candidateOrigins = [...new Set([
     page.origin,
     activeResolvedOrigin,
-    ...(getCached("portal:mirrors") || []),
-    ...MLBD_MIRRORS.filter(m => !/movielinkbd\.com$/i.test(m.baseUrl)).map(m => m.baseUrl)
+    ...MLBD_MIRRORS.filter(m => /\.movielinkbd\.(?:de|one|tv|shop)$/i.test(m.baseUrl)).map(m => m.baseUrl)
   ])].filter(Boolean);
-  const readyOrigins = rawOrigins.filter(origin => origin === page.origin || !isMirrorInCooldown(origin));
-  const candidateOrigins = readyOrigins.length ? readyOrigins : rawOrigins;
 
   for (const origin of candidateOrigins) {
     try {
@@ -4039,16 +3461,10 @@ async function fetchPlayerFrameData(frameSrc, page) {
         const fetchedPd2 = extractBalancedJson(pPage.text, /window\.__PD2\s*=\s*/i);
         const fetchedInline = extractBalancedJson(pPage.text, /(?:var|let|const|window\.)\s*mlbdInlinePlayerData\s*=\s*/i);
         if (fetchedPd2 || fetchedInline) {
-          recordMirrorSuccess(origin);
           return { pd2: fetchedPd2, inlineData: fetchedInline };
         }
-      } else if (pPage?.res?.status >= 400) {
-        const failure = classifyMirrorFailure({ status: pPage.res.status, headers: pPage.res.headers, text: pPage.text });
-        recordMirrorFailure(origin, { ...failure, message: `Player frame HTTP ${pPage.res.status}` });
       }
     } catch (err) {
-      const failure = classifyMirrorFailure({ err });
-      recordMirrorFailure(origin, { ...failure, message: err?.message || "Player frame fetch error" });
       console.warn("[MovieLinkBD player frame fetch]", origin, err?.message || err);
     }
   }
@@ -4066,10 +3482,14 @@ async function resolveLiveMlbdPathBySearch(hintTitle = "", cleanPath = "", yearH
     const baseQuery = cleanMlbdSearchTitle(rawSeed);
     if (!baseQuery || baseQuery.length < 2) return "";
 
+    const searchPage = await mlbdFetchPage(`/search/?q=${encodeURIComponent(baseQuery)}`, { ttlMs: 60000 }).catch(() => null);
+    if (!searchPage?.html) return "";
+    const cards = extractCardsFromHtml(searchPage.html, searchPage.origin);
+    if (!cards.length) return "";
+
     const wantRange = parseEpisodeRangeFromTitle(rawSeed) || parseEpisodeRangeFromTitle(rawSlugTitle);
     const wantSeries = /^\/(?:mlbd\/)?(?:series|drama|anime)\//i.test(cleanPath) || Boolean(wantRange);
-
-    const scoreCandidateList = list => (Array.isArray(list) ? list : [])
+    const scored = cards
       .filter(c => c?.path && normalizeUpstreamPath(c.path) !== cleanPath)
       .map(c => {
         const sim = titleSimilarityScore(baseQuery, c.searchTitle || c.title || "", {
@@ -4081,41 +3501,14 @@ async function resolveLiveMlbdPathBySearch(hintTitle = "", cleanPath = "", yearH
         if (Boolean(c.isSeries) === wantSeries) bonus += 0.12;
         if (yearHint && String(c.year || "") === String(yearHint)) bonus += 0.10;
         const cRange = parseEpisodeRangeFromTitle(c.title || "");
-        if (wantRange && (wantRange.endEp > wantRange.startEp || wantRange.startEp > 1)) {
-          if (cRange && cRange.season === wantRange.season && cRange.startEp === wantRange.startEp && cRange.endEp === wantRange.endEp) {
-            bonus += 0.35;
-          } else if (cRange && (cRange.season === wantRange.season || cRange.season === 0 || wantRange.season === 0) &&
-            cRange.endEp >= wantRange.startEp && cRange.startEp <= wantRange.endEp) {
-            bonus += 0.18;
-          } else if (cRange && (cRange.endEp > cRange.startEp || cRange.startEp > 1)) {
-            bonus -= 0.65;
-          }
-        } else if (wantRange && cRange && wantRange.startEp === cRange.startEp && wantRange.endEp === cRange.endEp) {
-          bonus += 0.20;
+        if (wantRange && cRange && wantRange.startEp === cRange.startEp && wantRange.endEp === cRange.endEp) {
+          bonus += 0.25;
         }
         return { c, sim, total: sim + bonus };
       })
-      .filter(x => x.sim >= 0.65 && x.total >= 0.65)
+      .filter(x => x.sim >= 0.65)
       .sort((a, b) => b.total - a.total || (b.c.uploadedAtMs || 0) - (a.c.uploadedAtMs || 0));
 
-    // Fast path: check registered live items & archive items first when exact batch matches
-    if (wantRange && (wantRange.endEp > wantRange.startEp || wantRange.startEp > 1)) {
-      const localScored = scoreCandidateList([...mlbdItemRegistry.values(), ...mlbdArchiveRecords]);
-      const exactLocal = localScored.find(x => {
-        const cRange = parseEpisodeRangeFromTitle(x.c?.title || "");
-        return cRange && cRange.season === wantRange.season && cRange.startEp === wantRange.startEp && cRange.endEp === wantRange.endEp;
-      });
-      if (exactLocal?.c?.path) {
-        return normalizeUpstreamPath(exactLocal.c.path);
-      }
-    }
-
-    const searchPage = await mlbdFetchPage(`/search/?q=${encodeURIComponent(baseQuery)}`, { ttlMs: 60000 }).catch(() => null);
-    if (!searchPage?.html) return "";
-    const cards = extractCardsFromHtml(searchPage.html, searchPage.origin);
-    if (!cards.length) return "";
-
-    const scored = scoreCandidateList(cards);
     return scored[0]?.c?.path || "";
   } catch {
     return "";
@@ -4129,10 +3522,8 @@ export async function getMlbdDetails(rawPath, hintTitle = "", extraOpts = {}) {
     throw new Error("Movie or series path is required");
   }
 
-  const requestedRange = parseEpisodeRangeFromTitle(hintTitle);
-  const rangeKey = requestedRange ? `s${requestedRange.season}e${requestedRange.startEp}-${requestedRange.endEp}` : "any";
   const dubLock = extraOpts?.dubLock ? "1" : "0";
-  const cacheKey = `details:${cleanPath}:${dubLock}:${rangeKey}`;
+  const cacheKey = `details:${cleanPath}:${dubLock}`;
   if (!extraOpts?.bypassCache) {
     const cached = getCached(cacheKey);
     if (cached) return cached;
@@ -4143,119 +3534,29 @@ export async function getMlbdDetails(rawPath, hintTitle = "", extraOpts = {}) {
     page = await mlbdFetchPage(cleanPath, { ttlMs: 120000, bypassCache: Boolean(extraOpts?.bypassCache) });
   } catch {
     const regItemPre = mlbdItemRegistry.get(String(rawPath || "").trim()) || mlbdItemRegistry.get(cleanPath) || mlbdArchiveByPath.get(cleanPath);
-    const seedTitle = String(hintTitle || regItemPre?.title || "").trim();
-    const initialParsedRange = parseEpisodeRangeFromTitle(seedTitle);
-    let minExpectedEpFromSlug = 0;
-    const slugBatchMatch = /^(\/(?:series|drama|anime)\/.+-)(\d+)$/i.exec(cleanPath);
-    if (slugBatchMatch) {
-      const slugPrefix = slugBatchMatch[1].toLowerCase();
-      const slugBatchNum = Number(slugBatchMatch[2]) || 0;
-      if (slugBatchNum >= 2) {
-        for (const arc of mlbdArchiveRecords) {
-          const arcPath = String(arc?.path || "").toLowerCase();
-          if (!arcPath.startsWith(slugPrefix)) continue;
-          const arcBatchNum = Number(arcPath.slice(slugPrefix.length)) || 0;
-          if (arcBatchNum > 0 && arcBatchNum < slugBatchNum) {
-            const arcRange = parseEpisodeRangeFromTitle(arc?.title || "");
-            if (arcRange?.endEp && arcRange.endEp >= minExpectedEpFromSlug) {
-              minExpectedEpFromSlug = arcRange.endEp + 1;
-            }
-          }
-        }
-      }
-    }
-    const detailMatchesRequestedBatch = (det, rangeOverride = initialParsedRange) => {
-      const eps = Array.isArray(det?.episodes) ? det.episodes : [];
-      if (rangeOverride) {
-        const rangeCheck = matchEpisodesToRequestedRange(eps, rangeOverride);
-        if (!rangeCheck.matched) return { ok: false, startEpisodeIndex: 0 };
-        return { ok: true, startEpisodeIndex: rangeCheck.startEpisodeIndex };
-      }
-      if (minExpectedEpFromSlug > 0 && eps.length) {
-        const idx = eps.findIndex(ep => (Number(ep?.episodeNumber ?? ep?.ep ?? ep?.number ?? 0) || 0) >= minExpectedEpFromSlug);
-        if (idx < 0) return { ok: false, startEpisodeIndex: 0 };
-        return { ok: true, startEpisodeIndex: idx };
-      }
-      return { ok: true, startEpisodeIndex: Number(det?.startEpisodeIndex) || 0 };
-    };
-
-    if (!extraOpts?._noLiveSearch) {
-      const yrGuess = String(regItemPre?.year || seedTitle.match(/\((19\d\d|20\d\d)\)/)?.[1] || "");
-      const recoveredPath = await resolveLiveMlbdPathBySearch(seedTitle, cleanPath, yrGuess);
+    if (!extraOpts?._noLiveSearch && !mlbdDirectMirrorsBlocked) {
+      const yrGuess = String(regItemPre?.year || String(hintTitle || "").match(/\((19\d\d|20\d\d)\)/)?.[1] || "");
+      const recoveredPath = await resolveLiveMlbdPathBySearch(hintTitle || regItemPre?.title || "", cleanPath, yrGuess);
       if (recoveredPath && recoveredPath !== cleanPath) {
-        return await getMlbdDetails(recoveredPath, seedTitle, { ...extraOpts, _noLiveSearch: true });
+        return await getMlbdDetails(recoveredPath, hintTitle || regItemPre?.title || "", { ...extraOpts, _noLiveSearch: true });
       }
     }
     if (isCinePulseConfigured()) {
-      const cpPathsToTry = [...new Set([rawPath.startsWith("/mlbd/") ? rawPath : cleanPath, cleanPath].filter(Boolean))];
-      for (const cpPath of cpPathsToTry) {
-        const cp = await fetchCinePulseApi("details", {
-          path: cpPath,
-          title: seedTitle,
-          source: "movielinkbd"
-        }, { timeoutMs: 12000 });
-        const cpRawDetail = cp.data?.detail || (cp.data?.title ? cp.data : null);
-        if (cp.ok && cpRawDetail) {
-          const cpDetail = normalizeCinePulseDetail(cpRawDetail, cpPath);
-          const batchMatch = cpDetail && cpDetail.hasResource ? detailMatchesRequestedBatch(cpDetail) : { ok: false };
-          if (batchMatch.ok) {
-            mlbdCinePulseHasContent = true;
-            cpDetail.mlbdOriginalPath = rawPath;
-            cpDetail.source = "movielinkbd-cinepulse";
-            cpDetail.startEpisodeIndex = batchMatch.startEpisodeIndex;
-            if (!cpDetail.poster && regItemPre?.poster) cpDetail.poster = regItemPre.poster;
-            if (!cpDetail.rawPoster && regItemPre?.rawPoster) cpDetail.rawPoster = regItemPre.rawPoster;
-            return setCached(cacheKey, { ok: true, source: "movielinkbd", detail: attachFastRelatedSeasons(cpDetail, rawPath, hintTitle) }, 120000);
-          }
-        }
-      }
-      // Also search CinePulse MLBD catalog in case the live entry uses an mKs_* path instead of slug path
-      const cpSearchSeed = cleanMlbdSearchTitle(seedTitle);
-      if (cpSearchSeed && cpSearchSeed.length >= 2) {
-        const cpSearch = await fetchCinePulseApi("search", {
-          q: cpSearchSeed,
-          source: "movielinkbd",
-          page: "1"
-        }, { timeoutMs: 8000 });
-        const cpCandidates = Array.isArray(cpSearch.data?.items) ? cpSearch.data.items : [];
-        const yrGuess = String(regItemPre?.year || seedTitle.match(/\((19\d\d|20\d\d)\)/)?.[1] || "");
-        const bestCpCand = cpCandidates
-          .filter(c => c?.path && !cpPathsToTry.includes(c.path))
-          .map(c => {
-            const sim = titleSimilarityScore(cpSearchSeed, c.title || "", { queryYear: yrGuess, candidateYear: c.year || "", isSeries: true });
-            const cRange = parseEpisodeRangeFromTitle(c.title || "");
-            let bonus = 0;
-            if (initialParsedRange && cRange) {
-              if (cRange.season === initialParsedRange.season && cRange.startEp === initialParsedRange.startEp && cRange.endEp === initialParsedRange.endEp) {
-                bonus += 0.5;
-              } else if (cRange.season !== initialParsedRange.season || cRange.endEp < initialParsedRange.startEp || cRange.startEp > initialParsedRange.endEp) {
-                bonus -= 1;
-              }
-            }
-            return { c, score: sim + bonus };
-          })
-          .filter(x => x.score >= 0.72)
-          .sort((a, b) => b.score - a.score)[0]?.c;
-        if (bestCpCand?.path) {
-          const cp2 = await fetchCinePulseApi("details", {
-            path: bestCpCand.path,
-            title: seedTitle || bestCpCand.title || "",
-            source: "movielinkbd"
-          }, { timeoutMs: 10000 });
-          const cp2Raw = cp2.data?.detail || (cp2.data?.title ? cp2.data : null);
-          if (cp2.ok && cp2Raw) {
-            const cp2Detail = normalizeCinePulseDetail(cp2Raw, bestCpCand.path);
-            const batchMatch = cp2Detail && cp2Detail.hasResource ? detailMatchesRequestedBatch(cp2Detail) : { ok: false };
-            if (batchMatch.ok) {
-              mlbdCinePulseHasContent = true;
-              cp2Detail.mlbdOriginalPath = rawPath;
-              cp2Detail.source = "movielinkbd-cinepulse";
-              cp2Detail.startEpisodeIndex = batchMatch.startEpisodeIndex;
-              if (!cp2Detail.poster && regItemPre?.poster) cp2Detail.poster = regItemPre.poster;
-              if (!cp2Detail.rawPoster && regItemPre?.rawPoster) cp2Detail.rawPoster = regItemPre.rawPoster;
-              return setCached(cacheKey, { ok: true, source: "movielinkbd", detail: attachFastRelatedSeasons(cp2Detail, rawPath, hintTitle) }, 120000);
-            }
-          }
+      const cp = await fetchCinePulseApi("details", {
+        path: cleanPath,
+        title: String(hintTitle || regItemPre?.title || ""),
+        source: "movielinkbd"
+      }, { timeoutMs: 12000 });
+      const cpRawDetail = cp.data?.detail || (cp.data?.title ? cp.data : null);
+      if (cp.ok && cpRawDetail) {
+        const cpDetail = normalizeCinePulseDetail(cpRawDetail, cleanPath);
+        if (cpDetail && cpDetail.hasResource) {
+          mlbdCinePulseHasContent = true;
+          cpDetail.mlbdOriginalPath = rawPath;
+          cpDetail.source = "movielinkbd-cinepulse";
+          if (!cpDetail.poster && regItemPre?.poster) cpDetail.poster = regItemPre.poster;
+          if (!cpDetail.rawPoster && regItemPre?.rawPoster) cpDetail.rawPoster = regItemPre.rawPoster;
+          return setCached(cacheKey, { ok: true, source: "movielinkbd", detail: attachFastRelatedSeasons(cpDetail, rawPath, hintTitle) }, 120000);
         }
       }
     }
@@ -4293,18 +3594,28 @@ export async function getMlbdDetails(rawPath, hintTitle = "", extraOpts = {}) {
           )
         : 0;
       if (mbDetails?.detail && bridgeSim >= 0.72 && !isMusicOrClipSubject(mbDetails.detail)) {
-        const rangeMatch = detailMatchesRequestedBatch(mbDetails.detail, parsedEpRange);
-        if (rangeMatch.ok) {
-          const detail = {
-            ...mbDetails.detail,
-            mlbdOriginalPath: rawPath,
-            poster: mbDetails.detail.poster || regItem?.poster || "",
-            rawPoster: mbDetails.detail.rawPoster || regItem?.rawPoster || "",
-            startEpisodeIndex: rangeMatch.startEpisodeIndex,
-            source: "movielinkbd-bridge"
-          };
-          return setCached(cacheKey, { ok: true, source: "movielinkbd", detail: attachFastRelatedSeasons(detail, rawPath, displayTitle) }, 120000);
+        let startEpisodeIndex = 0;
+        const mbEps = Array.isArray(mbDetails.detail.episodes) ? mbDetails.detail.episodes : [];
+        if (parsedEpRange?.season && mbEps.length) {
+          const exactIdx = mbEps.findIndex(
+            ep => Number(ep.seasonNumber ?? ep.se ?? 0) === parsedEpRange.season &&
+                  Number(ep.episodeNumber ?? ep.ep ?? 0) === (parsedEpRange.startEp || 1)
+          );
+          const seasonFirstIdx = mbEps.findIndex(
+            ep => Number(ep.seasonNumber ?? ep.se ?? 0) === parsedEpRange.season
+          );
+          if (exactIdx >= 0) startEpisodeIndex = exactIdx;
+          else if (seasonFirstIdx >= 0) startEpisodeIndex = seasonFirstIdx;
         }
+        const detail = {
+          ...mbDetails.detail,
+          mlbdOriginalPath: rawPath,
+          poster: mbDetails.detail.poster || regItem?.poster || "",
+          rawPoster: mbDetails.detail.rawPoster || regItem?.rawPoster || "",
+          startEpisodeIndex,
+          source: "movielinkbd-bridge"
+        };
+        return setCached(cacheKey, { ok: true, source: "movielinkbd", detail: attachFastRelatedSeasons(detail, rawPath, displayTitle) }, 120000);
       }
     }
 
@@ -4556,28 +3867,6 @@ export async function getMlbdDetails(rawPath, hintTitle = "", extraOpts = {}) {
     ? baseData.startEp
     : 0;
   const year = String(baseData.year || finalTitle.match(/\((19\d\d|20\d\d)\)/)?.[1] || "");
-
-  // If the requested title explicitly named a newer episode batch (e.g. "S05 [Ep 135-140 Completed]")
-  // but the resolved slug/path returned an older batch (e.g. Ep 57-64 on /series/bachelor-point-2026),
-  // resolve the matching batch page via live search / registry instead of returning wrong episodes.
-  if (
-    isSeries &&
-    requestedRange &&
-    (requestedRange.endEp > requestedRange.startEp || requestedRange.startEp > 1) &&
-    !extraOpts?._noLiveSearch
-  ) {
-    const batchCheck = matchEpisodesToRequestedRange(episodes, requestedRange);
-    if (!batchCheck.matched) {
-      const yrHint = year || String(hintTitle || "").match(/\((19\d\d|20\d\d)\)/)?.[1] || "";
-      const recoveredBatchPath = await resolveLiveMlbdPathBySearch(hintTitle, cleanPath, yrHint);
-      if (recoveredBatchPath && recoveredBatchPath !== cleanPath) {
-        return await getMlbdDetails(recoveredBatchPath, hintTitle, { ...extraOpts, _noLiveSearch: true });
-      }
-    } else if (batchCheck.startEpisodeIndex > 0) {
-      baseData.startEp = batchCheck.startEpisodeIndex;
-    }
-  }
-
   const regMeta = mlbdItemRegistry.get(String(rawPath || "").trim()) || mlbdItemRegistry.get(cleanPath) || mlbdArchiveByPath.get(cleanPath);
   const inferredLang =
     String(baseData.langs || regMeta?.language || "").trim() ||
@@ -4589,9 +3878,6 @@ export async function getMlbdDetails(rawPath, hintTitle = "", extraOpts = {}) {
 
   const detailRawPoster = String(baseData.poster || rawPoster || "");
   const detailPoster = baseData.poster ? mlbdProxyImageUrl(baseData.poster) : poster;
-  const resolvedStartIdx = Number.isInteger(baseData.startEp) && baseData.startEp >= 0 && baseData.startEp < episodes.length
-    ? baseData.startEp
-    : startIdx;
   const detail = {
     source: "movielinkbd",
     id: String(baseData.id || cleanPath.split("/").pop() || cleanPath),
@@ -4609,7 +3895,7 @@ export async function getMlbdDetails(rawPath, hintTitle = "", extraOpts = {}) {
     isSeries,
     typeBadge: isSeries ? "Series" : "Movie",
     totalEpisodes: episodes.length,
-    startEpisodeIndex: resolvedStartIdx,
+    startEpisodeIndex: startIdx,
     playerToken,
     playerFramePath: frameSrc,
     trailerYoutubeId,
@@ -4620,7 +3906,7 @@ export async function getMlbdDetails(rawPath, hintTitle = "", extraOpts = {}) {
     subtitles: dedupGlobalSubs,
     episodes,
     downloadButtons: pageDownloadButtons,
-    hasResource: hasStreamSources || episodes.some(e => e.downloadButtons.some(b => b.type === "mp4"))
+    hasResource: hasStreamSources || episodes.some(e => e.downloadButtons.length > 0)
   };
 
   const payloadOut = { ok: true, source: "movielinkbd", detail: attachFastRelatedSeasons(detail, rawPath, finalTitle) };
@@ -4645,7 +3931,7 @@ function attachFastRelatedSeasons(detailObj, rawPath = "", hintTitle = "") {
   if (baseSeriesName && baseSeriesName.length >= 3) {
     const baseLower = baseSeriesName.toLowerCase();
     for (const item of mlbdArchiveRecords) {
-      if (!item?.path || seenPaths.has(item.path) || !isMlbdPlayableListItem(item)) continue;
+      if (!item?.path || seenPaths.has(item.path)) continue;
       if (extractBaseSeriesTitle(item.title).toLowerCase() === baseLower) {
         seenPaths.add(item.path);
         const titleKey = `${String(item.title || "").trim()}`.toLowerCase().replace(/\s+/g, " ").trim();
@@ -4695,7 +3981,7 @@ function attachFastRelatedSeasons(detailObj, rawPath = "", hintTitle = "") {
   return out;
 }
 
-export async function findExactTitleMlbdBackup(rawTitle = "", wantMovie = true, { se = 0, ep = 0 } = {}) {
+export async function findExactTitleMlbdBackup(rawTitle = "", wantMovie = true) {
   try {
     await ensureMlbdArchiveLoaded();
     const cleanStrictBase = s =>
@@ -4708,116 +3994,60 @@ export async function findExactTitleMlbdBackup(rawTitle = "", wantMovie = true, 
     const wantNorm = norm(baseTitle);
     if (baseTitle.length < 3 || wantNorm.length < 3) return null;
 
-    const wantRange = parseEpisodeRangeFromTitle(rawTitle);
-    const targetSe = Number(se) || wantRange?.season || 0;
-    const targetEp = Number(ep) || wantRange?.startEp || 0;
-
-    const episodeRangeCompatible = candTitle => {
-      if (wantMovie || (!targetSe && !targetEp && !wantRange)) return true;
-      const cRange = parseEpisodeRangeFromTitle(candTitle);
-      if (!cRange) return true;
-      if (targetSe > 0 && cRange.season > 0 && cRange.season !== targetSe) return false;
-      if (targetEp > 0 && (cRange.endEp > cRange.startEp || cRange.startEp > 1)) {
-        if (targetEp < cRange.startEp || targetEp > cRange.endEp) return false;
-      }
-      if (wantRange && (wantRange.endEp > wantRange.startEp || wantRange.startEp > 1) && (cRange.endEp > cRange.startEp || cRange.startEp > 1)) {
-        if (wantRange.endEp < cRange.startEp || wantRange.startEp > cRange.endEp) return false;
-      }
-      return true;
-    };
-
     const langHintMatch = String(rawTitle || "").match(/\b(Hindi|Bangla|Bengali|Tamil|Telugu|Malayalam|English)\b/i);
     const wantLang = langHintMatch ? langHintMatch[1].toLowerCase() : "";
     const scoreCandidate = it => {
       let sc = wantMovie === !it.isSeries ? 10 : 0;
       if (wantLang && String(`${it.title} ${it.language}`).toLowerCase().includes(wantLang)) sc += 5;
-      const cRange = parseEpisodeRangeFromTitle(it.title || "");
-      if (!wantMovie && cRange && targetSe > 0 && cRange.season === targetSe && targetEp >= cRange.startEp && targetEp <= cRange.endEp) {
-        sc += 20;
-      }
       return sc;
     };
 
     const matches = mlbdArchiveRecords
-      .filter(it => it?.path && norm(it.title) === wantNorm && episodeRangeCompatible(it.title))
+      .filter(it => it?.path && norm(it.title) === wantNorm)
       .sort((a, b) => scoreCandidate(b) - scoreCandidate(a));
 
     let matchedPath = matches[0]?.path || "";
-    if (!matchedPath) {
+    if (!matchedPath && !mlbdDirectMirrorsBlocked) {
       const searchPage = await mlbdFetchPage(`/search/?q=${encodeURIComponent(baseTitle)}`, { ttlMs: 60000 }).catch(() => null);
       if (searchPage?.html) {
         const cards = extractCardsFromHtml(searchPage.html, searchPage.origin)
-          .filter(it => norm(it.title) === wantNorm && episodeRangeCompatible(it.title))
+          .filter(it => norm(it.title) === wantNorm)
           .sort((a, b) => scoreCandidate(b) - scoreCandidate(a));
         matchedPath = cards[0]?.path || "";
       }
     }
     if (!matchedPath) return null;
-    const { detail } = await getMlbdDetails(matchedPath, rawTitle, { _noLiveSearch: true });
-    if (!detail || !(detail.hasResource || detail.episodes?.some(ep => ep.sources?.length))) {
-      return null;
-    }
-    if (!wantMovie && targetEp > 0) {
-      const eps = Array.isArray(detail.episodes) ? detail.episodes : [];
-      const hasTargetEp = eps.some(e => {
-        const eSe = Number(e?.seasonNumber ?? e?.se ?? 0) || 0;
-        const eNum = Number(e?.episodeNumber ?? e?.ep ?? e?.number ?? 0) || 0;
-        if (targetSe > 0 && eSe > 0 && eSe !== targetSe) return false;
-        return eNum === targetEp;
-      });
-      if (!hasTargetEp) return null;
-    }
-    return detail;
+    const { detail } = await getMlbdDetails(matchedPath, rawTitle);
+    return detail && (detail.hasResource || detail.episodes?.some(ep => ep.sources?.length)) ? detail : null;
   } catch {
     return null;
   }
 }
 
-export async function getMlbdStream({ path = "", se = 0, ep = 1, title = "", dubLock = false, bypassCache = false } = {}) {
-  const targetSe = Number(se) || 0;
-  const targetEp = Number(ep) || 0;
-
-  let { detail } = await getMlbdDetails(path, title, { dubLock, bypassCache });
+export async function getMlbdStream({ path = "", se = 0, ep = 1, title = "", dubLock = false } = {}) {
+  let { detail } = await getMlbdDetails(path, title, { dubLock });
   if (detail?.source === "movielinkbd-bridge" && detail?.subjectId) {
-    const checkBridgeRange = det => {
-      if (!det?.isSeries || targetEp <= 0) return true;
-      const eps = Array.isArray(det?.episodes) ? det.episodes : [];
-      return eps.some(e => {
-        const eSe = Number(e?.seasonNumber ?? e?.se ?? 0) || 0;
-        const eNum = Number(e?.episodeNumber ?? e?.ep ?? e?.number ?? 0) || 0;
-        if (targetSe > 0 && eSe > 0 && eSe !== targetSe) return false;
-        return eNum === targetEp;
-      });
-    };
-    if (checkBridgeRange(detail)) {
-      const params = new URLSearchParams({
-        subjectId: String(detail.subjectId),
-        detailPath: String(detail.detailPath || ""),
-        se: String(se || 0),
-        ep: String(ep || 1),
-        title: String(title || detail.title || "")
-      });
-      if (dubLock) params.set("dubLock", "1");
-      return await handleMovieBoxRoute("stream", params);
-    }
+    const params = new URLSearchParams({
+      subjectId: String(detail.subjectId),
+      detailPath: String(detail.detailPath || ""),
+      se: String(se || 0),
+      ep: String(ep || 1),
+      title: String(title || detail.title || "")
+    });
+    if (dubLock) params.set("dubLock", "1");
+    return await handleMovieBoxRoute("stream", params);
   }
 
   const pickChosen = det => {
     const eps = Array.isArray(det?.episodes) ? det.episodes : [];
-    if (!eps.length) return null;
-    const exact = eps.find(e => Number(e.seasonNumber ?? e.se ?? 0) === targetSe && Number(e.episodeNumber ?? e.ep ?? 0) === targetEp);
-    if (exact) return exact;
-    const sameSeasonOrZero = eps.find(e => {
-      const eSe = Number(e.seasonNumber ?? e.se ?? 0) || 0;
-      const seasonOk = targetSe <= 0 || !det?.isSeries || eSe === targetSe || eSe === 0;
-      return seasonOk && Number(e.episodeNumber ?? e.ep ?? 0) === targetEp;
-    });
-    if (sameSeasonOrZero) return sameSeasonOrZero;
-    // Never fall back to eps[0] (an older episode) when an explicit series episode was requested
-    if ((det?.isSeries || targetSe > 0) && targetEp > 0) {
-      return null;
-    }
-    return eps[Math.max(0, Math.min(eps.length - 1, Number(det?.startEpisodeIndex) || 0))] || eps[0];
+    const targetSe = Number(se) || 0;
+    const targetEp = Number(ep) || 0;
+    return (
+      eps.find(e => Number(e.seasonNumber) === targetSe && Number(e.episodeNumber) === targetEp) ||
+      eps.find(e => Number(e.episodeNumber) === targetEp) ||
+      eps[Math.max(0, Math.min(eps.length - 1, Number(det?.startEpisodeIndex) || 0))] ||
+      eps[0]
+    );
   };
 
   let chosen = pickChosen(detail);
@@ -4831,22 +4061,15 @@ export async function getMlbdStream({ path = "", se = 0, ep = 1, title = "", dub
       const fresh = await getMlbdDetails(path, title || detail?.title || "", { dubLock, bypassCache: true });
       if (fresh?.detail) {
         if (fresh.detail.source === "movielinkbd-bridge" && fresh.detail.subjectId) {
-          const freshHasTarget = !fresh.detail.isSeries || targetEp <= 0 || (fresh.detail.episodes || []).some(e => {
-            const eSe = Number(e?.seasonNumber ?? e?.se ?? 0) || 0;
-            const eNum = Number(e?.episodeNumber ?? e?.ep ?? e?.number ?? 0) || 0;
-            return (targetSe <= 0 || eSe <= 0 || eSe === targetSe) && eNum === targetEp;
+          const params = new URLSearchParams({
+            subjectId: String(fresh.detail.subjectId),
+            detailPath: String(fresh.detail.detailPath || ""),
+            se: String(se || 0),
+            ep: String(ep || 1),
+            title: String(title || fresh.detail.title || "")
           });
-          if (freshHasTarget) {
-            const params = new URLSearchParams({
-              subjectId: String(fresh.detail.subjectId),
-              detailPath: String(fresh.detail.detailPath || ""),
-              se: String(se || 0),
-              ep: String(ep || 1),
-              title: String(title || fresh.detail.title || "")
-            });
-            if (dubLock) params.set("dubLock", "1");
-            return await handleMovieBoxRoute("stream", params);
-          }
+          if (dubLock) params.set("dubLock", "1");
+          return await handleMovieBoxRoute("stream", params);
         }
         const freshChosen = pickChosen(fresh.detail);
         if (Array.isArray(freshChosen?.sources) && freshChosen.sources.length) {
@@ -4862,7 +4085,7 @@ export async function getMlbdStream({ path = "", se = 0, ep = 1, title = "", dub
 
   if (!sources.length && (title || detail?.title)) {
     try {
-      const backupDet = await findExactTitleMlbdBackup(title || detail?.title, !detail?.isSeries, { se: targetSe, ep: targetEp });
+      const backupDet = await findExactTitleMlbdBackup(title || detail?.title, !detail?.isSeries);
       if (backupDet) {
         const bChosen = pickChosen(backupDet);
         if (Array.isArray(bChosen?.sources) && bChosen.sources.length) {
@@ -4876,14 +4099,16 @@ export async function getMlbdStream({ path = "", se = 0, ep = 1, title = "", dub
     } catch {}
   }
 
+  const targetSe = Number(se) || 0;
+  const targetEp = Number(ep) || 0;
   if ((detail?.source === "movielinkbd-cinepulse" || !sources.length) && isCinePulseConfigured()) {
     const cp = await fetchCinePulseApi("stream", {
-      path: detail?.mlbdOriginalPath || detail?.path || normalizeUpstreamPath(path),
+      path: normalizeUpstreamPath(detail?.path || path),
       subjectId: String(detail?.subjectId || ""),
       se: String(targetSe),
       ep: String(targetEp),
       title: String(title || detail?.title || ""),
-      source: "movielinkbd"
+      source: detail?.source === "movielinkbd-cinepulse" ? "movielinkbd" : "all"
     }, { timeoutMs: 14000 });
     if (cp.ok && cp.data) {
       const norm = normalizeCinePulsePayload("stream", cp.data);
@@ -4894,21 +4119,6 @@ export async function getMlbdStream({ path = "", se = 0, ep = 1, title = "", dub
         audioTracks = Array.isArray(norm?.audioTracks) && norm.audioTracks.length ? norm.audioTracks : audioTracks;
       }
     }
-  }
-
-  sources = (Array.isArray(sources) ? sources : []).filter(
-    s => s && !s.isTrailer && !/\btrailer\b/i.test(String(s.quality || ""))
-  );
-  const regTarget = {
-    path: detail?.path || path,
-    mlbdOriginalPath: detail?.mlbdOriginalPath || "",
-    title: title || detail?.title || ""
-  };
-  if (sources.length > 0) {
-    clearMediaUnplayable(regTarget);
-  } else if (isMlbdDirectPlaybackAvailable() || !isTrailerOnlyItem(detail)) {
-    // Blacklist entries whose live page + backup + CinePulse all return zero direct stream sources
-    markMediaUnplayable(regTarget, detail?.isUpcoming ? "upcoming" : "no_direct_stream");
   }
 
   return {
@@ -4929,7 +4139,9 @@ export async function getMlbdStream({ path = "", se = 0, ep = 1, title = "", dub
     downloadButtons: chosen?.downloadButtons || detail.downloadButtons || [],
     message: sources.length
       ? ""
-      : "Direct video stream is unavailable on this server right now."
+      : detail?.isUpcoming
+        ? `Upcoming release (${detail.year || "2026"}) — Official details & trailer available; full stream opens after release.`
+        : "Direct video stream is unavailable on this server right now — watch the official trailer or tap Retry Stream."
   };
 }
 

@@ -30,7 +30,7 @@
   <link rel="stylesheet" href="css/watch-enhancements.css?v=20261124-90hz-6">
   <link rel="stylesheet" href="css/cineverse-app-redesign.css?v=20261125-ui-3">
   <link rel="stylesheet" href="css/movie-api-account.css?v=20261125-ui-3">
-  <link rel="stylesheet" href="css/liquid-glass-theme.css?v=20261128-bg-2">
+  <link rel="stylesheet" href="css/liquid-glass-theme.css?v=20261127-fast-2">
   <style>
     .ms-download-page{max-width:920px;margin:0 auto;padding:6px 0 36px}
     .ms-download-brand{display:flex;justify-content:center;margin:8px 0 18px}
@@ -69,11 +69,10 @@
     @media(max-width:480px){.ms-download-poster{width:72px}.ms-download-card{border-radius:16px}.ms-download-meta span{font-size:11px;padding:7px 9px}}
   </style>
   <script defer src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script defer src="js/offline-downloads.js?v=20261128-bal-2"></script>
-  <script defer src="js/movie-api-download.js?v=20261128-bal-2"></script>
-  <script defer src="js/movie-api-discovery.js?v=20261128-bal-2"></script>
+  <script defer src="js/offline-downloads.js?v=20261125-offline-1"></script>
+  <script defer src="js/movie-api-download.js?v=20261127-fast-2"></script>
+  <script defer src="js/movie-api-discovery.js?v=20261127-fast-2"></script>
   <script defer src="js/movie-api-account.js?v=20261125-ui-3"></script>
-  <script defer src="js/download-manager.js?v=20261128-bal-2"></script>
 </head>
 <body class="cv-home-body ms-watch-page">
   <header class="cv-topbar">
@@ -136,14 +135,14 @@
           <span>Multiple Quality</span>
           <span>Direct MP4 Source</span>
         </div>
-        <div class="ms-download-notice"><b>NOTICE</b>⚡ <b>BACKGROUND DIRECT DOWNLOAD</b> বা নিচের Quality লিংকে চাপলে Background Service Worker 4 MB Resumable Engine দিয়ে ডাউনলোড শুরু হবে — এখন Home, Catalog বা অন্য মুভি ব্রাউজ করলেও ডাউনলোড চলবে এবং শেষ হলে ফাইল অটোমেটিক ডিভাইসের Downloads-এ সেভ হবে!</div>
+        <div class="ms-download-notice"><b>NOTICE</b>⚡ ONE CLICK DOWNLOAD বা নিচের Quality লিংকে চাপলে 4 MB Resumable Verified Engine দিয়ে ডাউনলোড হবে — মাঝপথে নেটওয়ার্ক সাময়িক কাটলেও অটো রিজিউম হয়ে ১০০% ফাইল সেভ হবে। অথবা <b>SAVE OFFLINE IN APP</b> ব্যবহার করে সরাসরি অ্যাপের ভিতরেই ইন্টারনেট ছাড়া YouTube-এর মতো প্লে করতে পারবেন।</div>
         <div class="ms-download-form">
           <label>SELECT DOWNLOAD QUALITY<select id="downloadQuality" disabled><option>Loading available qualities…</option></select></label>
           <div id="downloadStatus" class="ms-download-status" aria-live="polite">Checking available download sources…</div>
-          <a id="downloadAction" class="ms-download-action" href="#" aria-disabled="true"><span>⚡ BACKGROUND DIRECT DOWNLOAD<small>Saves to Device Storage while you browse the app</small></span><b class="icon">↓</b></a>
-          <button id="downloadOfflineBtn" class="ms-download-action offline" type="button" hidden><span>📥 BACKGROUND DOWNLOAD (SAVE IN APP)<small>YouTube-style Offline Playback · Pause/Resume Supported</small></span><b class="icon">▶</b></button>
+          <a id="downloadAction" class="ms-download-action" href="#" aria-disabled="true"><span>⚡ ONE CLICK DOWNLOAD<small>Resumable Verified MP4 · Selected quality</small></span><b class="icon">↓</b></a>
+          <button id="downloadOfflineBtn" class="ms-download-action offline" type="button" hidden><span>📥 SAVE OFFLINE IN APP<small>YouTube-style Offline Playback · Pause/Resume Supported</small></span><b class="icon">▶</b></button>
           <a id="downloadOfflinePlay" class="ms-download-action offline ready" href="saved.html?tab=offline" hidden><span>▶ PLAY OFFLINE NOW (NO INTERNET)<small>Saved in App Offline Library · Tap to watch</small></span><b class="icon">▶</b></a>
-          <button id="downloadSafeChunked" class="ms-download-action zip" type="button" hidden style="margin-top:0"><span>⚡ INSTANT BROWSER DOWNLOAD (NO CACHE LIMIT)<small>সরাসরি ব্রাউজারের Downloads-এ পাঠান — বড় ফাইলের জন্য সেরা</small></span><b class="icon">⬇</b></button>
+          <button id="downloadSafeChunked" class="ms-download-action zip" type="button" hidden style="margin-top:0"><span>🛡 VERIFIED FULL DOWNLOAD (FALLBACK)<small>৪ MB রিজিউম ডাউনলোড — মাঝপথে আটকাবে না</small></span><b class="icon">✓</b></button>
           <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
             <a id="downloadDirectRaw" href="#" hidden style="color:#94a3b8;font-size:12px;text-decoration:underline">Copy / Direct Server Link (IDM / ADM)</a>
             <button id="downloadCancelBtn" type="button" hidden style="padding:7px 14px;border-radius:10px;border:1px solid rgba(248,113,113,.45);background:rgba(248,113,113,.15);color:#fecaca;font-size:12px;font-weight:700;cursor:pointer">Cancel Download</button>

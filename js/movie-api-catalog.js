@@ -19,7 +19,7 @@
  const pageSize=30;
  const CATS_CACHE_KEY="cv_categories_cache_v1", CATS_TTL=60*60*1000;
  const OPTS_CACHE_KEY="cv_filter_opts_cache_v1", OPTS_TTL=6*60*60*1000;
- const CATALOG_CACHE_KEY="cv_catalog_cache_v3", CATALOG_TTL=15*60*1000;
+ const CATALOG_CACHE_KEY="cv_catalog_cache_v2", CATALOG_TTL=15*60*1000;
  let data=null,all=[],apiCatalogMode=false,apiMeta=null,allApiCategories=[],apiSearchQuery="";
  const readLocal=(k,ttl)=>{try{const r=JSON.parse(localStorage.getItem(k)||"null");if(r&&r.ts&&Date.now()-r.ts<ttl)return r.val;}catch{}return null;};
  const writeLocal=(k,val)=>{try{localStorage.setItem(k,JSON.stringify({ts:Date.now(),val}));}catch{}};
@@ -58,14 +58,6 @@
   if(item.isUpcoming===true)return true;
   const titleBadge=`${item.title||""} ${item.typeBadge||""}`;
   if(/\b(?:upcoming|coming\s*soon|unreleased)\b/i.test(titleBadge)&&item.hasResource!==true)return true;
-  return false;
- };
- const isTrailerOrUnavailable=item=>{
-  if(!item||typeof item!=="object")return true;
-  if(item.hasResource===false||item.isUpcoming===true||item.trailerOnly===true||item.isTrailer===true)return true;
-  if(/\b(?:trailer|teaser|coming\s*soon|unreleased)\b/i.test(`${item.typeBadge||""} ${item.quality||""}`))return true;
-  if(/\b(?:official\s+trailer|teaser\s+trailer|trailer\s+only)\b/i.test(String(item.title||"")))return true;
-  if(isUpcomingUnreleased(item))return true;
   return false;
  };
  const stripCatBrand=s=>String(s||"").replace(/\bmovie\s*(?:stream|link)\s*bd\b(?:\.com|\.at)?/gi,"").replace(/\s*[—–\-|:]+\s*$/g,"").replace(/^\s*[—–\-|:]+\s*/g,"").replace(/\s+/g," ").trim();
@@ -175,8 +167,9 @@
   (Array.isArray(d.sections)?d.sections:[]).forEach(s=>(Array.isArray(s.items)?s.items:[]).forEach(x=>add(x,text(s.title),"section")));
   (Array.isArray(d.allOfficialSections)?d.allOfficialSections:[]).forEach(s=>(Array.isArray(s.items)?s.items:[]).forEach(x=>add(x,text(s.title),"officialSection")));
   (Array.isArray(d.trending)?d.trending:[]).forEach(x=>add(x,"Trending Now","trending"));
+  (Array.isArray(d.comingSoon)?d.comingSoon:[]).forEach(x=>add(x,"Coming Soon","comingSoon"));
   (Array.isArray(d.banners)?d.banners:[]).forEach(x=>add(x,"Featured","banner"));
-  return [...map.values()].filter(item=>!isNigerian(item)&&!isTrailerOrUnavailable(item)).sort(categoryPriority);
+  return [...map.values()].filter(item=>!isNigerian(item)).sort(categoryPriority);
  }
  const customLabels={
   "/":"All Releases",
@@ -280,7 +273,6 @@
   return sections.includes(label)||sections.some(s=>s===label);
  }
  function matches(item){
-  if(selected==="/upcoming"||isTrailerOrUnavailable(item))return false;
   if(!apiCatalogMode&&!categoryMatches(item))return false;
   if(letter&&letter!=="#"){
    if(!text(item.title).toUpperCase().startsWith(letter))return false;
@@ -309,6 +301,9 @@
   const fbAttr=rawP&&rawP!==p?' data-fallback-src="'+esc(rawP)+'"':"";
   const loadAttr=(idx<6?'loading="eager"':'loading="lazy"')+(idx<4?' fetchpriority="high"':'');
   const title=text(item.title)||"Untitled",path=pathOf(item),b=badge(item);
+  if(selected==="/upcoming"||isUpcomingUnreleased(item)){
+   return '<article class="movie-card movie-api-card cv-card-upcoming" aria-label="'+esc(title)+' (Coming Soon)" title="'+esc(title)+' — Coming Soon"><div class="movie-api-poster">'+(p?'<img '+loadAttr+' decoding="async" referrerpolicy="no-referrer" src="'+esc(p)+'"'+fbAttr+' alt="'+esc(title)+'" data-poster-img="1">':'<span class="movie-api-placeholder">MOVIESTREAM BD</span>')+'</div></article>';
+  }
   return '<article class="movie-card movie-api-card"><button class="movie-api-poster" type="button" data-path="'+esc(path)+'" data-title="'+esc(title)+'" '+(!path?"disabled":"")+' aria-label="Open '+esc(title)+'">'+(p?'<img '+loadAttr+' decoding="async" referrerpolicy="no-referrer" src="'+esc(p)+'"'+fbAttr+' alt="'+esc(title)+'" data-poster-img="1">':'<span class="movie-api-placeholder">MOVIESTREAM BD</span>')+'<span class="quality">'+esc(item.quality||item.typeBadge||"HD")+'</span>'+(b?'<span class="movie-api-language-badge">'+b+'</span>':"")+'<span class="overlay">▶<small>View details &amp; watch</small></span></button><div class="movie-info"><h3>'+esc(title)+'</h3><p>'+esc(item.language||item.country||item.typeBadge||"")+'</p></div></article>';
  }
  function link(extra){const p=new URLSearchParams();if(selected)p.set("category",selected);if(letter)p.set("letter",letter);if(search?.value.trim())p.set("q",search.value.trim());Object.entries(extra||{}).forEach(([k,v])=>{if(v)p.set(k,String(v));else p.delete(k)});return "catalog.html?"+p.toString();}
@@ -454,10 +449,9 @@
    const key=pathOf(item)||norm(item.title);
    if(key&&!unique.has(key))unique.set(key,{...item,_sections:[],_sources:["catalog"]});
   });
-  return [...unique.values()].filter(item=>!isNigerian(item)&&!isTrailerOrUnavailable(item)).map(item=>isHindi?({...item,_hindiCatalog:true}):item);
+  return [...unique.values()].filter(item=>!isNigerian(item)).map(item=>isHindi?({...item,_hindiCatalog:true}):item);
  };
  async function load(){
-  window.CineVerseOffline?.yieldForBrowsing?.(1500);
   const q=params.get("q")||"";
   if(search)search.value=q;
   apiCatalogMode=false;
@@ -468,7 +462,10 @@
     const cats=await catsPromise;
     data={categories:cats};
     status.textContent="Searching movies and dramas…";
-    const safeQs = localStorage.getItem("cv_family_safe_v1")==="1" ? "&safe=1" : "";
+    let safeQs = "";
+    try {
+      if (localStorage.getItem("cv_family_safe_v1") === "1") safeQs = "&safe=1";
+    } catch {}
     const reqUrl="/api/movie-api/search?q="+encodeURIComponent(q)+"&page="+page+safeQs;
     const pre=window.__cvCatalogPreload;
     let response,payload;
@@ -481,7 +478,7 @@
     }
     if(!response.ok||payload.ok!==true)throw new Error(payload.error||"Movie Search API unavailable");
     const unique=new Map();
-    (Array.isArray(payload.items)?payload.items:[]).filter(item=>!isNigerian(item)&&!isTrailerOrUnavailable(item)).forEach(item=>{
+    (Array.isArray(payload.items)?payload.items:[]).filter(item=>!isNigerian(item)).forEach(item=>{
      const key=pathOf(item)||norm(item.title);
      if(key&&!unique.has(key))unique.set(key,{...item,_sections:[],_sources:["search"],_hindiCatalog:isHindiDubbed(item)});
     });
@@ -607,21 +604,16 @@
     if(!(img instanceof HTMLImageElement)||!img.dataset.posterImg)return;
     const fb=img.dataset.fallbackSrc||"";
     if(fb&&!img.dataset.triedFb){img.dataset.triedFb="1";img.src=fb;return;}
-    const cur=img.getAttribute("src")||"";
-    if(!img.dataset.retried&&cur.startsWith("/api/moviebox-image/")){
-     img.dataset.retried="1";
-     setTimeout(()=>{if(img.isConnected)img.src=cur+(cur.includes("?")?"&":"?")+"r=1";},450);
-     return;
-    }
-    if(!img.dataset.svgFb&&img.alt){
-     img.dataset.svgFb="1";
-     img.src="/api/poster/"+encodeURIComponent(img.alt.slice(0,80))+".svg";
-     return;
-    }
     const sib=img.nextElementSibling;
     if(sib&&(sib.classList?.contains("cv-card-fallback")||sib.classList?.contains("cv-rank-thumb-fallback"))){
      img.style.display="none";
      sib.hidden=false;
+    }else if(img.parentElement&&!img.parentElement.querySelector(".movie-api-placeholder")){
+     img.style.display="none";
+     const ph=document.createElement("span");
+     ph.className="movie-api-placeholder";
+     ph.textContent=img.alt||"MOVIESTREAM BD";
+     img.parentElement.insertBefore(ph,img);
     }else{
      img.style.visibility="hidden";
     }
